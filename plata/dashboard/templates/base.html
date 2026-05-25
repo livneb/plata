@@ -18,7 +18,15 @@
       }
     })();
   </script>
+  <!-- Tailwind must be told to use the `class` darkMode strategy BEFORE the CDN evaluates,
+       otherwise it defaults to `media` (system preference) and our toggle does nothing. -->
+  <script>window.tailwind = { config: { darkMode: 'class' } };</script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    if (window.tailwind && typeof tailwind.config === 'object') {
+      tailwind.config = { darkMode: 'class' };
+    }
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.49.1/dist/apexcharts.min.js" defer></script>

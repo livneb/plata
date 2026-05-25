@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.049 — 2026-05-25
+- Fix **dark/light theme toggle**: Tailwind via CDN defaults to `darkMode: 'media'` (system preference), which silently ignores toggling the `dark` class on `<html>`. Now explicitly setting `darkMode: 'class'` before and after the CDN loads, so the topbar 🌙/☀ button actually flips the theme.
+
 ## 2.24.048 — 2026-05-25
 - New **trade_sampler** loop in `execution_vault`. For every open trade it samples Bybit's latest price at an adaptive cadence picked from the longest milestone ETA: ≤15 min → every 5 s; ≤4 h → 1 min; ≤24 h → 5 min; ≤7 d → 30 min; longer → 6 h. Samples land in Redis (`trade:samples:<ulid>`, capped 720 entries).
 - New endpoint `GET /trades/<ulid>/samples` returns the recorded samples.
