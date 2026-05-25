@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.035 — 2026-05-25
+- Graph: "Back" (Esc / ← button) **restores the saved unfocused view** instead of re-fetching + re-running the layout. Node positions and zoom/pan are remembered exactly. Cache invalidates when the event-count selector changes.
+- Graph: **loading indicator** shows "Loading graph…" on first load and "Loading focused view…" when drilling in.
+
 ## 2.24.034 — 2026-05-25
 - Graph layout: much stronger node repulsion (80k), mandatory `nodeOverlap` gap (60px), longer edges (220), more iterations. Hub entities (USA / IRN / EUR) won't pile on top of each other any more.
 - New **⟳ Re-layout** button on the graph toolbar — re-runs the force layout if the current arrangement isn't great.

@@ -39,6 +39,17 @@
       <div id="focus-hint" class="hidden absolute top-2 left-2 text-[11px] bg-blue-600 text-white px-2 py-1 rounded">
         Focused — press <span class="font-mono">Esc</span> or click ← Back
       </div>
+
+      <!-- Loading overlay -->
+      <div id="loading-overlay" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 shadow text-sm flex items-center gap-3">
+          <svg class="w-4 h-4 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+          <span id="loading-label">Loading graph…</span>
+        </div>
+      </div>
     </div>
     <div class="lg:col-span-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 overflow-y-auto" style="max-height: 70vh;">
       <h2 class="font-semibold text-sm mb-2">Selection</h2>
@@ -73,18 +84,69 @@
     const reloadBtn = document.getElementById('reload-btn');
     const clearFocusBtn = document.getElementById('clear-focus');
     const focusHint = document.getElementById('focus-hint');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loadingLabel = document.getElementById('loading-label');
     let cy = null;
     let focusKey = null;
     let lastHovered = null;
+    // Cache of the unfocused view so "back" doesn't re-fetch / re-layout.
+    // positions: { [nodeId]: {x, y} } captured at the moment the user focused in.
+    let unfocusedCache = { limit: null, data: null, positions: null, viewport: null };
 
-    async function loadGraph() {
-      const params = new URLSearchParams({ limit: limitSel.value });
-      if (focusKey) params.set('focus', focusKey.replace(/^event:/, ''));
-      const r = await fetch('/graph/data?' + params.toString());
-      const data = await r.json();
+    function snapshotCurrent() {
+      if (!cy) return null;
+      const positions = {};
+      cy.nodes().forEach(n => { const p = n.position(); positions[n.id()] = { x: p.x, y: p.y }; });
+      return positions;
+    }
+
+    function showLoading(text) {
+      loadingLabel.textContent = text || 'Loading graph…';
+      loadingOverlay.classList.remove('hidden');
+    }
+    function hideLoading() {
+      loadingOverlay.classList.add('hidden');
+    }
+
+    function captureViewport() {
+      if (!cy) return null;
+      return { zoom: cy.zoom(), pan: { ...cy.pan() } };
+    }
+    function restoreViewport(vp) {
+      if (!cy || !vp) return;
+      cy.zoom(vp.zoom);
+      cy.pan(vp.pan);
+    }
+
+    async function loadGraph(opts) {
+      opts = opts || {};
+      const canRestore = opts.fromCache && unfocusedCache.data && unfocusedCache.limit === limitSel.value && !focusKey;
       clearFocusBtn.classList.toggle('hidden', !focusKey);
       focusHint.classList.toggle('hidden', !focusKey);
-      render(data);
+      if (canRestore) {
+        // No fetch, no layout — reuse saved data + positions instantly.
+        render(unfocusedCache.data, { positions: unfocusedCache.positions });
+        if (unfocusedCache.viewport) restoreViewport(unfocusedCache.viewport);
+        return;
+      }
+      showLoading(focusKey ? 'Loading focused view…' : 'Loading graph…');
+      try {
+        const params = new URLSearchParams({ limit: limitSel.value });
+        if (focusKey) params.set('focus', focusKey.replace(/^event:/, ''));
+        const r = await fetch('/graph/data?' + params.toString());
+        const data = await r.json();
+        render(data);
+        if (!focusKey) {
+          unfocusedCache = {
+            limit: limitSel.value,
+            data,
+            positions: snapshotCurrent(),
+            viewport: captureViewport(),
+          };
+        }
+      } finally {
+        hideLoading();
+      }
     }
 
     function shortLabel(label, max) {
@@ -94,40 +156,40 @@
       return label.slice(0, max - 1) + '…';
     }
 
-    function render(data) {
+    function render(data, opts) {
+      opts = opts || {};
       // Trim labels for readability. Full text is in the side panel on click.
-      const nodes = data.nodes.map(n => ({
-        ...n,
-        data: {
-          ...n.data,
-          shortLabel: shortLabel(n.data.label,
-            n.data.kind === 'event' ? 32 : 22),
-        },
-      }));
+      const nodes = data.nodes.map(n => {
+        const node = {
+          ...n,
+          data: {
+            ...n.data,
+            shortLabel: shortLabel(n.data.label,
+              n.data.kind === 'event' ? 32 : 22),
+          },
+        };
+        if (opts.positions && opts.positions[n.data.id]) {
+          node.position = { ...opts.positions[n.data.id] };
+        }
+        return node;
+      });
       const elements = [...nodes, ...data.edges];
       if (cy) { cy.destroy(); }
+      const layoutCfg = opts.positions
+        ? { name: 'preset', animate: false, fit: false }
+        : {
+            name: 'cose', animate: false, randomize: true, fit: true, padding: 40,
+            idealEdgeLength: 220,
+            nodeRepulsion: function() { return 80000; },
+            edgeElasticity: function() { return 80; },
+            nodeOverlap: 60, gravity: 0.15, gravityRange: 4.0, gravityCompound: 1.5,
+            componentSpacing: 120, numIter: 3500,
+            initialTemp: 250, coolingFactor: 0.97, minTemp: 1.0,
+          };
       cy = cytoscape({
         container: cyEl,
         elements,
-        layout: {
-          name: 'cose',
-          animate: false,
-          randomize: true,
-          fit: true,
-          padding: 40,
-          idealEdgeLength: 220,
-          nodeRepulsion: function(node) { return 80000; },
-          edgeElasticity: function() { return 80; },
-          nodeOverlap: 60,
-          gravity: 0.15,
-          gravityRange: 4.0,
-          gravityCompound: 1.5,
-          componentSpacing: 120,
-          numIter: 3500,
-          initialTemp: 250,
-          coolingFactor: 0.97,
-          minTemp: 1.0,
-        },
+        layout: layoutCfg,
         wheelSensitivity: 0.25,
         minZoom: 0.1,
         maxZoom: 5.0,
@@ -186,6 +248,12 @@
         const id = node.id();
         await showDetail(id, node.data());
         if (node.data('kind') === 'event') {
+          // Snapshot the current (unfocused) layout before drilling in,
+          // so "Back" can restore it without a fetch + relayout.
+          if (!focusKey) {
+            unfocusedCache.positions = snapshotCurrent();
+            unfocusedCache.viewport = captureViewport();
+          }
           focusKey = id;
           loadGraph();
         }
@@ -230,7 +298,12 @@
     }
     function fitAll() { if (cy) cy.fit(undefined, 30); }
     function resetZoom() { if (cy) { cy.zoom(1); cy.center(); } }
-    function back() { if (focusKey) { focusKey = null; loadGraph(); } }
+    function back() {
+      if (!focusKey) return;
+      focusKey = null;
+      // Prefer the cached unfocused view; fall back to a fresh fetch if the cache is empty.
+      loadGraph({ fromCache: !!unfocusedCache.data });
+    }
 
     document.getElementById('zoom-in').addEventListener('click', () => zoomBy(1.25));
     document.getElementById('zoom-out').addEventListener('click', () => zoomBy(0.8));
