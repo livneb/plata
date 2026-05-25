@@ -18,18 +18,28 @@ configure()
 _log = get_logger("entrypoints")
 
 
-async def _run_dashboard() -> None:
-    from plata.dashboard.app import app
+async def _run_dashboard(started: asyncio.Event | None = None) -> None:
+    try:
+        from plata.dashboard.app import app
+    except Exception as exc:  # noqa: BLE001 — fall back to bare health endpoint
+        _log.error("dashboard_import_failed_using_health_only", error=str(exc))
+        await _run_health_server(started=started)
+        return
 
     settings = get_settings()
     config = uvicorn.Config(
         app, host="0.0.0.0", port=settings.dashboard_port, log_level="info", lifespan="on"
     )
     server = uvicorn.Server(config)
-    await server.serve()
+    serve_task = asyncio.create_task(server.serve(), name="uvicorn-serve")
+    if started is not None:
+        while not server.started and not serve_task.done():
+            await asyncio.sleep(0.05)
+        started.set()
+    await serve_task
 
 
-async def _run_health_server() -> None:
+async def _run_health_server(started: asyncio.Event | None = None) -> None:
     from fastapi import FastAPI
 
     app = FastAPI()
@@ -43,7 +53,12 @@ async def _run_health_server() -> None:
         app, host="0.0.0.0", port=settings.dashboard_port, log_level="warning", lifespan="on"
     )
     server = uvicorn.Server(config)
-    await server.serve()
+    serve_task = asyncio.create_task(server.serve(), name="uvicorn-serve")
+    if started is not None:
+        while not server.started and not serve_task.done():
+            await asyncio.sleep(0.05)
+        started.set()
+    await serve_task
 
 
 async def _supervise(name: str, coro_factory) -> None:
@@ -60,19 +75,31 @@ def _agent_task(name: str, factory) -> asyncio.Task:
     return asyncio.create_task(_supervise(name, factory), name=name)
 
 
+async def _bind_then_run(http_runner, agent_factories: list[tuple[str, Any]]) -> None:
+    """Bind the HTTP server first (so healthchecks pass), then start agents."""
+    started = asyncio.Event()
+    http_task = asyncio.create_task(http_runner(started=started), name="http")
+    await started.wait()
+    tasks = [http_task]
+    for name, factory in agent_factories:
+        tasks.append(_agent_task(name, factory))
+    _log.info("entrypoint_started", tasks=[t.get_name() for t in tasks])
+    await asyncio.gather(*tasks)
+
+
 async def _run_ingestion_hub() -> None:
     from plata.agents.orchestrator import Orchestrator
     from plata.agents.scraper.runner import Scraper
     from plata.hitl.telegram_bot import TelegramBot
 
-    tasks = [
-        _agent_task("orchestrator", lambda: Orchestrator().run()),
-        _agent_task("scraper", lambda: Scraper().run()),
-        _agent_task("telegram_bot", lambda: TelegramBot().run()),
-        asyncio.create_task(_run_dashboard(), name="dashboard"),
-    ]
-    _log.info("ingestion_hub_started", agents=[t.get_name() for t in tasks])
-    await asyncio.gather(*tasks)
+    await _bind_then_run(
+        _run_dashboard,
+        [
+            ("orchestrator", lambda: Orchestrator().run()),
+            ("scraper", lambda: Scraper().run()),
+            ("telegram_bot", lambda: TelegramBot().run()),
+        ],
+    )
 
 
 async def _run_intelligence_sandbox() -> None:
@@ -80,14 +107,14 @@ async def _run_intelligence_sandbox() -> None:
     from plata.agents.reviewer import Reviewer
     from plata.agents.strategist import Strategist
 
-    tasks = [
-        _agent_task("graph_ingestion", lambda: GraphIngestion().run()),
-        _agent_task("strategist", lambda: Strategist().run()),
-        _agent_task("reviewer", lambda: Reviewer().run()),
-        asyncio.create_task(_run_health_server(), name="health"),
-    ]
-    _log.info("intelligence_sandbox_started", agents=[t.get_name() for t in tasks])
-    await asyncio.gather(*tasks)
+    await _bind_then_run(
+        _run_health_server,
+        [
+            ("graph_ingestion", lambda: GraphIngestion().run()),
+            ("strategist", lambda: Strategist().run()),
+            ("reviewer", lambda: Reviewer().run()),
+        ],
+    )
 
 
 async def _run_execution_vault() -> None:
@@ -98,13 +125,13 @@ async def _run_execution_vault() -> None:
     if not settings.bybit_api_key or not settings.bybit_api_secret:
         _log.warning("execution_vault_missing_bybit_keys_running_paper_only")
 
-    tasks = [
-        _agent_task("risk_manager", lambda: RiskManager().run()),
-        _agent_task("executor", lambda: Executor().run()),
-        asyncio.create_task(_run_health_server(), name="health"),
-    ]
-    _log.info("execution_vault_started", agents=[t.get_name() for t in tasks])
-    await asyncio.gather(*tasks)
+    await _bind_then_run(
+        _run_health_server,
+        [
+            ("risk_manager", lambda: RiskManager().run()),
+            ("executor", lambda: Executor().run()),
+        ],
+    )
 
 
 DISPATCH = {
