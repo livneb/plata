@@ -120,6 +120,43 @@ def create_app() -> FastAPI:
     async def api_version():
         return {"version": get_settings().app_version}
 
+    @app.get("/api/dashboard/sparklines")
+    async def api_sparklines():
+        """Return small time-bucketed series for the dashboard tile sparklines.
+
+        - signals_24h: hourly count for the last 24 h.
+        - pnl_30d: daily net PnL for the last 30 d.
+        """
+        from datetime import date, datetime, timedelta, timezone
+        from sqlalchemy import cast, func, select, Date
+        from plata.core.db import SignalArchive, TradeLedger, session_scope
+        try:
+            async with session_scope() as session:
+                since = datetime.now(timezone.utc) - timedelta(hours=24)
+                rows = (await session.execute(
+                    select(
+                        func.date_trunc('hour', SignalArchive.fetched_at).label('h'),
+                        func.count().label('n'),
+                    )
+                    .where(SignalArchive.fetched_at >= since)
+                    .group_by('h').order_by('h')
+                )).all()
+                signals = [(r.h.isoformat() if r.h else "", int(r.n or 0)) for r in rows]
+
+                since30 = datetime.now(timezone.utc) - timedelta(days=30)
+                rows2 = (await session.execute(
+                    select(
+                        cast(TradeLedger.closed_at, Date).label('d'),
+                        func.coalesce(func.sum(TradeLedger.net_pnl), 0).label('p'),
+                    )
+                    .where(TradeLedger.closed_at >= since30)
+                    .group_by('d').order_by('d')
+                )).all()
+                pnl = [(r.d.isoformat() if r.d else "", float(r.p or 0)) for r in rows2]
+            return {"signals_24h": signals, "pnl_30d": pnl}
+        except Exception:  # noqa: BLE001
+            return {"signals_24h": [], "pnl_30d": []}
+
     @app.get("/api/changelog")
     async def api_changelog():
         from pathlib import Path

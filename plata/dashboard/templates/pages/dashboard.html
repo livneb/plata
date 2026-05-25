@@ -25,6 +25,7 @@
        class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">PnL today{{ help_icon('daily_pnl') }}</div>
       <div class="text-2xl font-semibold {% if daily_pnl > 0 %}text-green-500{% elif daily_pnl < 0 %}text-red-500{% endif %}">${{ '%.2f' % daily_pnl }}</div>
+      <div id="spark-pnl" class="h-10 -mb-2"></div>
     </a>
     <a href="/proposals/"
        class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
@@ -35,6 +36,7 @@
        class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">Signals today{{ help_icon('signals_today') }}</div>
       <div class="text-2xl font-semibold">{{ signals_24h }}</div>
+      <div id="spark-signals" class="h-10 -mb-2"></div>
     </a>
     <a href="/agents/"
        class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
@@ -103,4 +105,26 @@
     </div>
   </div>
 </div>
+
+<script>
+  // Flowbite-style sparklines on PnL + Signals tiles.
+  (async function () {
+    if (!window.ApexCharts) return;
+    let data; try { const r = await fetch('/api/dashboard/sparklines'); data = await r.json(); } catch { return; }
+    function spark(elId, series, color) {
+      const el = document.getElementById(elId);
+      if (!el || !series || !series.length) return;
+      new ApexCharts(el, {
+        chart: { type: 'area', height: 60, sparkline: { enabled: true }, animations: { enabled: false }, background: 'transparent', fontFamily: 'Inter, sans-serif' },
+        series: [{ data: series.map(p => p[1]) }],
+        stroke: { curve: 'smooth', width: 2 },
+        fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0, stops: [0, 100] } },
+        colors: [color],
+        tooltip: { x: { show: false }, y: { formatter: v => Number(v).toLocaleString() }, marker: { show: false } },
+      }).render();
+    }
+    spark('spark-pnl',     data.pnl_30d     || [], '#10b981');
+    spark('spark-signals', data.signals_24h || [], '#3b82f6');
+  })();
+</script>
 {% endblock %}

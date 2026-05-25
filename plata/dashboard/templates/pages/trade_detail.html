@@ -206,18 +206,20 @@
     if (msData.length && window.ApexCharts) {
       const el = document.getElementById('milestone-chart');
       const initial = await loadActualSeries();
+      // Flowbite-style "Area" chart for the predicted-vs-actual overlay (gradient fill + curved actual).
       chart = new ApexCharts(el, {
-        chart: { type: 'line', height: 260, toolbar: { show: false }, foreColor: axisColor, background: 'transparent', animations: { enabled: false } },
+        chart: { type: 'area', height: 280, toolbar: { show: false }, foreColor: axisColor, background: 'transparent', animations: { enabled: false }, fontFamily: 'Inter, sans-serif', dropShadow: { enabled: false } },
         series: [
-          { name: 'Predicted % move', type: 'line', data: msData.map(p => ({ x: p.x, y: p.y })) },
-          { name: 'Actual price (live)', type: 'line', data: initial },
+          { name: 'Predicted', type: 'area', data: msData.map(p => ({ x: p.x, y: p.y })) },
+          { name: 'Actual',    type: 'line', data: initial },
         ],
-        xaxis: { type: 'numeric', title: { text: 'Hours from entry' }, labels: { formatter: v => Number(v).toFixed(2) + 'h' } },
-        yaxis: { title: { text: '% move from entry' }, labels: { formatter: v => Number(v).toFixed(2) + '%' } },
-        markers: { size: [6, 0] },
-        stroke: { curve: ['straight', 'smooth'], width: [2, 1.5], dashArray: [4, 0] },
+        fill: { type: ['gradient', 'solid'], gradient: { shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0, stops: [0, 90, 100] } },
+        xaxis: { type: 'numeric', title: { text: 'Hours from entry' }, labels: { formatter: v => Number(v).toFixed(1) + 'h', style: { fontFamily: 'Inter, sans-serif' } }, axisBorder: { show: false }, axisTicks: { show: false } },
+        yaxis: { title: { text: '% move from entry' }, labels: { formatter: v => Number(v).toFixed(2) + '%', style: { fontFamily: 'Inter, sans-serif' } } },
+        markers: { size: [6, 0], hover: { size: 8 } },
+        stroke: { curve: ['straight', 'smooth'], width: [2.5, 2], dashArray: [6, 0] },
         colors: ['#3b82f6', '#f59e0b'],
-        grid: { borderColor: gridColor },
+        grid: { borderColor: gridColor, strokeDashArray: 4, padding: { top: -10, bottom: -8, left: 8, right: 8 } },
         annotations: { yaxis: [{ y: 0, borderColor: gridColor, strokeDashArray: 3 }] },
         legend: { showForSingleSeries: true },
         tooltip: {

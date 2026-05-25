@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.067 — 2026-05-25
+- Trade-detail **predicted-vs-actual** chart upgraded to Flowbite-style **area chart** with gradient fill, smooth actual line, dashed predicted line, Inter font.
+- Dashboard tile **sparklines**: PnL-today tile shows last 30 d of daily PnL; Signals-today tile shows last 24 h hourly counts. Fed by new `GET /api/dashboard/sparklines` endpoint (one query each, server-side bucketing).
+- Agents page **donut chart** showing today's LLM spend share per agent (Apex donut with center label = total $).
+
 ## 2.24.066 — 2026-05-25
 - **Hebrew + kid-friendly help tooltips.** Every `?` icon now ships three variants in its data attributes (`data-help-en`, `data-help-he`, `data-help-kids`); JS picks one based on two cookies (`plata_lang`, `plata_aud`). Switch them on **Settings → Account → Preferences** — every tooltip updates instantly, no reload.
 - **🌐 Translate / explain-further button** on long-form text (strategist reasoning, triggering-event summary, every analog summary). One click → POST `/api/translate/` (lang + audience from cookies) → LLM rewrite cached per `(text,lang,audience)` for 30 days in Redis (`translate:<sha256>`). Click again to toggle back to the original.
