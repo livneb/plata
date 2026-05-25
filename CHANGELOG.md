@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.029 — 2026-05-25
+- Sidebar reorganised into collapsible groups: **Dashboard**, **Operations** (Workflow / Activity / Agent Health), **Knowledge** (History / Graph / Historian), **Trading** (Pending Proposals / Trades), **Diagnostics** (Errors / Dead Letters), **Settings**. Groups auto-expand when one of their children is the active page.
+- Kill switch removed from the topbar. Moved to a new **Settings** page with **Flowbite tabs**: Controls (kill switch / resume), Risk Config (CRUD table), Account (signed-in user / logout), Environment (app version + state).
+- `?tab=<name>` deep-links a specific Settings tab.
+
 ## 2.24.028 — 2026-05-25
 - Graph page: floating toolbar with **+ / − / fit-all (⤢) / 1:1** zoom buttons (also keyboard `+ / − / 0`).
 - Graph page: **Esc** (or the new ← Back button) clears focus and returns to the last view.

@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Settings · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <h1 class="text-2xl font-semibold">Settings</h1>
+
+  <!-- Flowbite tabs -->
+  <div class="border-b border-gray-200 dark:border-gray-700">
+    <ul class="flex flex-wrap -mb-px text-sm font-medium text-center" id="settings-tabs" role="tablist">
+      <li class="me-2" role="presentation">
+        <button class="inline-block p-3 border-b-2 rounded-t-lg" id="controls-tab"
+                data-tabs-target="#tab-controls" type="button" role="tab" aria-controls="tab-controls" aria-selected="true">
+          🛑 Controls
+        </button>
+      </li>
+      <li class="me-2" role="presentation">
+        <button class="inline-block p-3 border-b-2 rounded-t-lg" id="risk-tab"
+                data-tabs-target="#tab-risk" type="button" role="tab" aria-controls="tab-risk" aria-selected="false">
+          ⚙️ Risk Config
+        </button>
+      </li>
+      <li class="me-2" role="presentation">
+        <button class="inline-block p-3 border-b-2 rounded-t-lg" id="account-tab"
+                data-tabs-target="#tab-account" type="button" role="tab" aria-controls="tab-account" aria-selected="false">
+          👤 Account
+        </button>
+      </li>
+      <li class="me-2" role="presentation">
+        <button class="inline-block p-3 border-b-2 rounded-t-lg" id="env-tab"
+                data-tabs-target="#tab-env" type="button" role="tab" aria-controls="tab-env" aria-selected="false">
+          🔧 Environment
+        </button>
+      </li>
+    </ul>
+  </div>
+
+  <div id="settings-tab-content">
+
+    <!-- ===== Controls ===== -->
+    <div class="hidden p-3" id="tab-controls" role="tabpanel" aria-labelledby="controls-tab">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+          <h2 class="font-semibold mb-2">System state</h2>
+          <p class="text-sm mb-3">
+            Current state:
+            {% if system_state == 'HALTED' %}
+            <span class="bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-red-900 dark:text-red-300">HALTED</span>
+            {% else %}
+            <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">RUNNING</span>
+            {% endif %}
+          </p>
+          <div class="flex gap-2">
+            <button id="resume-all-btn" type="button"
+                    class="text-white bg-green-700 hover:bg-green-800 focus:ring-4 focus:ring-green-300 font-medium rounded-lg text-sm px-4 py-2">
+              ▶ Resume all
+            </button>
+            <button id="kill-switch-btn" type="button"
+                    class="text-white bg-red-700 hover:bg-red-800 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-4 py-2">
+              🛑 Kill switch
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 mt-3">
+            Kill switch halts every agent and parks consumption until you click Resume. Use during incidents.
+          </p>
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+          <h2 class="font-semibold mb-2">Trading mode</h2>
+          <p class="text-sm mb-2">
+            Paper-trading default:
+            {% if paper_mode %}
+            <span class="bg-yellow-100 text-yellow-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">PAPER</span>
+            {% else %}
+            <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">LIVE</span>
+            {% endif %}
+          </p>
+          <p class="text-xs text-gray-500">
+            Switch via Risk Config tab: <span class="font-mono">paper_trading_mode</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Risk Config ===== -->
+    <div class="hidden p-3" id="tab-risk" role="tabpanel" aria-labelledby="risk-tab">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-xs text-gray-500">
+          Common keys: <span class="font-mono">paper_trading_mode</span>, <span class="font-mono">risk_per_trade_pct</span>,
+          <span class="font-mono">max_open_positions</span>, <span class="font-mono">max_daily_loss_pct</span>,
+          <span class="font-mono">auto_approve_threshold_usd</span>, <span class="font-mono">llm.daily_budget_usd_total</span>.
+        </p>
+        <button data-modal-target="create-modal" data-modal-toggle="create-modal" type="button"
+                class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2">
+          + New
+        </button>
+      </div>
+
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+            <tr>
+              <th class="px-4 py-3">Key</th>
+              <th class="px-4 py-3">Value</th>
+              <th class="px-4 py-3">Version</th>
+              <th class="px-4 py-3">Updated</th>
+              <th class="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in risk_rows %}
+            <tr class="border-t border-gray-100 dark:border-gray-700">
+              <td class="px-4 py-3 font-mono">{{ row.key }}</td>
+              <td class="px-4 py-3 font-mono break-all">{{ row.value }}</td>
+              <td class="px-4 py-3">{{ row.version }}</td>
+              <td class="px-4 py-3 text-gray-500" title="{{ row.updated_at or '' }}">{{ row.updated_at | time_ago }}</td>
+              <td class="px-4 py-3 text-right whitespace-nowrap">
+                <button type="button"
+                        data-modal-target="edit-{{ loop.index }}" data-modal-toggle="edit-{{ loop.index }}"
+                        class="text-blue-500 hover:underline mr-3">Edit</button>
+                <form method="post" action="/risk_config/{{ row.key }}/delete" class="inline"
+                      data-confirm="Delete config key '{{ row.key }}'?"
+                      data-confirm-title="Delete key" data-confirm-label="Delete" data-confirm-danger>
+                  <button type="submit" class="text-red-500 hover:underline">Delete</button>
+                </form>
+              </td>
+            </tr>
+            <tr><td colspan="5" class="p-0">
+              <div id="edit-{{ loop.index }}" tabindex="-1"
+                   class="hidden fixed top-0 left-0 right-0 z-50 w-full h-full bg-black/50 flex items-center justify-center">
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-full max-w-md p-5">
+                  <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold">Edit <span class="font-mono">{{ row.key }}</span></h3>
+                    <button type="button" data-modal-hide="edit-{{ loop.index }}" class="text-gray-400 hover:text-gray-200">✕</button>
+                  </div>
+                  <form method="post" action="/risk_config/{{ row.key }}/update" class="space-y-3"
+                        data-persist="risk-config-edit-{{ row.key }}">
+                    <div>
+                      <label class="block text-sm font-medium mb-1">Value (JSON or plain text)</label>
+                      <input name="value" value="{{ row.value }}" required
+                             class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                    </div>
+                    <div class="flex justify-end gap-2">
+                      <button type="button" data-modal-hide="edit-{{ loop.index }}"
+                              class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600">Cancel</button>
+                      <button type="submit"
+                              class="px-3 py-1.5 text-sm rounded-lg text-white bg-blue-700 hover:bg-blue-800">Save</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </td></tr>
+            {% else %}
+            <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No config keys yet — click "New" to add one.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div id="create-modal" tabindex="-1"
+           class="hidden fixed top-0 left-0 right-0 z-50 w-full h-full bg-black/50 flex items-center justify-center">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-full max-w-md p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">New config key</h3>
+            <button type="button" data-modal-hide="create-modal" class="text-gray-400 hover:text-gray-200">✕</button>
+          </div>
+          <form method="post" action="/risk_config/create" class="space-y-3" data-persist="risk-config-create">
+            <div>
+              <label class="block text-sm font-medium mb-1">Key</label>
+              <input name="key" required placeholder="e.g. max_open_positions"
+                     class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Value (JSON or plain text)</label>
+              <input name="value" required placeholder='e.g. 3 or "paper" or {"x":1}'
+                     class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+            </div>
+            <div class="flex justify-end gap-2">
+              <button type="button" data-modal-hide="create-modal"
+                      class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600">Cancel</button>
+              <button type="submit"
+                      class="px-3 py-1.5 text-sm rounded-lg text-white bg-blue-700 hover:bg-blue-800">Create</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Account ===== -->
+    <div class="hidden p-3" id="tab-account" role="tabpanel" aria-labelledby="account-tab">
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 max-w-lg space-y-3">
+        <h2 class="font-semibold">Signed in</h2>
+        <div class="text-sm">
+          <div class="text-[10px] uppercase text-gray-500">Email</div>
+          <div class="font-mono">{{ current_user or '—' }}</div>
+        </div>
+        <div class="text-sm">
+          <div class="text-[10px] uppercase text-gray-500">Bootstrapped admin</div>
+          <div class="font-mono">{{ admin_email or '—' }}</div>
+        </div>
+        <form method="post" action="/logout">
+          <button type="submit" class="text-white bg-gray-700 hover:bg-gray-800 font-medium rounded-lg text-sm px-4 py-2">
+            Log out
+          </button>
+        </form>
+        <p class="text-xs text-gray-500">
+          User management UI hasn't been built yet. The admin user is bootstrapped from <span class="font-mono">DASHBOARD_ADMIN_EMAIL</span>
+          + <span class="font-mono">DASHBOARD_ADMIN_PASSWORD</span> env vars.
+        </p>
+      </div>
+    </div>
+
+    <!-- ===== Environment ===== -->
+    <div class="hidden p-3" id="tab-env" role="tabpanel" aria-labelledby="env-tab">
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 max-w-2xl space-y-2 text-sm">
+        <div><span class="text-gray-500">App version:</span> <span class="font-mono">{{ app_version }}</span></div>
+        <div><span class="text-gray-500">System state:</span> <span class="font-mono">{{ system_state }}</span></div>
+        <div><span class="text-gray-500">Paper mode default:</span> <span class="font-mono">{{ paper_mode }}</span></div>
+        <p class="text-xs text-gray-500 mt-3">
+          Secrets (Bybit, Voyage, OpenRouter, Telegram, etc.) are configured per Railway service. See <span class="font-mono">.env.example</span>.
+        </p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // Initialise Flowbite tabs manually so deep-links (?tab=risk) work even before the autoinit fires.
+  (function () {
+    const tabs = ['controls', 'risk', 'account', 'env'];
+    const params = new URLSearchParams(location.search);
+    const want = (params.get('tab') || 'controls').toLowerCase();
+    const active = tabs.includes(want) ? want : 'controls';
+    function show(name) {
+      tabs.forEach(t => {
+        const panel = document.getElementById('tab-' + t);
+        const btn = document.getElementById(t + '-tab');
+        if (!panel || !btn) return;
+        const on = (t === name);
+        panel.classList.toggle('hidden', !on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        btn.classList.toggle('text-blue-600', on);
+        btn.classList.toggle('border-blue-600', on);
+        btn.classList.toggle('dark:text-blue-400', on);
+        btn.classList.toggle('dark:border-blue-400', on);
+        btn.classList.toggle('border-transparent', !on);
+        btn.classList.toggle('text-gray-500', !on);
+        btn.classList.toggle('hover:text-gray-700', !on);
+      });
+    }
+    tabs.forEach(t => {
+      const btn = document.getElementById(t + '-tab');
+      if (btn) btn.addEventListener('click', () => {
+        show(t);
+        const url = new URL(location.href); url.searchParams.set('tab', t); history.replaceState(null, '', url);
+      });
+    });
+    show(active);
+  })();
+
+  document.getElementById('kill-switch-btn')?.addEventListener('click', async () => {
+    const ok = await plataConfirm({
+      title: 'Kill switch',
+      message: 'Halt every agent system-wide?',
+      confirmLabel: 'Halt',
+      danger: true,
+    });
+    if (!ok) return;
+    const r = await fetch('/api/kill', { method: 'POST' });
+    plataToast(r.ok ? 'Halt requested.' : 'Halt failed.', r.ok ? 'success' : 'error');
+  });
+  document.getElementById('resume-all-btn')?.addEventListener('click', async () => {
+    const ok = await plataConfirm({
+      title: 'Resume all',
+      message: 'Resume every agent system-wide?',
+      confirmLabel: 'Resume',
+    });
+    if (!ok) return;
+    const r = await fetch('/api/resume', { method: 'POST' });
+    plataToast(r.ok ? 'Resume requested.' : 'Resume failed.', r.ok ? 'success' : 'error');
+  });
+</script>
+{% endblock %}

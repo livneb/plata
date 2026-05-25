@@ -62,10 +62,8 @@
           <button type="submit" class="text-xs text-gray-500 hover:text-gray-300">Log out</button>
         </form>
         {% endif %}
-        <button id="killswitch" type="button"
-          class="text-white bg-red-700 hover:bg-red-800 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-4 py-2">
-          🛑 KILL SWITCH
-        </button>
+        <a href="/settings/?tab=controls"
+           class="text-xs text-gray-500 hover:text-gray-300" title="Open settings">⚙</a>
       </div>
     </div>
   </nav>
@@ -74,29 +72,72 @@
   <aside id="sidebar"
     class="fixed top-0 left-0 z-40 w-64 h-screen pt-16 transition-transform -translate-x-full bg-white border-r border-gray-200 sm:translate-x-0 dark:bg-gray-800 dark:border-gray-700">
     <div class="h-full px-3 pb-4 overflow-y-auto bg-white dark:bg-gray-800">
-      <ul class="space-y-2 font-medium">
-        {% set links = [
+      {% set groups = [
+        {'key': 'home', 'label': '', 'children': [
           ('dashboard', '/', 'Dashboard', '📊'),
+        ]},
+        {'key': 'ops', 'label': 'Operations', 'icon': '🧭',
+         'children': [
           ('workflow', '/workflow/', 'Workflow', '🧭'),
           ('activity', '/activity/', 'Activity', '📈'),
+          ('agents', '/agents/', 'Agent Health', '❤️'),
+        ]},
+        {'key': 'knowledge', 'label': 'Knowledge', 'icon': '📚',
+         'children': [
           ('history', '/history/', 'History', '🕘'),
           ('graph', '/graph/', 'Graph', '🕸️'),
           ('historian', '/historian/', 'Historian seed', '📚'),
+        ]},
+        {'key': 'trading', 'label': 'Trading', 'icon': '💰',
+         'children': [
           ('proposals', '/proposals/', 'Pending Proposals', '⏳'),
           ('trades', '/trades/', 'Trades', '💰'),
-          ('risk_config', '/risk_config/', 'Risk Config', '⚙️'),
+        ]},
+        {'key': 'diag', 'label': 'Diagnostics', 'icon': '🩺',
+         'children': [
           ('errors', '/errors/', 'Errors', '🚨'),
           ('dlq', '/dlq/', 'Dead Letters', '📥'),
-          ('agents', '/agents/', 'Agent Health', '❤️'),
-        ] %}
-        {% for key, href, label, icon in links %}
-        <li>
-          <a href="{{ href }}" class="flex items-center p-2 rounded-lg
-            {% if active == key %}bg-gray-200 dark:bg-gray-700{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
-            <span class="mr-2">{{ icon }}</span>
-            <span>{{ label }}</span>
-          </a>
-        </li>
+        ]},
+        {'key': 'settings', 'label': '', 'children': [
+          ('settings', '/settings/', 'Settings', '⚙️'),
+        ]},
+      ] %}
+      <ul class="space-y-1 font-medium">
+        {% for grp in groups %}
+        {% if not grp.label %}
+          {# Top-level single link (Dashboard, Settings) #}
+          {% for key, href, label, icon in grp.children %}
+          <li>
+            <a href="{{ href }}" class="flex items-center p-2 rounded-lg
+              {% if active == key %}bg-gray-200 dark:bg-gray-700{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+              <span class="mr-2">{{ icon }}</span><span>{{ label }}</span>
+            </a>
+          </li>
+          {% endfor %}
+        {% else %}
+          {% set child_keys = grp.children | map(attribute=0) | list %}
+          {% set open = active in child_keys %}
+          <li>
+            <button type="button"
+                    class="flex items-center w-full p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                    data-collapse-toggle="submenu-{{ grp.key }}"
+                    aria-expanded="{{ 'true' if open else 'false' }}">
+              <span class="mr-2">{{ grp.icon }}</span>
+              <span class="flex-1 text-left">{{ grp.label }}</span>
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 10 6"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4"/></svg>
+            </button>
+            <ul id="submenu-{{ grp.key }}" class="{% if not open %}hidden {% endif %}py-1 space-y-1 ml-2">
+              {% for key, href, label, icon in grp.children %}
+              <li>
+                <a href="{{ href }}" class="flex items-center p-2 pl-6 rounded-lg text-sm
+                  {% if active == key %}bg-gray-200 dark:bg-gray-700{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+                  <span class="mr-2">{{ icon }}</span><span>{{ label }}</span>
+                </a>
+              </li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% endif %}
         {% endfor %}
       </ul>
     </div>
@@ -209,17 +250,7 @@
     }, true);
 
     // ---------- Kill / Resume ----------
-    document.getElementById('killswitch')?.addEventListener('click', async () => {
-      const ok = await plataConfirm({
-        title: 'Kill switch',
-        message: 'Halt all agents and cancel open orders?',
-        confirmLabel: 'Halt',
-        danger: true,
-      });
-      if (!ok) return;
-      const r = await fetch('/api/kill', { method: 'POST' });
-      plataToast(r.ok ? 'Halt requested.' : 'Halt failed.', r.ok ? 'success' : 'error');
-    });
+    // Kill switch moved to /settings/?tab=controls.
 
     // ---------- Form draft persistence ----------
     // Any <form data-persist="<key>"> auto-saves its inputs to localStorage on every keystroke,
