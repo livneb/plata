@@ -1,8 +1,8 @@
 import pytest
 from pydantic import SecretStr
 
-from inkcliq.config.secrets import ScopedSecrets, SecretAccessError
-from inkcliq.config.settings import Settings
+from plata.config.secrets import ScopedSecrets, SecretAccessError
+from plata.config.settings import Settings
 
 
 def _settings() -> Settings:

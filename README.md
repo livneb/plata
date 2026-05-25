@@ -1,4 +1,4 @@
-# InkCliq
+# Plata
 
 Multi-agent autonomous trading system with knowledge-graph reasoning.
 

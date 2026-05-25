@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Trades – Plata{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Trade Ledger</h1>
+<div class="relative overflow-x-auto shadow-md sm:rounded-lg">
+  <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+    <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
+      <tr>
+        <th class="px-6 py-3">ULID</th>
+        <th class="px-6 py-3">Mode</th>
+        <th class="px-6 py-3">Symbol</th>
+        <th class="px-6 py-3">Side</th>
+        <th class="px-6 py-3">Qty</th>
+        <th class="px-6 py-3">Entry</th>
+        <th class="px-6 py-3">Exit</th>
+        <th class="px-6 py-3">Net PnL</th>
+        <th class="px-6 py-3">Opened</th>
+        <th class="px-6 py-3">Closed</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in trades %}
+      <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700">
+        <td class="px-6 py-3 font-mono text-xs">{{ t.trade_ulid[:10] }}…</td>
+        <td class="px-6 py-3">
+          <span class="px-2 py-0.5 rounded text-xs
+            {% if t.mode == 'paper' %}bg-yellow-100 text-yellow-800{% else %}bg-green-100 text-green-800{% endif %}">
+            {{ t.mode }}
+          </span>
+        </td>
+        <td class="px-6 py-3">{{ t.symbol }}</td>
+        <td class="px-6 py-3">{{ t.side }}</td>
+        <td class="px-6 py-3">{{ t.qty }}</td>
+        <td class="px-6 py-3">{{ t.entry_price }}</td>
+        <td class="px-6 py-3">{{ t.exit_price or '—' }}</td>
+        <td class="px-6 py-3 font-medium
+          {% if t.net_pnl and t.net_pnl > 0 %}text-green-500{% elif t.net_pnl and t.net_pnl < 0 %}text-red-500{% endif %}">
+          {{ t.net_pnl or '—' }}
+        </td>
+        <td class="px-6 py-3">{{ t.opened_at.strftime('%Y-%m-%d %H:%M') if t.opened_at }}</td>
+        <td class="px-6 py-3">{{ t.closed_at.strftime('%Y-%m-%d %H:%M') if t.closed_at else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="px-6 py-12 text-center text-gray-400">No trades yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

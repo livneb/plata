@@ -3,7 +3,7 @@ version: "3.9"
 services:
   redis:
     image: redis/redis-stack-server:7.4.0-v0
-    container_name: inkcliq-redis
+    container_name: plata-redis
     ports:
       - "6379:6379"
     volumes:
@@ -16,29 +16,29 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: inkcliq-postgres
+    container_name: plata-postgres
     environment:
-      POSTGRES_USER: inkcliq
-      POSTGRES_PASSWORD: inkcliq
-      POSTGRES_DB: inkcliq
+      POSTGRES_USER: plata
+      POSTGRES_PASSWORD: plata
+      POSTGRES_DB: plata
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "inkcliq"]
+      test: ["CMD", "pg_isready", "-U", "plata"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   ingestion_hub:
     build: .
-    container_name: inkcliq-ingestion-hub
+    container_name: plata-ingestion-hub
     env_file: .env
     environment:
       SERVICE_ENTRYPOINT: ingestion_hub
       REDIS_URL: redis://redis:6379/0
-      POSTGRES_URL: postgresql+asyncpg://inkcliq:inkcliq@postgres:5432/inkcliq
+      POSTGRES_URL: postgresql+asyncpg://plata:plata@postgres:5432/plata
     ports:
       - "8080:8080"
     depends_on:
@@ -49,12 +49,12 @@ services:
 
   intelligence_sandbox:
     build: .
-    container_name: inkcliq-intelligence-sandbox
+    container_name: plata-intelligence-sandbox
     env_file: .env
     environment:
       SERVICE_ENTRYPOINT: intelligence_sandbox
       REDIS_URL: redis://redis:6379/0
-      POSTGRES_URL: postgresql+asyncpg://inkcliq:inkcliq@postgres:5432/inkcliq
+      POSTGRES_URL: postgresql+asyncpg://plata:plata@postgres:5432/plata
       # Bybit keys MUST NOT be set here — enforced by ScopedSecrets
       BYBIT_API_KEY: ""
       BYBIT_API_SECRET: ""
@@ -66,12 +66,12 @@ services:
 
   execution_vault:
     build: .
-    container_name: inkcliq-execution-vault
+    container_name: plata-execution-vault
     env_file: .env
     environment:
       SERVICE_ENTRYPOINT: execution_vault
       REDIS_URL: redis://redis:6379/0
-      POSTGRES_URL: postgresql+asyncpg://inkcliq:inkcliq@postgres:5432/inkcliq
+      POSTGRES_URL: postgresql+asyncpg://plata:plata@postgres:5432/plata
       # No Telegram or scraper-source keys here
       TELEGRAM_BOT_TOKEN: ""
       REDDIT_CLIENT_ID: ""

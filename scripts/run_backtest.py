@@ -6,7 +6,7 @@ from datetime import datetime
 
 import typer
 
-from inkcliq.backtest.engine import run_backtest
+from plata.backtest.engine import run_backtest
 
 app = typer.Typer()
 

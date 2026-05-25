@@ -18,7 +18,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 RUN uv pip install --system --no-cache .
 
-COPY inkcliq ./inkcliq
+COPY plata ./plata
 COPY alembic ./alembic
 COPY alembic.ini ./
 
@@ -32,7 +32,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 1000 inkcliq
+    && useradd --create-home --uid 1000 plata
 
 WORKDIR /app
 
@@ -40,7 +40,7 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app /app
 
-USER inkcliq
+USER plata
 
 # The entrypoint dispatcher picks which processes to run based on SERVICE_ENTRYPOINT
-CMD ["python", "-m", "inkcliq.entrypoints"]
+CMD ["python", "-m", "plata.entrypoints"]

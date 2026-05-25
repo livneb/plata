@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from inkcliq.core.schemas import (
+from plata.core.schemas import (
     EnrichedEvent,
     EntityRef,
     EntityType,

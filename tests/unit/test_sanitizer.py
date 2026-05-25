@@ -1,4 +1,4 @@
-from inkcliq.agents.scraper.sanitizer import (
+from plata.agents.scraper.sanitizer import (
     detect_likely_injection,
     sanitize,
     wrap_untrusted,

@@ -1,5 +1,5 @@
 [project]
-name = "inkcliq"
+name = "plata"
 version = "0.1.0"
 description = "Multi-agent autonomous trading system with knowledge-graph reasoning"
 requires-python = ">=3.12"
@@ -65,14 +65,14 @@ dev = [
 ]
 
 [project.scripts]
-inkcliq = "inkcliq.cli:app"
+plata = "plata.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["inkcliq"]
+packages = ["plata"]
 
 [tool.ruff]
 line-length = 110

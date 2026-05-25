@@ -1,4 +1,4 @@
-from inkcliq.execution.universe import UNIVERSE, get_symbol, symbols_in_sector
+from plata.execution.universe import UNIVERSE, get_symbol, symbols_in_sector
 
 
 def test_lookup_basic():

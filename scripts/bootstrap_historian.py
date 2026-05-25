@@ -5,7 +5,7 @@ import asyncio
 
 import typer
 
-from inkcliq.agents.historian import seed
+from plata.agents.historian import seed
 
 app = typer.Typer()
 

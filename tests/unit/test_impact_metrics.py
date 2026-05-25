@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from inkcliq.oracle.impact_metrics import (
+from plata.oracle.impact_metrics import (
     all_metrics,
     max_drawdown,
     pct_move,

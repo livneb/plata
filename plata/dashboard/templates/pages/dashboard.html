@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – Plata{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Overview</h1>
+<div class="grid gap-4 grid-cols-1 md:grid-cols-4 mb-4">
+  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">Open Positions</h5>
+    <p class="text-2xl font-semibold">—</p>
+  </div>
+  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">Daily PnL</h5>
+    <p class="text-2xl font-semibold">—</p>
+  </div>
+  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">Pending HITL</h5>
+    <p class="text-2xl font-semibold">—</p>
+  </div>
+  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">LLM Spend Today</h5>
+    <p class="text-2xl font-semibold">—</p>
+  </div>
+</div>
+<div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+  <h2 class="text-lg font-semibold mb-2">Recent Activity</h2>
+  <p class="text-gray-500">Dashboard data wires up in the next iteration. Browse the pages from the sidebar.</p>
+</div>
+{% endblock %}

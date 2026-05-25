@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from inkcliq.backtest.report import max_drawdown, profit_factor, summarize, win_rate
+from plata.backtest.report import max_drawdown, profit_factor, summarize, win_rate
 
 
 def test_win_rate():
