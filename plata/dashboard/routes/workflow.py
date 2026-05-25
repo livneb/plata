@@ -61,24 +61,22 @@ CATEGORY = {
 }
 
 
-async def _background_cards() -> list[dict[str, Any]]:
-    """Persistent watchers — always-on tasks that don't 'finish'."""
+async def _sleeping_cards() -> list[dict[str, Any]]:
+    """Periodic pollers between cycles."""
     redis = get_redis()
     cards: list[dict[str, Any]] = []
-
-    # Scraper sources — clearer status: POLLING (mid-fetch) vs SLEEPING (between polls).
     async for k in redis.scan_iter(match="scraper:source:*", count=100):
         data = await redis.hgetall(k)
         name = k.split(":")[-1]
         raw = data.get("status") or "sleeping"
         status = {
-            "polling": "polling",    # mid-fetch (brief, pulses)
-            "idle": "sleeping",      # between polls — healthy
+            "polling": "polling",   # mid-fetch (brief, pulses)
+            "idle": "sleeping",     # between polls — healthy
             "halted": "halted",
             "error": "error",
         }.get(raw, "sleeping")
         cards.append({
-            "lane": "background",
+            "lane": "sleeping",
             "category": "ingestion",
             "agent": "scraper",
             "title": SOURCE_LABELS.get(name, f"Polling {name}"),
@@ -88,13 +86,17 @@ async def _background_cards() -> list[dict[str, Any]]:
             "extra": f"fetched {data.get('last_fetched', '0')} last cycle",
             "error": data.get("last_error") or "",
         })
+    return cards
 
-    # Orchestrator + telegram_bot — both are event-driven background loops; same status.
+
+async def _active_cards() -> list[dict[str, Any]]:
+    """Event-driven observers — orchestrator, telegram bot."""
+    redis = get_redis()
+    cards: list[dict[str, Any]] = []
     for name in ("orchestrator", "telegram_bot"):
         data = await redis.hgetall(f"agent_status:{name}")
         if not data:
             continue
-        # Show the last action this watcher performed (if any).
         recent = await redis.lrange(f"agent_activity:{name}", 0, 0)
         last_action = ""
         if recent:
@@ -102,7 +104,7 @@ async def _background_cards() -> list[dict[str, Any]]:
             if len(parts) == 3:
                 last_action = parts[2]
         cards.append({
-            "lane": "background",
+            "lane": "active",
             "category": CATEGORY.get(name, "ops"),
             "agent": name,
             "title": AGENT_VERB.get(name, name),
@@ -125,12 +127,24 @@ async def _ready_cards() -> list[dict[str, Any]]:
         except Exception:  # noqa: BLE001
             continue
         pending_count = 0
-        # Best-effort: XPENDING needs a group; we use the consumer's own group name
-        # convention from BaseAgent (`<agent>-grp`). Falls back silently if absent.
+        oldest_ts = None
         group = f"{consumer.replace('_', '-')}-grp"
         try:
             info = await redis.xpending(stream, group)
-            pending_count = int(info.get("pending") or 0) if isinstance(info, dict) else int(info[0] or 0)
+            # Newer redis-py returns a dict; older returns a list.
+            if isinstance(info, dict):
+                pending_count = int(info.get("pending") or 0)
+                min_id = info.get("min")
+            else:
+                pending_count = int(info[0] or 0) if info else 0
+                min_id = info[1] if len(info) > 1 else None
+            # Redis stream IDs are "<ms>-<seq>"; the ms part is the message creation time.
+            if pending_count > 0 and min_id:
+                try:
+                    ms = int(str(min_id).split("-")[0])
+                    oldest_ts = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+                except (ValueError, TypeError):
+                    oldest_ts = None
         except Exception:  # noqa: BLE001
             pending_count = 0
         if pending_count <= 0 and length == 0:
@@ -141,8 +155,9 @@ async def _ready_cards() -> list[dict[str, Any]]:
             "agent": consumer,
             "title": f"{pending_count} waiting for {consumer}",
             "subtitle": f"from {producer} → {stream.split(':')[0]}",
-            "status": "waiting" if pending_count > 0 else "empty",
-            "ts": None,
+            "status": "waiting" if pending_count > 0 else "caught up",
+            "ts": oldest_ts,
+            "ts_label": "oldest" if oldest_ts else "",
             "extra": f"stream total: {length}",
         })
     return cards
@@ -213,7 +228,8 @@ async def _gather() -> dict[str, Any]:
     return {
         "system_state": state or "RUNNING",
         "paper_mode": settings.default_paper_trading_mode,
-        "background": await _background_cards(),
+        "sleeping": await _sleeping_cards(),
+        "active": await _active_cards(),
         "ready": await _ready_cards(),
         "doing": await _doing_cards(),
         "done": await _done_cards(),

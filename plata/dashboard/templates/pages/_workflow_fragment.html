@@ -1,5 +1,6 @@
 {% set lanes = [
-  ('background', '⚙️ Background', background, 'gray'),
+  ('sleeping', '💤 Sleeping', sleeping, 'gray'),
+  ('active', '⚙️ Active', active, 'emerald'),
   ('ready', '📥 Ready', ready, 'amber'),
   ('doing', '🔄 Doing', doing, 'blue'),
   ('done', '✅ Done', done, 'green'),
@@ -17,14 +18,15 @@
   'sleeping':  'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
   'active':    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200',
   'idle':      'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
-  'waiting':   'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200',
-  'empty':     'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+  'waiting':    'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200',
+  'caught up':  'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+  'empty':      'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
   'ok':        'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200',
   'error':     'bg-red-100 text-red-700',
   'halted':    'bg-red-100 text-red-700',
 } %}
 
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
   {% for key, label, cards, _ in lanes %}
   <section class="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-3 min-h-[200px]">
     <div class="flex items-center justify-between mb-3">
@@ -49,7 +51,9 @@
         <div class="flex items-center justify-between mt-1.5">
           <span class="text-[10px] font-mono text-gray-400">{{ c.agent }}</span>
           {% if c.ts %}
-          <time class="text-[10px] text-gray-400 font-mono" data-elapsed="{{ c.ts }}" title="{{ c.ts }}">{{ c.ts | time_ago }}</time>
+          <span class="text-[10px] text-gray-400 font-mono">
+            {% if c.ts_label %}{{ c.ts_label }} {% endif %}<time data-elapsed="{{ c.ts }}" title="{{ c.ts }}">{{ c.ts | time_ago }}</time>
+          </span>
           {% endif %}
         </div>
       </div>

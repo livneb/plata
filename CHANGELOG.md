@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.020 — 2026-05-25
+- Workflow Kanban: split the old "Background" lane into **💤 Sleeping** (periodic pollers between cycles) and **⚙️ Active** (event-driven observers — orchestrator + telegram bot). Five lanes total.
+- Ready lane: cards now show the age of the **oldest pending message** ("oldest 5m 12s ago"), and the "0 waiting" status is labelled **caught up** instead of the confusing "empty".
+- DLQ Replay fixed: re-publishes in the correct wire format (`{"data": <json>}`), throttles to 50ms between messages so consumers drain gradually, and runs in the background so the HTTP request returns instantly.
+- (commit messages now prefixed with the version, matching the in-app topbar.)
+
 ## 2.24.019 — 2026-05-25
 - Fix strategist `ValidationError` on `AnalogousEvent.similarity` when KNN returns a near-identical neighbor: `1 - score` could be `1.0000001` due to float32 precision. Now clamped to [0, 1].
 

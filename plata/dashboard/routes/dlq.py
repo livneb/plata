@@ -67,26 +67,30 @@ async def index(request: Request):
 
 
 async def _replay(dlq: str, original_stream: str, max_items: int | None = None) -> int:
-    """Read each DLQ entry, re-XADD its payload to the original stream, delete from DLQ.
+    """Replay DLQ entries to the source stream one at a time with a small delay between each.
 
+    Wire format matches `plata.core.bus.publish`: a single `{"data": <json>}` field.
     Returns the number of messages replayed.
     """
+    import asyncio
     redis = get_redis()
     replayed = 0
     while True:
-        batch = await redis.xrange(dlq, count=50)
+        batch = await redis.xrange(dlq, count=20)
         if not batch:
             break
         for redis_id, fields in batch:
             payload_raw = fields.get("payload", "{}")
             try:
-                payload = json.loads(payload_raw)
+                json.loads(payload_raw)  # validate
             except Exception:  # noqa: BLE001
-                # Skip unparseable entries — leave them in DLQ for manual inspection.
-                continue
-            await redis.xadd(original_stream, {k: str(v) for k, v in payload.items()})
+                continue  # leave malformed entries in DLQ
+            # Re-publish in the same wire format publish() uses: one "data" field.
+            await redis.xadd(original_stream, {"data": payload_raw})
             await redis.xdel(dlq, redis_id)
             replayed += 1
+            # Throttle so consumers process gradually instead of being slammed.
+            await asyncio.sleep(0.05)
             if max_items is not None and replayed >= max_items:
                 return replayed
     return replayed
@@ -94,15 +98,15 @@ async def _replay(dlq: str, original_stream: str, max_items: int | None = None) 
 
 @router.post("/{stream_name}/replay")
 async def replay_stream(stream_name: str):
+    import asyncio
     # Look up the original stream by name (sans dlq: prefix)
-    original = next(
-        (s for s in ORIGINAL_STREAMS if s == stream_name),
-        None,
-    )
+    original = next((s for s in ORIGINAL_STREAMS if s == stream_name), None)
     if original is None:
         return RedirectResponse(url="/dlq/", status_code=303)
     dlq = Streams.dlq_for(original)
-    await _replay(dlq, original)
+    # Kick off replay as a background task so the HTTP request returns immediately;
+    # the throttled drain keeps consumers from being slammed.
+    asyncio.create_task(_replay(dlq, original), name=f"dlq-replay-{stream_name}")
     return RedirectResponse(url="/dlq/", status_code=303)
 
 
