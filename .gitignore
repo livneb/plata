@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+.venv/
+venv/
+env/
+
+.env
+.env.local
+.env.*.local
+
+build/
+dist/
+*.egg-info/
+.eggs/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# uv
+.uv-cache/
+uv.lock
+
+# Local docker volumes
+redis_data/
+postgres_data/
+
+# Plan / scratch
+/scratch/

@@ -1,0 +1,87 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis/redis-stack-server:7.4.0-v0
+    container_name: inkcliq-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: inkcliq-postgres
+    environment:
+      POSTGRES_USER: inkcliq
+      POSTGRES_PASSWORD: inkcliq
+      POSTGRES_DB: inkcliq
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "inkcliq"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ingestion_hub:
+    build: .
+    container_name: inkcliq-ingestion-hub
+    env_file: .env
+    environment:
+      SERVICE_ENTRYPOINT: ingestion_hub
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_URL: postgresql+asyncpg://inkcliq:inkcliq@postgres:5432/inkcliq
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  intelligence_sandbox:
+    build: .
+    container_name: inkcliq-intelligence-sandbox
+    env_file: .env
+    environment:
+      SERVICE_ENTRYPOINT: intelligence_sandbox
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_URL: postgresql+asyncpg://inkcliq:inkcliq@postgres:5432/inkcliq
+      # Bybit keys MUST NOT be set here — enforced by ScopedSecrets
+      BYBIT_API_KEY: ""
+      BYBIT_API_SECRET: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  execution_vault:
+    build: .
+    container_name: inkcliq-execution-vault
+    env_file: .env
+    environment:
+      SERVICE_ENTRYPOINT: execution_vault
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_URL: postgresql+asyncpg://inkcliq:inkcliq@postgres:5432/inkcliq
+      # No Telegram or scraper-source keys here
+      TELEGRAM_BOT_TOKEN: ""
+      REDDIT_CLIENT_ID: ""
+      REDDIT_CLIENT_SECRET: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+volumes:
+  redis_data:
+  postgres_data:

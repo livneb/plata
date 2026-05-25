@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Risk Config – InkCliq{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Risk Configuration</h1>
+
+<div class="grid gap-6 md:grid-cols-2">
+  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    <h2 class="text-lg font-semibold mb-3">Current values</h2>
+    <table class="w-full text-sm">
+      <tbody>
+        {% for key, value in config.items() %}
+        <tr class="border-b dark:border-gray-700">
+          <td class="py-2 font-mono">{{ key }}</td>
+          <td class="py-2">{{ value }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    <h2 class="text-lg font-semibold mb-3">Edit</h2>
+    <form method="post" action="/risk_config/" class="space-y-3">
+      <div>
+        <label class="block mb-1 text-sm font-medium">Key</label>
+        <input name="key" required class="bg-gray-50 border border-gray-300 text-sm rounded-lg block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600" />
+      </div>
+      <div>
+        <label class="block mb-1 text-sm font-medium">Value</label>
+        <input name="value" required class="bg-gray-50 border border-gray-300 text-sm rounded-lg block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600" />
+      </div>
+      <button type="submit" class="text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-lg text-sm px-5 py-2.5">Update</button>
+    </form>
+    <p class="mt-3 text-xs text-gray-500">Common keys: paper_trading_mode, risk_per_trade_pct, max_open_positions, max_daily_loss_pct, auto_approve_threshold_usd, llm.daily_budget_usd_total</p>
+  </div>
+</div>
+{% endblock %}
