@@ -100,6 +100,34 @@
         }
         return;
       }
+      // Per-card cancel (✕) — kind decides which endpoint.
+      const cancel = ev.target.closest('[data-cancel-kind]');
+      if (cancel) {
+        ev.stopPropagation();
+        const kind = cancel.getAttribute('data-cancel-kind');
+        const target = cancel.getAttribute('data-cancel-target') || '';
+        let url, msg, danger = true, label = 'Cancel';
+        if (kind === 'source') { url = '/workflow/cancel/source/' + encodeURIComponent(target); msg = `Halt the "${target}" source's poll loop?`; label = 'Halt'; }
+        else if (kind === 'agent') { url = '/workflow/cancel/agent/' + encodeURIComponent(target); msg = `Halt the "${target}" agent?`; label = 'Halt'; }
+        else if (kind === 'historian-dismiss') { url = '/historian/reset'; msg = 'Dismiss the historian card?'; label = 'Dismiss'; }
+        else if (kind === 'historian-batch') {
+          // Pull the batch index out of the parent card's data-card JSON (title "Batch N/M · ...").
+          const card = cancel.closest('.kanban-card');
+          let i = 0;
+          try {
+            const data = JSON.parse(card.getAttribute('data-card') || '{}');
+            const m = (data.title || '').match(/Batch\s+(\d+)/i);
+            if (m) i = parseInt(m[1], 10) - 1;
+          } catch {}
+          url = '/workflow/cancel/historian/' + i;
+          msg = `Cancel historian batch #${i + 1}?`;
+          label = 'Cancel batch';
+        } else { return; }
+        if (!await plataConfirm({ title: label, message: msg, confirmLabel: label, danger })) return;
+        const r = await fetch(url, { method: 'POST' });
+        plataToast(r.ok ? 'Cancel sent.' : 'Cancel failed.', r.ok ? 'success' : 'error');
+        return;
+      }
       const card = ev.target.closest('.kanban-card');
       if (!card) return;
       let data;

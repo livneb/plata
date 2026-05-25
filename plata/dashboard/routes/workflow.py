@@ -461,3 +461,37 @@ async def fragment(request: Request):
     return templates.TemplateResponse(
         request, "pages/_workflow_fragment.html", await _gather()
     )
+
+
+@router.post("/cancel/source/{name}")
+async def cancel_source(name: str):
+    """Halt one scraper source's poll loop. The Scraper loop checks this status
+    on every tick and skips polling until you re-enable it."""
+    from fastapi.responses import JSONResponse
+    redis = get_redis()
+    await redis.hset(f"scraper:source:{name}", "status", "halted")
+    return JSONResponse({"ok": True, "source": name, "status": "halted"})
+
+
+@router.post("/cancel/agent/{name}")
+async def cancel_agent(name: str):
+    """Per-agent halt. Reuses the existing system:halt channel with `agent` payload."""
+    from fastapi.responses import JSONResponse
+    from plata.core.bus import Channels, publish_channel
+    await publish_channel(Channels.SYSTEM_HALT, {"agent": name, "reason": "manual_cancel_from_kanban"})
+    return JSONResponse({"ok": True, "agent": name})
+
+
+@router.post("/cancel/historian/{batch_i}")
+async def cancel_historian_batch(batch_i: int):
+    """Mark a historian batch cancelled. The runner doesn't watch this signal mid-batch,
+    but the card flips to ERROR state so it leaves Doing and lands in Active."""
+    from fastapi.responses import JSONResponse
+    redis = get_redis()
+    key = f"historian:batch:{int(batch_i)}"
+    await redis.hset(key, mapping={
+        "state": "failed",
+        "last_error": "cancelled by user",
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return JSONResponse({"ok": True, "batch": int(batch_i)})

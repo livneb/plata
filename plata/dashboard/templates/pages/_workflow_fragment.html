@@ -38,12 +38,28 @@
     </div>
     <div class="lane-body space-y-2">
       {% for c in cards %}
+      {# Decide if this card supports a 'cancel' action and which endpoint to hit. #}
+      {% set cancel = none %}
+      {% if c.agent == 'historian' and c.status in ('error','ok') %}
+        {% set cancel = {'kind': 'historian-dismiss', 'label': 'Dismiss'} %}
+      {% elif key == 'sleeping' and c.agent == 'scraper' %}
+        {# Source card in Sleeping lane — title is the source name (e.g. 'GDELT'). #}
+        {% set cancel = {'kind': 'source', 'target': (c.title | lower | replace(' ', '_')), 'label': 'Halt source'} %}
+      {% elif key in ('doing','active') and c.agent in ('graph_ingestion','strategist','reviewer','risk_manager','executor','orchestrator','telegram_bot','trade_sampler') %}
+        {% set cancel = {'kind': 'agent', 'target': c.agent, 'label': 'Halt agent'} %}
+      {% elif c.agent == 'historian' and c.title and 'Batch' in c.title and c.status == 'running' %}
+        {# Per-batch card — title looks like "Batch 3/10 · 5/10 events"; we leave the batch_id
+           in a data attribute below so JS can post to /workflow/cancel/historian/<i>. #}
+        {% set cancel = {'kind': 'historian-batch', 'label': 'Cancel batch'} %}
+      {% endif %}
       <div class="kanban-card relative bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 shadow-sm cursor-pointer hover:border-blue-400 dark:hover:border-blue-500"
            data-card='{{ c | tojson | e }}'>
-        {% if c.agent == 'historian' and c.status in ('error','ok') %}
-        <button type="button" data-kanban-dismiss="historian"
+        {% if cancel %}
+        <button type="button"
+                data-cancel-kind="{{ cancel.kind }}"
+                {% if cancel.target %}data-cancel-target="{{ cancel.target }}"{% endif %}
                 class="absolute top-1 right-1 w-5 h-5 text-gray-400 hover:text-red-500 text-xs leading-none"
-                title="Dismiss">✕</button>
+                title="{{ cancel.label }}">✕</button>
         {% endif %}
         <div class="flex items-center justify-between mb-1">
           <span class="text-[10px] px-1.5 py-0.5 rounded {{ cat_colors.get(c.category, 'bg-gray-200 text-gray-700') }}">{{ c.category }}</span>

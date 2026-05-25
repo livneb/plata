@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.063 — 2026-05-25
+- **Cancel ✕ on every actionable Kanban card.** Click → confirm modal → POST. New endpoints:
+  - `POST /workflow/cancel/source/<name>` — halts one scraper source's poll loop. The poll loop now reads the Redis status hash each tick and sleeps when set to `halted`.
+  - `POST /workflow/cancel/agent/<name>` — proxies to the existing per-agent halt channel.
+  - `POST /workflow/cancel/historian/<batch_i>` — marks the batch as failed/cancelled.
+- Visible on: source cards (Sleeping lane), agent cards (Doing / Active lanes), historian batch cards (Doing), historian aggregate card (when error/ok).
+
 ## 2.24.062 — 2026-05-25
 - Country canonical form flipped: canonical id/name is now the **human-readable full name** ("Israel", "United States", "United Kingdom", "European Union", …). ISO-2 / ISO-3 codes (IL/ISR, US/USA, …) become aliases of the canonical node. Re-run the 🧹 Dedup button on the graph to apply to existing nodes.
 

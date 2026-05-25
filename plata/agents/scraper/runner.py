@@ -47,6 +47,13 @@ class Scraper(BaseAgent):
                 await redis.hset(key, mapping={"status": "halted"})
                 await asyncio.sleep(5)
                 continue
+            # Per-source manual cancel from the Kanban: if the status was set to
+            # "halted" by /workflow/cancel/source/<name>, honour it. The user can
+            # POST it back to "idle" (or remove the field) to resume.
+            current = (await redis.hget(key, "status")) or ""
+            if current == "halted":
+                await asyncio.sleep(5)
+                continue
             now = datetime.now(timezone.utc).isoformat()
             await redis.hset(key, mapping={
                 "status": "polling", "started_at": now, "interval_sec": src.poll_interval_sec,
