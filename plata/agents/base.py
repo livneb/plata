@@ -158,12 +158,19 @@ class BaseAgent(ABC):
             self._halted.set()
             self.log.warning("booted_in_halted_state")
 
-        async for channel, _payload in subscribe(Channels.SYSTEM_HALT, Channels.SYSTEM_RESUME):
+        async for channel, payload in subscribe(Channels.SYSTEM_HALT, Channels.SYSTEM_RESUME):
+            # Optional targeting: payload may include {"agent": "<name>"} for per-agent control.
+            # Absent/empty agent => applies to all.
+            target = (payload or {}).get("agent") if isinstance(payload, dict) else None
+            if target and target != self.name:
+                continue
             if channel == Channels.SYSTEM_HALT:
                 self._halted.set()
-                await redis.set(SYSTEM_STATE_KEY, "HALTED")
-                self.log.warning("halt_received")
+                if not target:
+                    await redis.set(SYSTEM_STATE_KEY, "HALTED")
+                self.log.warning("halt_received", target=target or "all")
             elif channel == Channels.SYSTEM_RESUME:
                 self._halted.clear()
-                await redis.set(SYSTEM_STATE_KEY, "RUNNING")
-                self.log.info("resume_received")
+                if not target:
+                    await redis.set(SYSTEM_STATE_KEY, "RUNNING")
+                self.log.info("resume_received", target=target or "all")

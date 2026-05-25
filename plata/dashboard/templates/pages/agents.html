@@ -1,24 +1,83 @@
 {% extends "base.html" %}
-{% block title %}Agents – Plata{% endblock %}
+{% block title %}Agents · Plata{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">Agent Health</h1>
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-bold">Agent Health</h1>
+  <div class="flex gap-2">
+    <button id="resume-all" type="button"
+            class="text-white bg-green-700 hover:bg-green-800 focus:ring-4 focus:ring-green-300 font-medium rounded-lg text-sm px-4 py-2">
+      ▶ Resume all
+    </button>
+    <button id="halt-all" type="button"
+            class="text-white bg-red-700 hover:bg-red-800 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-4 py-2">
+      ⏸ Halt all
+    </button>
+  </div>
+</div>
+
 <div class="grid gap-4 md:grid-cols-3">
   {% for a in agents %}
   <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-    <h3 class="text-lg font-semibold">{{ a.name }}</h3>
+    <div class="flex items-center justify-between">
+      <h3 class="text-lg font-semibold">{{ a.name }}</h3>
+      {% if a.halted == 'True' %}
+      <span class="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded">HALTED</span>
+      {% else %}
+      <span class="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded">RUNNING</span>
+      {% endif %}
+    </div>
     <p class="text-xs text-gray-500">Container: {{ a.container or '—' }}</p>
     <p class="text-xs" title="{{ a.last_heartbeat or '' }}">Last heartbeat: {{ a.last_heartbeat | time_ago }}</p>
     <p class="text-xs">In-flight: {{ a.in_flight or '0' }}</p>
-    <p>
-      {% if a.halted == 'True' %}
-      <span class="bg-red-100 text-red-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded">HALTED</span>
-      {% else %}
-      <span class="bg-green-100 text-green-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded">RUNNING</span>
-      {% endif %}
-    </p>
+    <div class="mt-3 flex gap-2">
+      <button type="button" data-agent-resume="{{ a.name }}"
+              class="text-xs text-white bg-green-700 hover:bg-green-800 font-medium rounded-lg px-3 py-1.5">
+        Resume
+      </button>
+      <button type="button" data-agent-halt="{{ a.name }}"
+              class="text-xs text-white bg-red-700 hover:bg-red-800 font-medium rounded-lg px-3 py-1.5">
+        Halt
+      </button>
+    </div>
   </div>
   {% else %}
   <p class="text-gray-400">No agents reporting yet.</p>
   {% endfor %}
 </div>
+
+<script>
+  async function agentAction(name, action) {
+    const r = await fetch(`/api/agents/${name}/${action}`, { method: 'POST' });
+    plataToast(r.ok ? `${action} sent to ${name}` : `${action} failed for ${name}`,
+               r.ok ? 'success' : 'error');
+  }
+
+  document.querySelectorAll('[data-agent-resume]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const name = b.getAttribute('data-agent-resume');
+      const ok = await plataConfirm({ title: 'Resume agent', message: `Resume ${name}?`, confirmLabel: 'Resume' });
+      if (ok) agentAction(name, 'resume');
+    });
+  });
+  document.querySelectorAll('[data-agent-halt]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const name = b.getAttribute('data-agent-halt');
+      const ok = await plataConfirm({ title: 'Halt agent', message: `Halt ${name}? It will stop consuming until resumed.`, confirmLabel: 'Halt', danger: true });
+      if (ok) agentAction(name, 'halt');
+    });
+  });
+
+  document.getElementById('resume-all')?.addEventListener('click', async () => {
+    const ok = await plataConfirm({ title: 'Resume all agents', message: 'Resume every agent system-wide?', confirmLabel: 'Resume all' });
+    if (!ok) return;
+    const r = await fetch('/api/resume', { method: 'POST' });
+    plataToast(r.ok ? 'Resume-all sent.' : 'Resume-all failed.', r.ok ? 'success' : 'error');
+  });
+  document.getElementById('halt-all')?.addEventListener('click', async () => {
+    const ok = await plataConfirm({ title: 'Halt all agents', message: 'Halt every agent system-wide?', confirmLabel: 'Halt all', danger: true });
+    if (!ok) return;
+    const r = await fetch('/api/kill', { method: 'POST' });
+    plataToast(r.ok ? 'Halt-all sent.' : 'Halt-all failed.', r.ok ? 'success' : 'error');
+  });
+</script>
 {% endblock %}

@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.005 — 2026-05-25
+- Moved Resume out of the topbar; Agents page now has **Resume all** + **Halt all** buttons and per-agent Resume/Halt buttons.
+- Halt/Resume channels now accept an optional `{agent: "<name>"}` payload so a single agent can be paused without freezing the rest of the system.
+
 ## 2.24.004 — 2026-05-25
 - New-version banner now pushes the topbar, sidebar, and content down instead of overlaying them.
 

@@ -102,6 +102,18 @@ def create_app() -> FastAPI:
         await get_redis().set("system:state", "RUNNING")
         return {"ok": True, "state": "RUNNING"}
 
+    @app.post("/api/agents/{name}/resume")
+    async def api_agent_resume(name: str):
+        from plata.core.bus import Channels, publish_channel
+        await publish_channel(Channels.SYSTEM_RESUME, {"agent": name, "reason": "manual_resume"})
+        return {"ok": True, "agent": name}
+
+    @app.post("/api/agents/{name}/halt")
+    async def api_agent_halt(name: str):
+        from plata.core.bus import Channels, publish_channel
+        await publish_channel(Channels.SYSTEM_HALT, {"agent": name, "reason": "manual_killswitch"})
+        return {"ok": True, "agent": name}
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         from datetime import date, datetime, timezone
