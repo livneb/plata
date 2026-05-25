@@ -353,6 +353,9 @@
       else if (e.key === '0') fitAll();
     });
 
+    // Honour ?focus=<ulid> from the URL on initial load (used by /historian/ links).
+    const _initFocus = new URLSearchParams(location.search).get('focus');
+    if (_initFocus) focusKey = 'event:' + _initFocus.replace(/^event:/, '');
     loadGraph();
   })();
 </script>

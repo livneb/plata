@@ -68,6 +68,46 @@ async def reset():
     return RedirectResponse(url="/historian/", status_code=303)
 
 
+@router.get("/events")
+async def events(limit: int = 100) -> JSONResponse:
+    """Return recent events seeded by the historian (newest first by timestamp)."""
+    redis = get_redis()
+    # Best-effort scan; cap at 1000 to keep latency bounded on big graphs.
+    keys: list[str] = []
+    async for k in redis.scan_iter(match="event:*", count=500):
+        keys.append(k)
+        if len(keys) >= 1000:
+            break
+    out: list[dict[str, Any]] = []
+    if keys:
+        pipe = redis.pipeline()
+        for k in keys:
+            pipe.json().get(k)
+        docs = await pipe.execute()
+        for k, d in zip(keys, docs, strict=True):
+            if not isinstance(d, dict):
+                continue
+            if (d.get("source") or "") != "historian":
+                continue
+            ents = d.get("entity_refs") or []
+            out.append({
+                "key": k,
+                "ulid": d.get("ulid"),
+                "ts": d.get("ts"),
+                "category": d.get("category"),
+                "region": d.get("region"),
+                "summary": d.get("summary"),
+                "entities": [
+                    {"type": e.get("type"), "name": e.get("name")}
+                    for e in ents[:10] if isinstance(e, dict)
+                ],
+                "has_price_impact": bool(d.get("price_impact")),
+                "price_impact_symbols": list((d.get("price_impact") or {}).keys()),
+            })
+    out.sort(key=lambda e: e.get("ts") or "", reverse=True)
+    return JSONResponse({"count": len(out), "events": out[:limit]})
+
+
 def _kick_seed(total: int, batch_size: int, start_date: str, end_date: str,
                brief: str, focus: str) -> tuple[bool, str]:
     """Spawn the seed task and stash a reference so it isn't GC'd. Returns (ok, msg)."""

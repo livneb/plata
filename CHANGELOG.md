@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.047 — 2026-05-25
+- New **Seeded events** panel at the bottom of `/historian/`. Lists every historian-sourced event in the graph (newest first) — date, category, region, summary, entities (chips), and whether real Bybit price-impact data was attached. Click any row to jump to `/graph/?focus=<ulid>` and see it in the knowledge graph.
+- New endpoint `GET /historian/events?limit=N`.
+- Graph page honors `?focus=<ulid>` on initial load.
+
 ## 2.24.046 — 2026-05-25
 - Global FastAPI exception handler on the dashboard. **Any uncaught exception in any route is now logged to `/errors/`** (Postgres `error_log`) — agent=`dashboard`, with path/method/user context — not just to stdout. No more "I had to dig in Railway deploy logs to find why my click failed".
 
