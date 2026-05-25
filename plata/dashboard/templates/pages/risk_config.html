@@ -49,7 +49,8 @@
                 <h3 class="text-lg font-semibold">Edit <span class="font-mono">{{ row.key }}</span></h3>
                 <button type="button" data-modal-hide="edit-{{ loop.index }}" class="text-gray-400 hover:text-gray-200">✕</button>
               </div>
-              <form method="post" action="/risk_config/{{ row.key }}/update" class="space-y-3">
+              <form method="post" action="/risk_config/{{ row.key }}/update" class="space-y-3"
+                    data-persist="risk-config-edit-{{ row.key }}">
                 <div>
                   <label class="block text-sm font-medium mb-1">Value (JSON or plain text)</label>
                   <input name="value" value="{{ row.value }}" required
@@ -80,7 +81,7 @@
       <h3 class="text-lg font-semibold">New config key</h3>
       <button type="button" data-modal-hide="create-modal" class="text-gray-400 hover:text-gray-200">✕</button>
     </div>
-    <form method="post" action="/risk_config/create" class="space-y-3">
+    <form method="post" action="/risk_config/create" class="space-y-3" data-persist="risk-config-create">
       <div>
         <label class="block text-sm font-medium mb-1">Key</label>
         <input name="key" required placeholder="e.g. max_open_positions"

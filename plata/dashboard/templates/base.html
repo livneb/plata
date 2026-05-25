@@ -217,6 +217,57 @@
       plataToast(r.ok ? 'Halt requested.' : 'Halt failed.', r.ok ? 'success' : 'error');
     });
 
+    // ---------- Form draft persistence ----------
+    // Any <form data-persist="<key>"> auto-saves its inputs to localStorage on every keystroke,
+    // restores them on load, and clears the saved draft on submit.
+    (function () {
+      function storageKey(form) {
+        const k = form.getAttribute('data-persist');
+        return k ? `plata-draft:${k}` : null;
+      }
+      function fieldsOf(form) {
+        // Persist text-like inputs only. Never save passwords.
+        return form.querySelectorAll(
+          'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=password]):not([type=file]), textarea, select'
+        );
+      }
+      function restore(form) {
+        const key = storageKey(form); if (!key) return;
+        let saved; try { saved = JSON.parse(localStorage.getItem(key) || '{}'); } catch { return; }
+        fieldsOf(form).forEach(el => {
+          if (!el.name || !(el.name in saved)) return;
+          if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!saved[el.name];
+          else el.value = saved[el.name];
+        });
+      }
+      function persist(form) {
+        const key = storageKey(form); if (!key) return;
+        const out = {};
+        fieldsOf(form).forEach(el => {
+          if (!el.name) return;
+          out[el.name] = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value;
+        });
+        localStorage.setItem(key, JSON.stringify(out));
+      }
+      function clear(form) {
+        const key = storageKey(form); if (key) localStorage.removeItem(key);
+      }
+      function init(root) {
+        (root || document).querySelectorAll('form[data-persist]').forEach(form => {
+          if (form.dataset.persistBound === '1') return;
+          form.dataset.persistBound = '1';
+          restore(form);
+          fieldsOf(form).forEach(el => {
+            el.addEventListener('input', () => persist(form));
+            el.addEventListener('change', () => persist(form));
+          });
+          form.addEventListener('submit', () => clear(form));
+        });
+      }
+      document.addEventListener('DOMContentLoaded', () => init());
+      document.body.addEventListener('htmx:afterSwap', e => init(e.target));
+    })();
+
     // ---------- Local-time formatter ----------
     // Any <time data-utc="ISO"> element will render in the browser's locale + timezone.
     function plataFormatLocalTimes(root) {

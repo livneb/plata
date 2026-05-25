@@ -17,7 +17,7 @@
       <div class="mb-4 p-3 rounded-lg bg-red-100 text-red-800 text-sm dark:bg-red-900 dark:text-red-200">{{ error }}</div>
       {% endif %}
 
-      <form method="post" action="/login" class="space-y-4">
+      <form method="post" action="/login" class="space-y-4" data-persist="login">
         <input type="hidden" name="next" value="{{ next }}" />
         <div>
           <label class="block text-sm font-medium mb-1" for="email">Email</label>
