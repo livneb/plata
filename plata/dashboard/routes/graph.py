@@ -48,25 +48,31 @@ async def index(request: Request):
 
 
 @router.get("/data")
-async def graph_data(limit: int = Query(40, ge=1, le=200), focus: str | None = None) -> JSONResponse:
-    """Return Cytoscape-compatible nodes + edges.
+async def graph_data(
+    limit: int = Query(40, ge=1, le=200),
+    focus: str | None = None,
+    since: int | None = Query(None, description="Only return events with ts_epoch >= since (unix s)."),
+) -> JSONResponse:
+    """Cytoscape-compatible nodes + edges.
 
-    Strategy:
-      - If `focus` is an event ULID: return that event + all its entity neighbors +
-        each connected event one hop away (events sharing an entity).
-      - Otherwise: return up to `limit` most recent events + their entities + edges.
+    `since` enables a delta fetch — only events newer than the given epoch are returned,
+    along with their entities + edges. The frontend can merge with its localStorage cache.
+
+    Performance: edges are scanned **once globally** instead of once-per-event, then
+    filtered in Python by the event-key set we picked. This collapses the cost from
+    O(events × all-edges) to O(all-edges).
     """
     redis = get_redis()
+    server_ts_epoch = int(__import__("time").time())
 
     event_keys: list[str] = []
     if focus:
         event_keys = [event_key(focus)]
     else:
-        # Most recent events: scan and sort by ts_epoch (best-effort; bounded by limit*4).
         scanned = []
         async for k in redis.scan_iter(match="event:*", count=500):
             scanned.append(k)
-            if len(scanned) >= limit * 4:
+            if not since and len(scanned) >= limit * 4:
                 break
         if scanned:
             pipe = redis.pipeline()
@@ -76,14 +82,19 @@ async def graph_data(limit: int = Query(40, ge=1, le=200), focus: str | None = N
             paired = []
             for k, ts in zip(scanned, ts_results, strict=True):
                 ts_val = (ts[0] if isinstance(ts, list) and ts else ts) or 0
-                paired.append((k, int(ts_val or 0)))
+                try:
+                    ts_int = int(ts_val or 0)
+                except (TypeError, ValueError):
+                    ts_int = 0
+                if since is not None and ts_int < int(since):
+                    continue
+                paired.append((k, ts_int))
             paired.sort(key=lambda kv: kv[1], reverse=True)
-            event_keys = [k for k, _ in paired[:limit]]
+            event_keys = [k for k, _ in paired[:limit]] if since is None else [k for k, _ in paired]
 
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
 
-    # Load events
     if event_keys:
         pipe = redis.pipeline()
         for k in event_keys:
@@ -102,24 +113,29 @@ async def graph_data(limit: int = Query(40, ge=1, le=200), focus: str | None = N
                     "category": category,
                     "source": doc.get("source"),
                     "ts": doc.get("ts"),
+                    "ts_epoch": int(doc.get("ts_epoch") or 0),
                     "color": color,
                 },
             }
 
-    # Scan all edges that touch any of our events
     if event_keys:
-        for ek in event_keys:
-            pattern = f"edge:{ek}:*"
-            edge_keys = []
-            async for ek_match in redis.scan_iter(match=pattern, count=200):
-                edge_keys.append(ek_match)
-            if not edge_keys:
+        # ONE global edge scan, filter by source-in-set. Was: N scans (one per event).
+        wanted = set(event_keys)
+        all_edge_keys: list[str] = []
+        async for k in redis.scan_iter(match="edge:*", count=1000):
+            # Edge keys look like edge:<src>:<rel>:<dst>; we want any where <src> is one of ours.
+            parts = k.split(":", 3)  # ['edge', '<srctype>', '<srcid>', '<rel>:<dst>'] OR for event:<ulid> as src: ['edge', 'event', '<ulid>', '<rel>:<dst>']
+            if len(parts) < 4:
                 continue
+            src_candidate = parts[1] + ":" + parts[2]
+            if src_candidate in wanted:
+                all_edge_keys.append(k)
+        if all_edge_keys:
             pipe = redis.pipeline()
-            for k in edge_keys:
+            for k in all_edge_keys:
                 pipe.json().get(k)
             docs = await pipe.execute()
-            for ek_key, edoc in zip(edge_keys, docs, strict=True):
+            for ek_key, edoc in zip(all_edge_keys, docs, strict=True):
                 if not edoc:
                     continue
                 src = edoc.get("src")
@@ -136,11 +152,10 @@ async def graph_data(limit: int = Query(40, ge=1, le=200), focus: str | None = N
                         "weight": float(edoc.get("weight") or 1.0),
                     }
                 })
-                # Make sure the entity endpoint becomes a node too.
                 if dst not in nodes and dst.startswith("entity:"):
-                    parts = dst.split(":", 2)
-                    type_ = parts[1] if len(parts) > 1 else "default"
-                    name = parts[2] if len(parts) > 2 else dst
+                    parts2 = dst.split(":", 2)
+                    type_ = parts2[1] if len(parts2) > 1 else "default"
+                    name = parts2[2] if len(parts2) > 2 else dst
                     nodes[dst] = {
                         "data": {
                             "id": dst,
@@ -151,7 +166,12 @@ async def graph_data(limit: int = Query(40, ge=1, le=200), focus: str | None = N
                         }
                     }
 
-    return JSONResponse({"nodes": list(nodes.values()), "edges": edges})
+    return JSONResponse({
+        "nodes": list(nodes.values()),
+        "edges": edges,
+        "server_ts_epoch": server_ts_epoch,
+        "delta": since is not None,
+    })
 
 
 @router.get("/node")

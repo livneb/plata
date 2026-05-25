@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.050 — 2026-05-25
+- **Graph loads near-instantly on reload.** localStorage cache + delta fetch:
+  - On open we render the cached nodes/edges immediately, then fetch only events created since `lastSyncEpoch` and merge in.
+  - First-ever load still hits the backend, but the backend itself is much faster now: edges are scanned **once globally** (was once per event), so cost is O(all-edges) instead of O(events × all-edges).
+- New query parameter `GET /graph/data?since=<unix_seconds>` for delta fetches.
+
 ## 2.24.049 — 2026-05-25
 - Fix **dark/light theme toggle**: Tailwind via CDN defaults to `darkMode: 'media'` (system preference), which silently ignores toggling the `dark` class on `<html>`. Now explicitly setting `darkMode: 'class'` before and after the CDN loads, so the topbar 🌙/☀ button actually flips the theme.
 

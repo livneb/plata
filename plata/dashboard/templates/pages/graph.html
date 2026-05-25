@@ -90,9 +90,54 @@
     let cy = null;
     let focusKey = null;
     let lastHovered = null;
-    // Cache of the unfocused view so "back" doesn't re-fetch / re-layout.
-    // positions: { [nodeId]: {x, y} } captured at the moment the user focused in.
     let unfocusedCache = { limit: null, data: null, positions: null, viewport: null };
+
+    // ---------- Persistent graph cache (localStorage) ----------
+    // Survives page reloads. On open we render from cache instantly, then
+    // fetch only events newer than `lastSyncEpoch` and merge in.
+    const PERSIST_KEY = (limit) => `plata-graph-cache:v1:${limit}`;
+    function loadPersisted(limit) {
+      try {
+        const raw = localStorage.getItem(PERSIST_KEY(limit));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
+        return parsed;
+      } catch { return null; }
+    }
+    function savePersisted(limit, data) {
+      try {
+        // Cap size: only keep `limit` most recent events + their entities + edges.
+        // Also strip positions; layout will run on first paint.
+        const events = data.nodes.filter(n => n.data && n.data.kind === 'event')
+          .sort((a, b) => (b.data.ts_epoch || 0) - (a.data.ts_epoch || 0))
+          .slice(0, limit);
+        const keep = new Set(events.map(e => e.data.id));
+        // Keep edges where source is a kept event, and the entity nodes those edges touch.
+        const edges = data.edges.filter(e => keep.has(e.data.source));
+        const entityIds = new Set(edges.map(e => e.data.target).filter(t => t && t.startsWith('entity:')));
+        const entities = data.nodes.filter(n => n.data && n.data.kind === 'entity' && entityIds.has(n.data.id));
+        const trimmed = {
+          nodes: [...events, ...entities],
+          edges,
+          lastSyncEpoch: data.server_ts_epoch || Math.floor(Date.now() / 1000),
+        };
+        localStorage.setItem(PERSIST_KEY(limit), JSON.stringify(trimmed));
+      } catch (e) {
+        // Quota etc — ignore; cache is best-effort.
+      }
+    }
+    function mergeDelta(base, delta) {
+      const nodeMap = new Map((base.nodes || []).map(n => [n.data.id, n]));
+      (delta.nodes || []).forEach(n => nodeMap.set(n.data.id, n));
+      const edgeMap = new Map((base.edges || []).map(e => [e.data.id, e]));
+      (delta.edges || []).forEach(e => edgeMap.set(e.data.id, e));
+      return {
+        nodes: [...nodeMap.values()],
+        edges: [...edgeMap.values()],
+        server_ts_epoch: delta.server_ts_epoch || base.lastSyncEpoch,
+      };
+    }
 
     function snapshotCurrent() {
       if (!cy) return null;
@@ -121,29 +166,54 @@
 
     async function loadGraph(opts) {
       opts = opts || {};
-      const canRestore = opts.fromCache && unfocusedCache.data && unfocusedCache.limit === limitSel.value && !focusKey;
+      const canRestoreInMem = opts.fromCache && unfocusedCache.data && unfocusedCache.limit === limitSel.value && !focusKey;
       clearFocusBtn.classList.toggle('hidden', !focusKey);
       focusHint.classList.toggle('hidden', !focusKey);
-      if (canRestore) {
-        // No fetch, no layout — reuse saved data + positions instantly.
+      if (canRestoreInMem) {
         render(unfocusedCache.data, { positions: unfocusedCache.positions });
         if (unfocusedCache.viewport) restoreViewport(unfocusedCache.viewport);
         return;
       }
+
+      // Try the persistent (localStorage) cache for the unfocused view —
+      // paint instantly, then fetch only the delta since lastSyncEpoch.
+      const limit = limitSel.value;
+      const persisted = !focusKey ? loadPersisted(limit) : null;
+      if (persisted) {
+        showLoading('Loading cached graph…');
+        render(persisted);
+        hideLoading();
+        // Background delta fetch.
+        (async () => {
+          try {
+            const params = new URLSearchParams({ limit, since: String(persisted.lastSyncEpoch || 0) });
+            const r = await fetch('/graph/data?' + params.toString());
+            const delta = await r.json();
+            if ((delta.nodes && delta.nodes.length) || (delta.edges && delta.edges.length)) {
+              const merged = mergeDelta(persisted, delta);
+              render(merged);
+              savePersisted(limit, merged);
+              unfocusedCache = { limit, data: merged, positions: snapshotCurrent(), viewport: captureViewport() };
+            } else {
+              // No new data — just refresh the lastSync timestamp.
+              persisted.lastSyncEpoch = delta.server_ts_epoch || persisted.lastSyncEpoch;
+              localStorage.setItem(PERSIST_KEY(limit), JSON.stringify(persisted));
+            }
+          } catch (e) { /* keep showing cached view */ }
+        })();
+        return;
+      }
+
       showLoading(focusKey ? 'Loading focused view…' : 'Loading graph…');
       try {
-        const params = new URLSearchParams({ limit: limitSel.value });
+        const params = new URLSearchParams({ limit });
         if (focusKey) params.set('focus', focusKey.replace(/^event:/, ''));
         const r = await fetch('/graph/data?' + params.toString());
         const data = await r.json();
         render(data);
         if (!focusKey) {
-          unfocusedCache = {
-            limit: limitSel.value,
-            data,
-            positions: snapshotCurrent(),
-            viewport: captureViewport(),
-          };
+          savePersisted(limit, data);
+          unfocusedCache = { limit, data, positions: snapshotCurrent(), viewport: captureViewport() };
         }
       } finally {
         hideLoading();
