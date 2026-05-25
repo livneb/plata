@@ -54,25 +54,49 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-async def embed(text: str, *, input_type: str = "document") -> list[float]:
-    """Return a 1024-d embedding for a single text. Cached by content hash.
+class EmbeddingRateLimited(Exception):
+    """Voyage returned a rate-limit error. Transient — caller should skip, not DLQ."""
 
-    `input_type` should be "document" for indexed content, "query" for searches.
-    """
+    user_message = (
+        "Voyage embeddings is rate-limiting us (free-tier: 3 RPM / 10K TPM). "
+        "Add a payment method at https://dashboard.voyageai.com/ to unlock standard limits. "
+        "The 200M free tokens still apply afterwards."
+    )
+
+
+async def embed(text: str, *, input_type: str = "document") -> list[float]:
+    """Return a 1024-d embedding for a single text. Cached by content hash."""
     key = f"{input_type}:{_hash(text)}"
     cached = _cache.get(key)
     if cached is not None:
         return cached
 
     client = _client()
-    result = await client.embed(
-        texts=[text],
-        model=EMBEDDING_MODEL,
-        input_type=input_type,
-    )
-    vector = result.embeddings[0]
-    _cache.put(key, vector)
-    return vector
+    # Internal retry with backoff on transient rate-limit; tenacity already retries inside
+    # voyageai for some cases, but free-tier 429s often slip through.
+    delays = [1, 3, 8]
+    for attempt, delay in enumerate([0, *delays]):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            result = await client.embed(
+                texts=[text],
+                model=EMBEDDING_MODEL,
+                input_type=input_type,
+            )
+            vector = result.embeddings[0]
+            _cache.put(key, vector)
+            return vector
+        except Exception as exc:  # noqa: BLE001
+            name = type(exc).__name__
+            msg = str(exc).lower()
+            is_rate = name == "RateLimitError" or "rate limit" in msg or "429" in msg
+            if is_rate and attempt < len(delays):
+                _log.warning("embed_rate_limited_retrying", attempt=attempt + 1, delay=delays[attempt])
+                continue
+            if is_rate:
+                raise EmbeddingRateLimited(EmbeddingRateLimited.user_message) from exc
+            raise
 
 
 async def embed_many(texts: list[str], *, input_type: str = "document") -> list[list[float]]:

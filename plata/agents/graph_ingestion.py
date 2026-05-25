@@ -10,7 +10,7 @@ from plata.agents.base import BaseAgent
 from plata.agents.scraper.sanitizer import wrap_untrusted
 from plata.core.bus import Streams, publish
 from plata.core.db import SignalArchive, session_scope
-from plata.core.embeddings import embed
+from plata.core.embeddings import EmbeddingRateLimited, embed
 from plata.core.graph import ensure_indexes, upsert_edge, upsert_entity, upsert_event
 from plata.core.llm import LLMClient
 from plata.core.schemas import (
@@ -105,7 +105,17 @@ class GraphIngestion(BaseAgent):
 
         event_ulid = new_ulid()
         summary = extracted["summary"]
-        embedding = await embed(summary, input_type="document")
+        try:
+            embedding = await embed(summary, input_type="document")
+        except EmbeddingRateLimited as exc:
+            # Don't DLQ; classify as a warning, skip this signal until quota recovers.
+            from plata.core.bus import get_redis
+            await get_redis().hincrby(f"agent_stats:{self.name}", "dropped_embed_rate_limit", 1)
+            await self.error_reporter.capture(
+                agent=self.name, severity="WARN", error_type="EmbeddingRateLimited",
+                message=str(exc), context={"signal_ulid": signal.ulid},
+            )
+            return
 
         # Upsert event node
         await upsert_event(

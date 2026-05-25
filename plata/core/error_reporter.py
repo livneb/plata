@@ -17,6 +17,29 @@ _log = get_logger("error_reporter")
 VALID_SEVERITIES = {"DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"}
 
 
+def humanize(error_type: str, message: str) -> tuple[str, str]:
+    """Map noisy upstream errors to short, actionable messages.
+
+    Returns (severity_override_or_empty, friendly_message).
+    """
+    m = (message or "").lower()
+    if error_type == "EmbeddingRateLimited" or "voyageai" in m and "rate" in m:
+        return ("WARN",
+                "Voyage embeddings rate-limited. Add a payment method at "
+                "dashboard.voyageai.com to lift the free-tier 3 RPM / 10K TPM cap.")
+    if error_type == "BadRequestError" and "minimum, minimum" in m or "bedrock" in m and "schema" in m:
+        return ("ERROR",
+                "LLM provider (Bedrock) rejected the JSON schema. The client already strips "
+                "minimum/maximum; if you see this again the schema has another unsupported keyword.")
+    if "openai.ratelimiterror" in (error_type or "").lower() or "rate limit" in m:
+        return ("WARN", "LLM provider rate-limited the request. Will retry on the next message.")
+    if "budgetexceedederror" in (error_type or "").lower():
+        return ("CRITICAL",
+                "LLM daily budget exceeded — system was halted. Raise the budget in Risk Config "
+                "(`llm.daily_budget_usd_total`) or wait until the daily counter rolls over.")
+    return ("", message)
+
+
 class ErrorReporter:
     """Singleton-style reporter accessible from any agent."""
 
@@ -40,6 +63,12 @@ class ErrorReporter:
         severity = severity.upper()
         if severity not in VALID_SEVERITIES:
             severity = "ERROR"
+
+        # Apply humanization to make upstream errors actionable in the dashboard.
+        override_severity, friendly = humanize(error_type, message)
+        if override_severity:
+            severity = override_severity
+        message = friendly
 
         container = os.environ.get("SERVICE_ENTRYPOINT", "unknown")
         context = context or {}
