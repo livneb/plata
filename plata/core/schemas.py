@@ -136,6 +136,21 @@ class AnalogousEvent(BaseModel):
     trade_outcome: dict[str, float] | None = None  # from Reviewer feedback
 
 
+class Milestone(BaseModel):
+    """One stop along the expected price trajectory.
+
+    Example: eta_minutes=10080 (1 week), expected_pct_move=+0.30, confidence=0.7
+    means "I expect ~+30% after one week with moderate confidence".
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    eta_minutes: int = Field(ge=1)
+    expected_pct_move: float  # signed; +0.30 = +30%; -0.05 = -5%
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str | None = None
+
+
 class TradeProposal(StreamMessage):
     triggering_event_ulid: str
     symbol: str
@@ -145,6 +160,7 @@ class TradeProposal(StreamMessage):
     conviction: float = Field(ge=0.0, le=1.0)
     reasoning: str
     similar_events: list[AnalogousEvent] = Field(default_factory=list)
+    milestones: list[Milestone] = Field(default_factory=list)
     suggested_notional_usd: Decimal | None = None
     suggested_sl_pct: float | None = None
     suggested_tp_pct: float | None = None

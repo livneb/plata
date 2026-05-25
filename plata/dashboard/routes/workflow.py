@@ -229,6 +229,35 @@ async def _active_cards() -> list[dict[str, Any]]:
     return cards
 
 
+async def _pending_proposal_cards() -> list[dict[str, Any]]:
+    """Pending HITL proposals shown as actionable cards (Approve / Reject)."""
+    try:
+        from plata.hitl.approval_store import list_pending
+    except Exception:  # noqa: BLE001
+        return []
+    pending = await list_pending()
+    out: list[dict[str, Any]] = []
+    for p in pending:
+        prop = p.get("proposal", {}) if isinstance(p, dict) else {}
+        ulid = p.get("proposal_ulid") or p.get("ulid") or "?"
+        out.append({
+            "lane": "ready",
+            "category": "hitl",
+            "agent": "risk_manager",
+            "title": f"{prop.get('symbol') or '?'} {(prop.get('side') or '').upper()} — approve?",
+            "subtitle": (p.get("reason") or "awaiting human approval")[:80],
+            "status": "waiting",
+            "ts": p.get("created_at"),
+            "ts_label": "created",
+            "extra": (prop.get("reasoning") or "")[:120],
+            "approval_ulid": ulid,
+            "symbol": prop.get("symbol"),
+            "side": prop.get("side"),
+            "conviction": prop.get("conviction"),
+        })
+    return out
+
+
 async def _ready_cards() -> list[dict[str, Any]]:
     """One card per consumer group with pending (unread) entries."""
     redis = get_redis()
@@ -409,7 +438,7 @@ async def _gather() -> dict[str, Any]:
         "paper_mode": settings.default_paper_trading_mode,
         "sleeping": sleeping_lane,
         "active": active,
-        "ready": await _ready_cards(),
+        "ready": (await _pending_proposal_cards()) + (await _ready_cards()),
         "doing": doing,
         "done": done,
         "as_of": datetime.now(timezone.utc).isoformat(),

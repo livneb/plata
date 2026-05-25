@@ -48,6 +48,47 @@
       <div class="text-[10px] uppercase text-gray-500 mb-1">Reasoning</div>
       <p class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ proposal.reasoning }}</p>
     </div>
+    {% if proposal.milestones %}
+    <div class="mb-3">
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Milestones — predicted trajectory</div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs text-left">
+          <thead class="text-[10px] uppercase text-gray-500">
+            <tr>
+              <th class="px-2 py-1">ETA</th>
+              <th class="px-2 py-1">Expected move</th>
+              <th class="px-2 py-1">Confidence</th>
+              <th class="px-2 py-1">Rationale</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in proposal.milestones %}
+            <tr class="border-t border-gray-100 dark:border-gray-700">
+              <td class="px-2 py-1 font-mono">
+                {% set h = (m.eta_minutes // 60) %}
+                {% set d = h // 24 %}
+                {% if d >= 1 %}{{ d }}d{% if (h % 24) %} {{ h % 24 }}h{% endif %}
+                {% elif h >= 1 %}{{ h }}h{% if (m.eta_minutes % 60) %} {{ m.eta_minutes % 60 }}m{% endif %}
+                {% else %}{{ m.eta_minutes }}m{% endif %}
+              </td>
+              <td class="px-2 py-1 font-mono {% if m.expected_pct_move > 0 %}text-green-500{% elif m.expected_pct_move < 0 %}text-red-500{% endif %}">
+                {{ '%+.2f' % (m.expected_pct_move * 100) }}%
+              </td>
+              <td class="px-2 py-1">
+                <div class="w-16 bg-gray-200 dark:bg-gray-700 rounded h-1.5">
+                  <div class="bg-blue-500 h-1.5 rounded" style="width: {{ (m.confidence * 100) | round }}%"></div>
+                </div>
+                <span class="text-[10px] text-gray-400">{{ '%.0f' % (m.confidence * 100) }}%</span>
+              </td>
+              <td class="px-2 py-1 text-gray-500">{{ m.rationale or '' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
     {% if proposal.similar_events %}
     <div>
       <div class="text-[10px] uppercase text-gray-500 mb-1">Analogous past events used ({{ proposal.similar_events | length }}){{ help_icon('analogs') }}</div>

@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.041 — 2026-05-25
+- Strategist now outputs **milestones** along the expected trajectory (e.g. `+30% in 2 weeks`, `+56% in 3 weeks`). New `Milestone` model + `milestones: list[Milestone]` on `TradeProposal`. JSON schema asks for 2-5 milestones with `eta_minutes`, signed `expected_pct_move`, `confidence`, `rationale`. Bedrock-incompatible keywords still stripped by the LLM client.
+- Trade detail page renders the milestones as a table — ETA, expected move (green/red), confidence bar, rationale.
+- Per-proposal LLM cost snapshot recorded in Redis (`proposal_cost:<ulid>`) for the trade-detail page (next commit consumes it).
+- Workflow Ready lane now surfaces **pending HITL proposals as actionable cards** with inline ✅ Approve / ❌ Reject buttons. Hits the same `/proposals/<ulid>/decide` endpoint Telegram uses, so both surfaces stay consistent.
+
 ## 2.24.040 — 2026-05-25
 - Workflow: **Done lane groups same-agent entries within 5 s** into a single card showing `Title (N)` and exposing all the merged entries in the detail modal.
 - Workflow: **click any card → details modal** (category, status, agent, lane, when, count, last touched, error, grouped entries, raw JSON).

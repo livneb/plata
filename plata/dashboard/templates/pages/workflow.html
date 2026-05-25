@@ -70,6 +70,24 @@
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
     document.addEventListener('click', async (ev) => {
+      // Approve / Reject HITL proposal from a Ready card
+      const approve = ev.target.closest('[data-proposal-approve]');
+      const reject  = ev.target.closest('[data-proposal-reject]');
+      if (approve || reject) {
+        ev.stopPropagation();
+        const action = approve ? 'approve' : 'reject';
+        const ulid = (approve || reject).getAttribute('data-proposal-' + action);
+        if (!await plataConfirm({
+          title: action === 'approve' ? 'Approve trade' : 'Reject trade',
+          message: 'Send ' + action.toUpperCase() + ' for proposal ' + ulid + '?',
+          confirmLabel: action === 'approve' ? 'Approve' : 'Reject',
+          danger: action === 'reject',
+        })) return;
+        const fd = new FormData(); fd.append('action', action);
+        const r = await fetch('/proposals/' + encodeURIComponent(ulid) + '/decide', { method: 'POST', body: fd });
+        plataToast(r.ok || r.redirected ? action + 'd.' : 'failed', r.ok ? 'success' : 'error');
+        return;
+      }
       // Dismiss (×) button on a card
       const dismiss = ev.target.closest('[data-kanban-dismiss]');
       if (dismiss) {
