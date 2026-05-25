@@ -127,6 +127,14 @@ async def seed(
         except Exception as exc:
             _log.exception("historian_batch_failed", batch=i)
             failed += 1
+            try:
+                from plata.core.error_reporter import get_error_reporter
+                await get_error_reporter().capture_exception(
+                    exc, agent="historian", severity="ERROR",
+                    context={"batch": i, "phase": "llm_batch"},
+                )
+            except Exception:  # noqa: BLE001
+                pass
             await redis.hset(status_key, mapping={
                 "failed_batches": failed,
                 "last_error": f"batch {i}: {type(exc).__name__}: {str(exc)[:160]}",

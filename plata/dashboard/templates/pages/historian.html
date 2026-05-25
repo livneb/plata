@@ -25,7 +25,7 @@
     <!-- Controls -->
     <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
       <h2 class="font-semibold text-sm mb-3">Run a new seed</h2>
-      <form method="post" action="/historian/start" class="space-y-3" data-persist="historian-seed">
+      <form id="seed-form" method="post" action="/historian/start" class="space-y-3" data-persist="historian-seed">
         <div>
           <label class="block text-xs font-medium mb-1">Total events to generate</label>
           <input name="total" type="number" min="10" max="2000" value="100"
@@ -67,10 +67,11 @@
           <input name="batch_size" type="number" min="1" max="25" value="10"
                  class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
         </div>
-        <button type="submit"
+        <button id="start-btn" type="submit"
                 class="w-full text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-lg text-sm px-4 py-2">
           ▶ Start seed
         </button>
+        <div id="seed-status" class="text-[11px] text-gray-500 hidden"></div>
         <p class="text-[10px] text-gray-500">
           Already-running seeds won't be re-started. Runs in the background; safe to navigate away.
         </p>
@@ -93,6 +94,44 @@
         const end = new Date(start.getTime() + days * 86400 * 1000);
         toEl.value = end.toISOString().slice(0, 10);
       });
+    });
+  })();
+
+  // Start-seed handler: submit via fetch so we can show a toast on failure
+  // (a native form POST would just navigate and swallow the error code).
+  (function () {
+    const form = document.getElementById('seed-form');
+    const btn = document.getElementById('start-btn');
+    const stat = document.getElementById('seed-status');
+    if (!form) return;
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      btn.disabled = true; btn.textContent = '⏳ Scheduling…';
+      stat.classList.remove('hidden'); stat.textContent = 'POST /historian/start …';
+      try {
+        const fd = new FormData(form);
+        const r = await fetch('/historian/start', {
+          method: 'POST', body: fd, headers: { 'Accept': 'application/json' },
+        });
+        if (r.status === 409) {
+          plataToast('A seed is already running. Reset status first.', 'error');
+          stat.textContent = 'already running';
+        } else if (r.ok) {
+          let body = {}; try { body = await r.json(); } catch {}
+          plataToast(body.ok ? 'Seed scheduled. Watching status…' : ('Failed: ' + (body.reason || 'unknown')),
+                     body.ok ? 'success' : 'error');
+          stat.textContent = body.ok ? 'scheduled — check status panel + Railway logs' : ('failed: ' + body.reason);
+          setTimeout(() => location.reload(), 1500);
+        } else {
+          plataToast('HTTP ' + r.status + ' — are you still logged in?', 'error');
+          stat.textContent = 'HTTP ' + r.status;
+        }
+      } catch (e) {
+        plataToast('Network error: ' + e.message, 'error');
+        stat.textContent = 'error: ' + e.message;
+      } finally {
+        btn.disabled = false; btn.textContent = '▶ Start seed';
+      }
     });
   })();
 
