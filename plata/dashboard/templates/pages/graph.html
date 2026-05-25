@@ -337,14 +337,17 @@
         maxZoom: 5.0,
         style: [
           {
-            // Events: emoji 📰 is the node face, summary sits below.
+            // Events: the 📰 icon IS the node. No background circle.
             selector: 'node[kind="event"]',
             style: {
-              'background-color': 'data(color)',
+              'background-color': 'transparent',
+              'background-opacity': 0,
               'background-image': 'data(iconUri)',
-              'background-fit': 'contain',
+              'background-fit': 'contain none',
               'background-clip': 'none',
-              'background-opacity': 0.5,
+              'background-image-opacity': 1,
+              'background-image-containment': 'over',
+              'bounds-expansion': 4,
               'label': 'data(shortLabel)',
               'shape': 'ellipse',
               'width': function(ele) { return 36 + Math.min(28, (degree[ele.id()] || 0) * 2); },
@@ -357,18 +360,22 @@
               'text-background-padding': 3,
               'text-background-shape': 'roundrectangle',
               'min-zoomed-font-size': 9,
-              'border-width': 1, 'border-color': '#1f2937',
+              // No border, no fill ring.
+              'border-width': 0,
+              'overlay-opacity': 0,
             }
           },
           {
-            // Entities: the icon (flag / 👤 / 🏢 …) IS the node; type-color is a halo border.
+            // Entities: pure icon (flag / 👤 / 🏢 …). No background circle, no halo border.
             selector: 'node[kind="entity"]',
             style: {
-              'background-color': '#ffffff',
-              'background-image': 'data(iconUri)',
-              'background-fit': 'contain',
-              'background-clip': 'none',
+              'background-color': 'transparent',
               'background-opacity': 0,
+              'background-image': 'data(iconUri)',
+              'background-fit': 'contain none',
+              'background-clip': 'none',
+              'background-image-opacity': 1,
+              'background-image-containment': 'over',
               'label': 'data(shortLabel)',
               'shape': 'ellipse',
               'width': function(ele) { return 32 + Math.min(24, (degree[ele.id()] || 0) * 2); },
@@ -380,7 +387,8 @@
               'text-background-padding': 3,
               'text-background-shape': 'roundrectangle',
               'min-zoomed-font-size': 9,
-              'border-width': 2, 'border-color': 'data(color)',
+              'border-width': 0,
+              'overlay-opacity': 0,
             }
           },
           {
@@ -435,6 +443,36 @@
         ev.target.connectedEdges().removeClass('hovered');
         if (lastHovered) { lastHovered.removeClass('hovered'); lastHovered = null; }
       });
+      // Keep nodes a stable VISUAL size when zoomed in. As zoom grows we shrink the
+      // node's logical width proportionally, so the on-screen icon stays small + readable
+      // instead of dominating the canvas.
+      function _baseSize(n) {
+        const k = n.data('kind');
+        const deg = degree[n.id()] || 0;
+        if (k === 'event')  return 36 + Math.min(28, deg * 2);
+        if (k === 'entity') return 32 + Math.min(24, deg * 2);
+        return 24;
+      }
+      function _adjustForZoom() {
+        if (!cy) return;
+        const z = cy.zoom();
+        // Compensate only when zoomed in past 1.0; never grow beyond base on zoom-out.
+        const shrink = z > 1.0 ? Math.min(3.5, Math.sqrt(z)) : 1.0;
+        cy.batch(() => {
+          cy.nodes().forEach(n => {
+            const base = _baseSize(n);
+            n.style('width', base / shrink);
+            n.style('height', base / shrink);
+            n.style('font-size', Math.max(7, 11 / Math.max(1.0, shrink * 0.85)));
+            n.style('text-margin-y', Math.max(2, 6 / shrink));
+          });
+        });
+      }
+      cy.on('zoom', _adjustForZoom);
+      // Run once after the initial layout settles.
+      cy.one('layoutstop', _adjustForZoom);
+      setTimeout(_adjustForZoom, 50);
+
       // Double-click anywhere: zoom in 1.6× centered on the click point.
       // Cytoscape fires `dbltap` for double click / two-finger-tap.
       cy.on('dbltap', (ev) => {

@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.057 — 2026-05-25
+- Graph: **circle/halo behind every node removed** — the emoji (flag, 👤, 🏢, 📰, etc.) is the node on its own, no background fill, no border ring.
+- Graph: **icon stays a stable on-screen size when you zoom in**. Logical node width is shrunk in proportion to `sqrt(zoom)` (capped at 3.5×), so icons don't dominate the canvas at high zoom; text label scales down with them.
+
 ## 2.24.056 — 2026-05-25
 - **Live updates via SSE.** Producers publish to Redis channel `dashboard:events` at four moments: new HITL proposal pending, proposal approved/rejected, trade opened, trade closed, system halted/resumed. The frontend opens `EventSource('/sse')` once per tab and reacts immediately: toasts for every event, `plata:pending_changed` / `plata:trades_changed` custom events for pages to refresh their tiles, instant recolor of the system-state badge.
 
