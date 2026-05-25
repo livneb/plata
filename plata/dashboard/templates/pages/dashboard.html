@@ -13,27 +13,33 @@
     </div>
   </div>
 
+  {% set open_href = '/trades/' + open_ulid if open_positions == 1 and open_ulid else '/trades/' %}
   <div class="grid gap-4 grid-cols-2 lg:grid-cols-5">
-    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    <a href="{{ open_href }}"
+       class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">Open positions</div>
       <div class="text-2xl font-semibold">{{ open_positions }}</div>
-    </div>
-    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    </a>
+    <a href="/trades/"
+       class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">PnL today</div>
       <div class="text-2xl font-semibold {% if daily_pnl > 0 %}text-green-500{% elif daily_pnl < 0 %}text-red-500{% endif %}">${{ '%.2f' % daily_pnl }}</div>
-    </div>
-    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    </a>
+    <a href="/proposals/"
+       class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">Pending HITL</div>
       <div class="text-2xl font-semibold">{{ pending_hitl }}</div>
-    </div>
-    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    </a>
+    <a href="/activity/"
+       class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">Signals today</div>
       <div class="text-2xl font-semibold">{{ signals_24h }}</div>
-    </div>
-    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+    </a>
+    <a href="/agents/"
+       class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">LLM spend today</div>
       <div class="text-2xl font-semibold">${{ '%.4f' % llm_spend_today }}</div>
-    </div>
+    </a>
   </div>
 
   <div class="grid gap-4 grid-cols-1 lg:grid-cols-3">

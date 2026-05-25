@@ -146,6 +146,11 @@ def create_app() -> FastAPI:
                 ctx["open_positions"] = (await session.execute(
                     select(func.count()).select_from(TradeLedger).where(TradeLedger.exit_price.is_(None))
                 )).scalar() or 0
+                ctx["open_ulid"] = None
+                if ctx["open_positions"] == 1:
+                    ctx["open_ulid"] = (await session.execute(
+                        select(TradeLedger.trade_ulid).where(TradeLedger.exit_price.is_(None)).limit(1)
+                    )).scalar_one_or_none()
                 today_utc = datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc)
                 ctx["daily_pnl"] = float((await session.execute(
                     select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))

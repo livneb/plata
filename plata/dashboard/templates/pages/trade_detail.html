@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Trade {{ trade.trade_ulid if trade else '?' }} · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Trade decision chain</h1>
+    <a href="/trades/" class="text-sm text-blue-500 hover:underline">← All trades</a>
+  </div>
+
+  {% if not trade %}
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 text-center text-gray-400">
+    Trade not found.
+  </div>
+  {% else %}
+  <!-- Trade summary -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold">{{ trade.symbol }} {{ trade.side|upper }} · {{ trade.qty }} @ {{ trade.entry_price }}</h2>
+      <span class="text-[10px] uppercase px-2 py-0.5 rounded
+        {% if trade.mode == 'paper' %}bg-yellow-100 text-yellow-800{% else %}bg-green-100 text-green-800{% endif %}">
+        {{ trade.mode }}
+      </span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+      <div><div class="text-[10px] uppercase text-gray-500">ULID</div><div class="font-mono break-all">{{ trade.trade_ulid }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Proposal</div><div class="font-mono break-all">{{ trade.proposal_id or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Venue</div><div>{{ trade.venue }} ({{ trade.instrument_type }})</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Opened</div><div><time data-utc="{{ trade.opened_at.isoformat() }}">{{ trade.opened_at.strftime('%Y-%m-%d %H:%M') }}</time></div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">SL / TP</div><div>{{ trade.sl_price or '—' }} / {{ trade.tp_price or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Exit</div><div>{{ trade.exit_price or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Net PnL</div><div>{{ trade.net_pnl or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Closed</div><div>{{ trade.closed_at.strftime('%Y-%m-%d %H:%M') if trade.closed_at else '—' }}</div></div>
+    </div>
+  </section>
+
+  <!-- Strategist proposal -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="font-semibold mb-2">Strategist proposal</h2>
+    {% if proposal %}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+      <div><div class="text-[10px] uppercase text-gray-500">Conviction</div><div class="text-lg font-bold">{{ '%.2f' % (proposal.conviction or 0) }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Suggested SL %</div><div>{{ proposal.suggested_sl_pct or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Suggested TP %</div><div>{{ proposal.suggested_tp_pct or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Suggested notional</div><div>{{ proposal.suggested_notional_usd or '—' }} USD</div></div>
+    </div>
+    <div class="mb-3">
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Reasoning</div>
+      <p class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ proposal.reasoning }}</p>
+    </div>
+    {% if proposal.similar_events %}
+    <div>
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Analogous past events used ({{ proposal.similar_events | length }})</div>
+      <ul class="space-y-1 text-xs">
+        {% for a in proposal.similar_events %}
+        <li class="flex gap-2">
+          <span class="text-gray-400 font-mono whitespace-nowrap">sim {{ '%.2f' % (a.similarity or 0) }}</span>
+          <span class="flex-1">{{ a.summary }}</span>
+          {% if a.price_impact %}<span class="text-gray-400 text-[10px] font-mono">{{ a.price_impact | tojson }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="text-sm text-gray-400 italic">Proposal payload not in the Redis stream anymore (likely trimmed). Trade still references proposal <span class="font-mono">{{ trade.proposal_id or '—' }}</span>.</p>
+    {% endif %}
+  </section>
+
+  <!-- Triggering event -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="font-semibold mb-2">Triggering event</h2>
+    {% if event_doc %}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+      <div><div class="text-[10px] uppercase text-gray-500">Source</div><div>{{ event_doc.source or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Category</div><div>{{ event_doc.category or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">When</div><div>{{ event_doc.ts or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Sentiment magnitude</div><div>{{ event_doc.sentiment_magnitude or '—' }}</div></div>
+    </div>
+    <div class="mb-3">
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Summary</div>
+      <p class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ event_doc.summary }}</p>
+    </div>
+    {% if event_doc.entity_refs %}
+    <div>
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Entities</div>
+      <div class="flex flex-wrap gap-1">
+        {% for e in event_doc.entity_refs %}
+        <span class="bg-indigo-100 text-indigo-800 text-[10px] px-2 py-0.5 rounded dark:bg-indigo-900 dark:text-indigo-200">{{ e.type }}:{{ e.name }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="text-sm text-gray-400 italic">No triggering event linked.</p>
+    {% endif %}
+  </section>
+
+  {% if audits %}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="font-semibold mb-2">Risk / HITL decisions</h2>
+    <ul class="text-sm space-y-2">
+      {% for a in audits %}
+      <li class="flex gap-3">
+        <span class="text-gray-400 whitespace-nowrap"><time data-utc="{{ a.ts.isoformat() }}">{{ a.ts.strftime('%H:%M:%S') }}</time></span>
+        <span class="font-mono text-xs">{{ a.actor }}</span>
+        <span class="font-semibold">{{ a.action }}</span>
+        <span class="text-gray-500">{{ (a.payload or {}).get('reason') or '' }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

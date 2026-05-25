@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.031 — 2026-05-25
+- Trade ledger rows clickable → new **decision-chain** page `/trades/<ulid>` showing the strategist proposal (conviction, reasoning, analogs), the triggering event, and any HITL/risk audit log entries.
+- Dashboard tiles are now smart links: **Open positions** → single trade if exactly one, else `/trades/`; PnL today → `/trades/`; Pending HITL → `/proposals/`; Signals today → `/activity/`; LLM spend today → `/agents/`.
+- Removed the static Mermaid architecture diagram from `/activity/`. Architecture lives in `docs/ARCHITECTURE.md` (versioned, kept in sync per commit).
+- New `docs/SPEC.md` — canonical project spec, env-var catalog, contracts, known sharp edges, roadmap. Will be kept up-to-date with each meaningful change.
+
 ## 2.24.030 — 2026-05-25
 - Historian seed now writes a `last_progress_at` heartbeat at every batch + every event. If no progress for >3 minutes, the dashboard auto-flags the run as **STALE** (instead of misleading "running"). A stale run is also surfaced as an error card on the Workflow Kanban.
 - New **Reset status** button on the Historian page (and a `POST /historian/reset` endpoint) to clear a stale/failed/done run so a fresh seed can start. The /start endpoint now ignores a stale "running" flag.
