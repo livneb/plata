@@ -15,12 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-RUN uv pip install --system --no-cache .
-
+COPY pyproject.toml README.md ./
 COPY plata ./plata
 COPY alembic ./alembic
 COPY alembic.ini ./
+RUN uv pip install --system --no-cache .
 
 # ----------- runtime image -----------
 FROM python:3.12-slim AS runtime
