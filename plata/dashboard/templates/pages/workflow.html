@@ -22,4 +22,44 @@
      hx-swap="innerHTML">
   {% include "pages/_workflow_fragment.html" %}
 </div>
+
+<script>
+  // Collapsible lanes — state persists across reloads + htmx swaps.
+  (function () {
+    const STORAGE = 'plata-workflow-collapsed';
+    function getCollapsed() {
+      try { return new Set(JSON.parse(localStorage.getItem(STORAGE) || '[]')); }
+      catch { return new Set(); }
+    }
+    function save(set) { localStorage.setItem(STORAGE, JSON.stringify([...set])); }
+
+    function applyState(root) {
+      const collapsed = getCollapsed();
+      (root || document).querySelectorAll('section.lane').forEach(lane => {
+        const key = lane.getAttribute('data-lane');
+        const body = lane.querySelector('.lane-body');
+        const btn = lane.querySelector('.lane-toggle');
+        const isCollapsed = collapsed.has(key);
+        if (body) body.classList.toggle('hidden', isCollapsed);
+        if (btn) btn.textContent = isCollapsed ? '⌄' : '⌃';
+        lane.classList.toggle('xl:col-span-1', !isCollapsed);
+        // Collapsed lanes shrink to fit content but stay aligned at top.
+      });
+    }
+
+    document.addEventListener('click', (ev) => {
+      const header = ev.target.closest('.lane-header');
+      if (!header) return;
+      const lane = header.closest('section.lane');
+      const key = lane.getAttribute('data-lane');
+      const collapsed = getCollapsed();
+      if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+      save(collapsed);
+      applyState();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => applyState());
+    document.body.addEventListener('htmx:afterSwap', () => applyState());
+  })();
+</script>
 {% endblock %}

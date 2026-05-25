@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.033 — 2026-05-25
+- Workflow lanes are **collapsible**. Click the header (or the ⌃ icon) to collapse a lane down to just title + count. State persists in localStorage and survives the 3-second htmx refresh.
+
 ## 2.24.032 — 2026-05-25
 - Done lane no longer shows orchestrator heartbeats / telegram-bot commands / scraper polls. Those are continuous watcher activity — they belong in the watcher's own card (Active lane), not in Done.
 

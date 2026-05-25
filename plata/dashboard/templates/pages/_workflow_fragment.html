@@ -26,14 +26,17 @@
   'halted':    'bg-red-100 text-red-700',
 } %}
 
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 items-start">
   {% for key, label, cards, _ in lanes %}
-  <section class="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-3 min-h-[200px]">
-    <div class="flex items-center justify-between mb-3">
+  <section data-lane="{{ key }}" class="lane bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-3 min-h-[80px]">
+    <div class="flex items-center justify-between mb-3 cursor-pointer select-none lane-header">
       <h2 class="font-semibold text-sm">{{ label }}</h2>
-      <span class="text-[10px] text-gray-500 bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded">{{ cards | length }}</span>
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] text-gray-500 bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded">{{ cards | length }}</span>
+        <button type="button" class="lane-toggle text-gray-400 hover:text-gray-200 text-xs" title="Collapse / expand">⌃</button>
+      </div>
     </div>
-    <div class="space-y-2">
+    <div class="lane-body space-y-2">
       {% for c in cards %}
       <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 shadow-sm">
         <div class="flex items-center justify-between mb-1">
