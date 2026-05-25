@@ -22,9 +22,10 @@
   <script src="https://unpkg.com/htmx.org@2.0.2"></script>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-  <!-- Version banner -->
+  <!-- Version banner (pushes layout down when shown) -->
   <div id="version-banner" tabindex="-1"
-       class="hidden fixed top-0 inset-x-0 z-[60] flex items-center justify-between p-3 bg-blue-600 text-white">
+       class="hidden fixed top-0 inset-x-0 z-[60] flex items-center justify-between p-3 bg-blue-600 text-white"
+       style="height:48px">
     <span class="text-sm">A new version of Plata is available.</span>
     <button onclick="location.reload()" class="text-sm font-medium underline">Reload</button>
   </div>
@@ -101,7 +102,7 @@
   </aside>
 
   <!-- Main content -->
-  <div class="p-4 sm:ml-64 pt-20">
+  <div id="main-content" class="p-4 sm:ml-64 pt-20">
     {% block content %}{% endblock %}
   </div>
 
@@ -279,12 +280,23 @@
       const pageVersion = document.querySelector('meta[name="app-version"]')?.content;
       if (!pageVersion) return;
       const banner = document.getElementById('version-banner');
+      const nav = document.querySelector('nav');
+      const aside = document.getElementById('sidebar');
+      const main = document.getElementById('main-content');
+      function showBanner() {
+        if (!banner.classList.contains('hidden')) return;
+        banner.classList.remove('hidden');
+        const h = banner.offsetHeight; // 48px
+        nav.style.top = h + 'px';
+        if (aside) aside.style.top = h + 'px';
+        if (main) main.style.paddingTop = (80 + h) + 'px'; // existing pt-20 (80px) + banner
+      }
       async function check() {
         try {
           const r = await fetch('/api/version', { cache: 'no-store' });
           if (!r.ok) return;
           const { version } = await r.json();
-          if (version && version !== pageVersion) banner.classList.remove('hidden');
+          if (version && version !== pageVersion) showBanner();
         } catch {}
       }
       setInterval(check, 30000);
