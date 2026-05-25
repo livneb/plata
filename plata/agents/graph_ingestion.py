@@ -162,7 +162,8 @@ class GraphIngestion(BaseAgent):
             source=SignalSource(signal.source),
             summary=summary,
             category=EventCategory(extracted["category"]),
-            sentiment_magnitude=float(extracted["sentiment_magnitude"]),
+            # LLM occasionally returns a signed score here; coerce to a [0,1] magnitude.
+            sentiment_magnitude=max(0.0, min(1.0, abs(float(extracted["sentiment_magnitude"])))),
             entities=entity_refs,
         )
         await publish(Streams.ENRICHED_EVENTS, enriched)

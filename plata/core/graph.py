@@ -222,32 +222,44 @@ async def vector_search_events(
     *,
     k: int = 20,
     filter_expr: str | None = None,
+    exclude_ulids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """KNN search over event embeddings. Returns list of {ulid, score, summary, ...}."""
+    """KNN search over event embeddings. Returns list of {ulid, score, summary, ...}.
+
+    `filter_expr` is only safe for fields actually indexed (source/category/ts_epoch/summary).
+    To exclude the current event by ulid, pass `exclude_ulids={current_ulid}` — applied client-side.
+    """
     redis = get_redis()
     base = filter_expr or "*"
-    query_str = f"({base})=>[KNN {k} @embedding $vec AS score]"
+    # Fetch a few extra so we can drop excluded ulids and still return k results.
+    fetch_k = k + (len(exclude_ulids) if exclude_ulids else 0)
+    query_str = f"({base})=>[KNN {fetch_k} @embedding $vec AS score]"
     q = (
         Query(query_str)
         .sort_by("score")
         .return_fields("ulid", "summary", "source", "category", "ts", "ts_epoch", "score")
         .dialect(2)
-        .paging(0, k)
+        .paging(0, fetch_k)
     )
     import struct
     vec_bytes = struct.pack(f"{EMBEDDING_DIM}f", *embedding)
     result = await redis.ft(EVENT_INDEX).search(q, query_params={"vec": vec_bytes})
     out: list[dict[str, Any]] = []
     for doc in result.docs:
+        ulid = getattr(doc, "ulid", None)
+        if exclude_ulids and ulid in exclude_ulids:
+            continue
         out.append({
             "key": doc.id,
-            "ulid": getattr(doc, "ulid", None),
+            "ulid": ulid,
             "summary": getattr(doc, "summary", None),
             "source": getattr(doc, "source", None),
             "category": getattr(doc, "category", None),
             "ts": getattr(doc, "ts", None),
             "score": float(getattr(doc, "score", 0.0)),
         })
+        if len(out) >= k:
+            break
     return out
 
 

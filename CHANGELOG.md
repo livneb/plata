@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.015 — 2026-05-25
+- Fix `graph_ingestion ValidationError` when LLM returns a signed sentiment value: `sentiment_magnitude` is now clamped to [0,1] (absolute value).
+- Fix `strategist ResponseError: Unknown field at offset 2 near ulid`: removed the unindexed RediSearch ulid filter; self-event exclusion is now done client-side via `exclude_ulids={...}`.
+- Errors copy button now reads from a hidden `<script type="text/plain">` blob per row (preserves newlines + JSON exactly; nothing truncated regardless of size or quotes).
+
 ## 2.24.014 — 2026-05-25
 - Agents page now shows today's LLM spend per agent and the daily total in the header. Data comes from existing Redis counters (`cost:daily:<date>:agent:<name>`).
 

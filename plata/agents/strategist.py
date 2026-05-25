@@ -77,8 +77,8 @@ class Strategist(BaseAgent):
 
         analogs_raw = await vector_search_events(
             embedding,
-            k=ANALOG_K + 1,  # the event itself may be returned
-            filter_expr=f"-@ulid:{{{event.ulid}}}",
+            k=ANALOG_K,
+            exclude_ulids={event.ulid},
         )
 
         analogs: list[AnalogousEvent] = []
