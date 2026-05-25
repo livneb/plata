@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     ] = 8080
     dashboard_admin_email: str | None = None
     dashboard_admin_password: SecretStr | None = None
+    vapid_public_key: str | None = None
+    vapid_private_key: SecretStr | None = None
+    vapid_subject: str = "mailto:admin@example.com"
     app_version: Annotated[str, Field(validation_alias=AliasChoices("APP_VERSION"))] = "dev"
 
     def model_post_init(self, __context) -> None:  # noqa: D401

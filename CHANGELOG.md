@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.043 — 2026-05-25
+- **Web Push** (VAPID): service worker at `/static/sw.js`, subscription store in Redis (`push:sub:<email>`), helper `plata.dashboard.push.send_to_user`, and a 🔔 button in the topbar that asks notification permission + registers + sends a test push.
+- **PWA manifest** at `/static/manifest.json` + SVG icon — Chrome desktop shows an install prompt, mobile gets "Add to Home Screen".
+- **Server-Sent Events** at `/sse` — subscribes to the Redis `dashboard:events` channel and streams updates to any browser tab. Frontend wiring of specific events lands later; the pipe is ready.
+- New deps: `pywebpush`, `py-vapid` (deploy will rebuild Docker layer).
+- New script: `scripts/generate_vapid.py` — generates the VAPID key pair and prints a ready-to-paste Railway CLI command. Run it on your Mac (see usage below).
+
 ## 2.24.042 — 2026-05-25
 - Global **Esc closes any open modal** — confirm, settings tabs, card-detail, changelog carousel, risk-config create/edit, graph focus, anything matching the standard `fixed inset-0 bg-black/50` overlay pattern. Equivalent to clicking ✕ / Cancel.
 

@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Plata{% endblock %}</title>
   <meta name="app-version" content="{{ app_version_global() }}" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#1e3a8a" />
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
   <!-- Theme bootstrap (run before paint to avoid flash) -->
   <script>
     (function () {
@@ -57,6 +60,8 @@
           <svg id="theme-icon-dark" class="w-5 h-5 dark:hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/></svg>
         </button>
         {% if current_user %}
+        <button id="push-toggle" type="button" title="Enable push notifications"
+                class="text-xs text-gray-500 hover:text-gray-300 hidden sm:inline">🔔</button>
         <span class="text-xs text-gray-400 hidden sm:inline">{{ current_user }}</span>
         <form method="post" action="/logout" class="inline">
           <button type="submit" class="text-xs text-gray-500 hover:text-gray-300">Log out</button>
@@ -251,6 +256,47 @@
 
     // ---------- Kill / Resume ----------
     // Kill switch moved to /settings/?tab=controls.
+
+    // ---------- Service worker + Web Push ----------
+    (function () {
+      if (!('serviceWorker' in navigator)) return;
+      navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+
+      function urlB64ToUint8(b64) {
+        const pad = '='.repeat((4 - b64.length % 4) % 4);
+        const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = atob(s);
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+      }
+
+      async function enablePush() {
+        if (!('PushManager' in window)) { plataToast('Push not supported in this browser.', 'error'); return; }
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { plataToast('Notifications permission denied.', 'error'); return; }
+        const reg = await navigator.serviceWorker.ready;
+        const keyResp = await fetch('/api/push/vapid_public_key');
+        const { key } = await keyResp.json();
+        if (!key) { plataToast('Server VAPID key not configured. See docs/SPEC.md.', 'error'); return; }
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlB64ToUint8(key),
+        });
+        const r = await fetch('/api/push/subscribe', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub }),
+        });
+        if (r.ok) {
+          plataToast('Push notifications enabled. Sending a test…', 'success');
+          await fetch('/api/push/test', { method: 'POST' });
+        } else {
+          plataToast('Subscription save failed: ' + r.status, 'error');
+        }
+      }
+      const btn = document.getElementById('push-toggle');
+      if (btn) btn.addEventListener('click', enablePush);
+    })();
 
     // ---------- Esc closes any visible modal ----------
     // Every modal in this app uses `fixed inset-0 z-[...] bg-black/50` and the
