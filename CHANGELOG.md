@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.060 — 2026-05-25
+- **Future-proof entity dedup**: new `plata/core/entity_aliases.py` maps country aliases (US/USA/UNITED_STATES/America → `USA`, IL/ISR/Israel → `ISR`, IR/IRN/Iran → `IRN`, +30 more) to a canonical ISO-3 id. `graph_ingestion` now canonicalises every entity before upserting — duplicate nodes stop being created.
+- **One-shot history merge**: new `POST /graph/normalize_aliases` endpoint. Default `?dry_run=true` previews which alias nodes would be merged into their canonical sibling; `?dry_run=false` actually does it (unions aliases, averages sentiment_ewma, rewrites every edge that points to the alias, deletes the alias node). Safe to re-run.
+- Graph events selector now supports **20 / 40 / 80 / 150 / 300 / 500 / 1000**. Backend `/graph/data?limit=…` upper bound raised to 2000.
+
 ## 2.24.059 — 2026-05-25
 - **Graph is now actually readable.** Three new controls in the top bar + a row of filter chips:
   - **Layout** selector: Constellation (force-directed, default), **Hub & spoke** (concentric — hubs in center, leaves on the rim), **Tree** (breadthfirst), Grid, Circle.

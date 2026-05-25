@@ -49,7 +49,7 @@ async def index(request: Request):
 
 @router.get("/data")
 async def graph_data(
-    limit: int = Query(40, ge=1, le=200),
+    limit: int = Query(40, ge=1, le=2000),
     focus: str | None = None,
     since: int | None = Query(None, description="Only return events with ts_epoch >= since (unix s)."),
 ) -> JSONResponse:
@@ -182,3 +182,94 @@ async def node_detail(key: str) -> JSONResponse:
     if doc and isinstance(doc, dict):
         doc.pop("embedding", None)
     return JSONResponse(doc or {})
+
+
+@router.post("/normalize_aliases")
+async def normalize_aliases(dry_run: bool = True) -> JSONResponse:
+    """Merge duplicate entity nodes that are known aliases of each other.
+
+    Walks every `entity:country:<id>` key, computes the canonical id, and if the
+    canonical differs:
+      - merges sentiment_ewma (EWMA-weighted average toward canonical),
+      - unions the aliases list,
+      - rewrites every edge that points at the alias to point at canonical instead,
+      - deletes the alias node.
+
+    Call with `?dry_run=false` to actually apply. Default is a preview.
+    """
+    from plata.core.entity_aliases import canonicalize_entity
+    redis = get_redis()
+
+    merges: list[dict] = []
+    async for key in redis.scan_iter(match="entity:*", count=200):
+        parts = key.split(":", 2)
+        if len(parts) < 3:
+            continue
+        _, type_, id_ = parts
+        doc = await redis.json().get(key)
+        if not isinstance(doc, dict):
+            continue
+        canon_id, canon_name = canonicalize_entity(type_, id_, doc.get("name") or id_)
+        if canon_id == id_:
+            continue
+        canon_key = f"entity:{type_}:{canon_id}"
+        merges.append({
+            "from": key,
+            "to": canon_key,
+            "alias_id": id_,
+            "canonical_id": canon_id,
+        })
+
+    if dry_run or not merges:
+        return JSONResponse({"dry_run": True, "would_merge": merges, "count": len(merges)})
+
+    # Apply
+    applied = 0
+    for m in merges:
+        src_key = m["from"]
+        dst_key = m["to"]
+        src_doc = await redis.json().get(src_key)
+        dst_doc = await redis.json().get(dst_key) or {}
+        if not isinstance(src_doc, dict):
+            continue
+
+        # 1. Merge aliases + sentiment_ewma (mean of both, weighted equally for simplicity).
+        merged_aliases = list({*(dst_doc.get("aliases") or []), *(src_doc.get("aliases") or []),
+                               src_doc.get("name") or "", src_doc.get("id") or ""})
+        merged_aliases = [a for a in merged_aliases if a]
+        s_src = float(src_doc.get("sentiment_ewma") or 0)
+        s_dst = float(dst_doc.get("sentiment_ewma") or 0)
+        merged = {
+            **(dst_doc or src_doc),
+            "id": m["canonical_id"],
+            "name": m["canonical_id"],
+            "type": src_doc.get("type") or dst_doc.get("type"),
+            "aliases": merged_aliases,
+            "sentiment_ewma": (s_src + s_dst) / 2 if (dst_doc and src_doc) else (s_src or s_dst),
+            "embedding": dst_doc.get("embedding") or src_doc.get("embedding"),
+        }
+        await redis.json().set(dst_key, "$", merged)
+
+        # 2. Rewrite every edge that references the alias.
+        async for ek in redis.scan_iter(match="edge:*", count=500):
+            edoc = await redis.json().get(ek)
+            if not isinstance(edoc, dict):
+                continue
+            changed = False
+            if edoc.get("dst") == src_key:
+                edoc["dst"] = dst_key; changed = True
+            if edoc.get("src") == src_key:
+                edoc["src"] = dst_key; changed = True
+            if not changed:
+                continue
+            # Move the edge to the new key path (edge:<src>:<rel>:<dst>) so the scan pattern stays consistent.
+            new_ek = f"edge:{edoc['src']}:{edoc.get('rel') or 'mentions'}:{edoc['dst']}"
+            await redis.json().set(new_ek, "$", edoc)
+            if new_ek != ek:
+                await redis.delete(ek)
+
+        # 3. Drop the alias node.
+        await redis.delete(src_key)
+        applied += 1
+
+    return JSONResponse({"dry_run": False, "merged": merges, "count": applied})

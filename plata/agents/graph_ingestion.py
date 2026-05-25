@@ -129,14 +129,17 @@ class GraphIngestion(BaseAgent):
             extra={"source_signal_ulid": signal.ulid},
         )
 
-        # Upsert entities + edges
+        # Upsert entities + edges. Canonicalize ids first so US / USA / UNITED_STATES
+        # all hit the same node instead of creating duplicates.
+        from plata.core.entity_aliases import canonicalize_entity
         for ref in entity_refs:
-            ent_text = f"{ref.type}:{ref.name}"
+            canon_id, canon_name = canonicalize_entity(str(ref.type), ref.id, ref.name)
+            ent_text = f"{ref.type}:{canon_name}"
             ent_emb = await embed(ent_text, input_type="document")
             ent_key = await upsert_entity(
                 type_=str(ref.type),
-                id_=ref.id,
-                name=ref.name,
+                id_=canon_id,
+                name=canon_name,
                 embedding=ent_emb,
                 sentiment_delta=ref.sentiment,
             )
