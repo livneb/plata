@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Errors – Plata{% endblock %}
+{% block title %}Errors · Plata{% endblock %}
 {% block content %}
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-bold">Error Log</h1>
@@ -18,19 +18,41 @@
   <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
     <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
       <tr>
-        <th class="px-6 py-3">When</th>
-        <th class="px-6 py-3">Severity</th>
-        <th class="px-6 py-3">Agent</th>
-        <th class="px-6 py-3">Type</th>
-        <th class="px-6 py-3">Message</th>
-        <th class="px-6 py-3">Context</th>
+        <th class="px-3 py-3 w-8"></th>
+        <th class="px-3 py-3">When</th>
+        <th class="px-3 py-3">Severity</th>
+        <th class="px-3 py-3">Agent</th>
+        <th class="px-3 py-3">Type</th>
+        <th class="px-3 py-3">Message</th>
+        <th class="px-3 py-3">Context</th>
       </tr>
     </thead>
     <tbody>
       {% for e in errors %}
-      <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700">
-        <td class="px-6 py-3 whitespace-nowrap">{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-        <td class="px-6 py-3">
+      {% set blob -%}
+{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') }} [{{ e.severity }}] {{ e.agent }} · {{ e.error_type }}
+{{ e.message }}
+
+Context:
+{{ e.context | tojson(indent=2) }}
+{% if e.traceback %}
+Traceback:
+{{ e.traceback }}
+{% endif %}
+      {%- endset %}
+      <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 align-top">
+        <td class="px-2 py-3">
+          <button type="button" class="copy-btn p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                  title="Copy error to clipboard"
+                  data-copy-text="{{ blob | e }}">
+            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+        </td>
+        <td class="px-3 py-3 whitespace-nowrap">{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td class="px-3 py-3">
           <span class="px-2 py-0.5 rounded text-xs
             {% if e.severity == 'CRITICAL' %}bg-red-200 text-red-900
             {% elif e.severity == 'ERROR' %}bg-red-100 text-red-700
@@ -39,10 +61,10 @@
             {{ e.severity }}
           </span>
         </td>
-        <td class="px-6 py-3 font-mono text-xs">{{ e.agent }}</td>
-        <td class="px-6 py-3">{{ e.error_type }}</td>
-        <td class="px-6 py-3">{{ e.message }}</td>
-        <td class="px-6 py-3">
+        <td class="px-3 py-3 font-mono text-xs">{{ e.agent }}</td>
+        <td class="px-3 py-3">{{ e.error_type }}</td>
+        <td class="px-3 py-3">{{ e.message }}</td>
+        <td class="px-3 py-3">
           <details>
             <summary class="cursor-pointer text-xs">view</summary>
             <pre class="text-xs whitespace-pre-wrap">{{ e.context | tojson(indent=2) }}</pre>
@@ -51,9 +73,27 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="px-6 py-12 text-center text-gray-400">No errors logged.</td></tr>
+      <tr><td colspan="7" class="px-6 py-12 text-center text-gray-400">No errors logged.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy-text') || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        plataToast('Error copied to clipboard', 'success');
+      } catch {
+        // Fallback: open a textarea and copy
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta);
+        ta.select(); document.execCommand('copy'); ta.remove();
+        plataToast('Error copied to clipboard', 'success');
+      }
+    });
+  });
+</script>
 {% endblock %}

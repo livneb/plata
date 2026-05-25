@@ -65,6 +65,24 @@ def _client() -> AsyncOpenAI:
     )
 
 
+_BEDROCK_INCOMPATIBLE_KEYS = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+                              "multipleOf", "minLength", "maxLength", "pattern",
+                              "minItems", "maxItems", "uniqueItems"}
+
+
+def _sanitize_schema(node):
+    """Strip JSON-schema keywords that Bedrock-backed structured output rejects."""
+    if isinstance(node, dict):
+        return {
+            k: _sanitize_schema(v)
+            for k, v in node.items()
+            if k not in _BEDROCK_INCOMPATIBLE_KEYS
+        }
+    if isinstance(node, list):
+        return [_sanitize_schema(x) for x in node]
+    return node
+
+
 def _today_key() -> str:
     return f"cost:daily:{date.today().isoformat()}"
 
@@ -212,7 +230,7 @@ class LLMClient:
             messages=messages,
             response_format={
                 "type": "json_schema",
-                "json_schema": {"name": schema_name, "schema": schema, "strict": True},
+                "json_schema": {"name": schema_name, "schema": _sanitize_schema(schema), "strict": True},
             },
             temperature=temperature,
             max_tokens=max_tokens,

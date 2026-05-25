@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.007 — 2026-05-25
+- Errors table: per-row copy-to-clipboard button (timestamp, agent, severity, type, message, context, traceback).
+- LLM client now strips JSON-schema keywords Bedrock-backed providers reject (`minimum`, `maximum`, `pattern`, etc.). Fixes `graph_ingestion` failing with `output_config.format.schema: For 'number' type, properties maximum, minimum are not supported`.
+
 ## 2.24.006 — 2026-05-25
 - Every agent now tracks `processed_total`, `errors_total`, and reason-specific `dropped_*` counters in Redis (`agent_stats:<name>`).
 - Every agent appends each handled message (or error) to a 50-entry activity tail (`agent_activity:<name>`).
