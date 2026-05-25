@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.059 — 2026-05-25
+- **Graph is now actually readable.** Three new controls in the top bar + a row of filter chips:
+  - **Layout** selector: Constellation (force-directed, default), **Hub & spoke** (concentric — hubs in center, leaves on the rim), **Tree** (breadthfirst), Grid, Circle.
+  - **Min connections** slider (default 2) — hides one-shot events that don't share entities with anything else, the biggest source of noise.
+  - **Type chips**: toggle Events / Countries / People / Companies / Orgs / Assets / Tickers visibility.
+  - **Category chips**: toggle crypto / macro / regulatory / company / geopolitics / tech / other.
+- Changing any control re-renders from the in-memory cache (no network fetch), then re-saves to localStorage.
+
 ## 2.24.058 — 2026-05-25
 - `trade_sampler` now caches the latest price **per symbol per tick** — N trades sharing a symbol = ONE Bybit fetch, not N.
 - "Sampled" log line distinct-deduplicates the symbol list (so 3 XAUUSDT trades show as `(1 symbol(s): XAUUSDT)` instead of `XAUUSDT, XAUUSDT, XAUUSDT`).

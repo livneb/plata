@@ -9,7 +9,7 @@
         Drag · scroll to zoom · click a node for details · click an event to focus its neighborhood · <span class="font-mono">Esc</span> to go back.
       </p>
     </div>
-    <div class="flex items-center gap-2 text-xs">
+    <div class="flex items-center gap-2 text-xs flex-wrap">
       <label class="text-gray-500">events:</label>
       <select id="limit-select" class="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-1">
         <option value="20">20</option>
@@ -17,9 +17,41 @@
         <option value="80">80</option>
         <option value="150">150</option>
       </select>
+      <label class="text-gray-500 ml-2">layout:</label>
+      <select id="layout-select" class="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-1">
+        <option value="cose" selected>Constellation</option>
+        <option value="concentric">Hub &amp; spoke</option>
+        <option value="breadthfirst">Tree</option>
+        <option value="grid">Grid</option>
+        <option value="circle">Circle</option>
+      </select>
+      <label class="text-gray-500 ml-2">min connections:</label>
+      <input id="min-degree" type="range" min="1" max="6" value="2" class="w-20 align-middle" />
+      <span id="min-degree-val" class="text-gray-400 font-mono">2</span>
       <button id="reload-btn" class="px-3 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Reload</button>
       <button id="clear-focus" class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hidden">← Back</button>
     </div>
+  </div>
+
+  <!-- Type-filter chips -->
+  <div class="flex flex-wrap items-center gap-2 text-xs px-1">
+    <span class="text-gray-500">show:</span>
+    {% for k, label in [
+      ('event','📰 events'),('country','🌍 countries'),('person','👤 people'),
+      ('company','🏢 companies'),('org','🏛️ orgs'),('asset','💰 assets'),
+      ('ticker','💹 tickers')] %}
+    <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+      <input type="checkbox" class="filter-type" data-type="{{ k }}" checked />
+      <span class="px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600">{{ label }}</span>
+    </label>
+    {% endfor %}
+    <span class="text-gray-500 ml-3">categories:</span>
+    {% for k in ['crypto','macro','regulatory','company','geopolitics','tech','other'] %}
+    <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+      <input type="checkbox" class="filter-cat" data-cat="{{ k }}" checked />
+      <span class="px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-[10px]">{{ k }}</span>
+    </label>
+    {% endfor %}
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
@@ -83,7 +115,16 @@
     const cyEl = document.getElementById('cy');
     const detailEl = document.getElementById('detail');
     const limitSel = document.getElementById('limit-select');
+    const layoutSel = document.getElementById('layout-select');
+    const minDegreeInput = document.getElementById('min-degree');
+    const minDegreeVal = document.getElementById('min-degree-val');
     const reloadBtn = document.getElementById('reload-btn');
+    function getFilters() {
+      const types = new Set([...document.querySelectorAll('.filter-type:checked')].map(x => x.getAttribute('data-type')));
+      const cats  = new Set([...document.querySelectorAll('.filter-cat:checked')].map(x => x.getAttribute('data-cat')));
+      const minDeg = parseInt(minDegreeInput.value, 10) || 1;
+      return { types, cats, minDeg };
+    }
     const clearFocusBtn = document.getElementById('clear-focus');
     const focusHint = document.getElementById('focus-hint');
     const loadingOverlay = document.getElementById('loading-overlay');
@@ -297,8 +338,39 @@
                   + `<text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="${Math.round(size * 0.7)}">${emoji}</text></svg>`;
         return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
       }
-      // The icon is now the node's face (background image). Text label sits underneath.
-      const nodes = data.nodes.map(n => {
+      // First pass: compute degree on the full graph (used for size + filtering).
+      const fullDegree = {};
+      (data.edges || []).forEach(e => {
+        fullDegree[e.data.source] = (fullDegree[e.data.source] || 0) + 1;
+        fullDegree[e.data.target] = (fullDegree[e.data.target] || 0) + 1;
+      });
+
+      // Apply user-driven filters: type whitelist + category whitelist + min-degree.
+      const f = getFilters();
+      function nodeAllowed(n) {
+        const d = n.data || {};
+        const k = d.kind === 'entity' ? (d.etype || 'default').toLowerCase() : 'event';
+        if (!f.types.has(k)) return false;
+        if (d.kind === 'event' && f.cats.size) {
+          const cat = (d.category || 'other').toLowerCase();
+          if (!f.cats.has(cat) && !f.cats.has('other')) return false;
+        }
+        if ((fullDegree[d.id] || 0) < f.minDeg) return false;
+        return true;
+      }
+      const allowedIds = new Set();
+      const visibleNodes = [];
+      data.nodes.forEach(n => {
+        if (!nodeAllowed(n)) return;
+        allowedIds.add(n.data.id);
+        visibleNodes.push(n);
+      });
+      const visibleEdges = (data.edges || []).filter(e =>
+        allowedIds.has(e.data.source) && allowedIds.has(e.data.target)
+      );
+
+      // Icon-as-node + short label.
+      const nodes = visibleNodes.map(n => {
         const data_ = { ...n.data };
         data_.icon = iconFor(data_);
         data_.iconUri = iconToDataUri(data_.icon);
@@ -309,25 +381,51 @@
         }
         return node;
       });
-      const elements = [...nodes, ...data.edges];
+      const elements = [...nodes, ...visibleEdges];
       if (cy) { cy.destroy(); }
-      // Compute degree-based repulsion so hub nodes (USA, IRN, …) push neighbours harder.
+      // Use the FILTERED degree for layout repulsion + sizing.
       const degree = {};
-      data.edges.forEach(e => {
+      visibleEdges.forEach(e => {
         degree[e.data.source] = (degree[e.data.source] || 0) + 1;
         degree[e.data.target] = (degree[e.data.target] || 0) + 1;
       });
-      const layoutCfg = opts.positions
-        ? { name: 'preset', animate: false, fit: false }
-        : {
-            name: 'cose', animate: false, randomize: true, fit: true, padding: 60,
-            idealEdgeLength: 320,
-            nodeRepulsion: (n) => 120000 + (degree[n.id()] || 0) * 30000,
-            edgeElasticity: () => 60,
-            nodeOverlap: 120, gravity: 0.08, gravityRange: 5.0, gravityCompound: 1.2,
-            componentSpacing: 200, numIter: 4500,
-            initialTemp: 320, coolingFactor: 0.97, minTemp: 1.0,
+      // Layout — user-selectable. Falls back to cose.
+      const layoutName = (layoutSel && layoutSel.value) || 'cose';
+      function layoutFor(name) {
+        if (opts.positions) return { name: 'preset', animate: false, fit: false };
+        if (name === 'concentric') {
+          return {
+            name: 'concentric', animate: false, fit: true, padding: 40,
+            // Hubs (high degree) at the center; leaves on the outside.
+            concentric: (n) => (degree[n.id()] || 0),
+            levelWidth: () => 1,
+            minNodeSpacing: 50,
           };
+        }
+        if (name === 'breadthfirst') {
+          return {
+            name: 'breadthfirst', animate: false, fit: true, padding: 30,
+            directed: true, spacingFactor: 1.4,
+          };
+        }
+        if (name === 'grid') {
+          return { name: 'grid', animate: false, fit: true, padding: 30 };
+        }
+        if (name === 'circle') {
+          return { name: 'circle', animate: false, fit: true, padding: 30 };
+        }
+        // default: physics-driven cose
+        return {
+          name: 'cose', animate: false, randomize: true, fit: true, padding: 60,
+          idealEdgeLength: 320,
+          nodeRepulsion: (n) => 120000 + (degree[n.id()] || 0) * 30000,
+          edgeElasticity: () => 60,
+          nodeOverlap: 120, gravity: 0.08, gravityRange: 5.0, gravityCompound: 1.2,
+          componentSpacing: 200, numIter: 4500,
+          initialTemp: 320, coolingFactor: 0.97, minTemp: 1.0,
+        };
+      }
+      const layoutCfg = layoutFor(layoutName);
       cy = cytoscape({
         container: cyEl,
         elements,
@@ -538,6 +636,21 @@
     });
     reloadBtn.addEventListener('click', () => { focusKey = null; loadGraph(); });
     limitSel.addEventListener('change', () => loadGraph());
+
+    // Filter & layout controls re-render from the current in-memory data (no fetch).
+    function rerenderFromCurrent() {
+      const cur = focusKey ? null : (unfocusedCache.data || loadPersisted(limitSel.value));
+      if (cur) { render(cur); savePersisted(limitSel.value, cur); }
+      else { loadGraph(); }
+    }
+    layoutSel.addEventListener('change', rerenderFromCurrent);
+    minDegreeInput.addEventListener('input', () => {
+      minDegreeVal.textContent = minDegreeInput.value;
+    });
+    minDegreeInput.addEventListener('change', rerenderFromCurrent);
+    document.querySelectorAll('.filter-type, .filter-cat').forEach(el => {
+      el.addEventListener('change', rerenderFromCurrent);
+    });
     clearFocusBtn.addEventListener('click', back);
 
     document.addEventListener('keydown', (e) => {
