@@ -24,6 +24,5 @@ async def index(request: Request):
         data["name"] = k.split(":")[-1]
         agents_data.append(data)
     return templates.TemplateResponse(
-        "pages/agents.html",
-        {"request": request, "agents": agents_data, "active": "agents"},
+        request, "pages/agents.html", {"agents": agents_data, "active": "agents"}
     )

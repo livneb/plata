@@ -21,5 +21,5 @@ async def index(request: Request):
         )
         rows = result.scalars().all()
     return templates.TemplateResponse(
-        "pages/errors.html", {"request": request, "errors": rows, "active": "errors"}
+        request, "pages/errors.html", {"errors": rows, "active": "errors"}
     )

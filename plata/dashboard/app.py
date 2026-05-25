@@ -24,7 +24,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        return templates.TemplateResponse("pages/dashboard.html", {"request": request, "active": "dashboard"})
+        return templates.TemplateResponse(request, "pages/dashboard.html", {"active": "dashboard"})
 
     app.include_router(proposals.router)
     app.include_router(trades.router)

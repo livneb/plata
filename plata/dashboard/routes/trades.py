@@ -21,5 +21,5 @@ async def index(request: Request):
         )
         rows = result.scalars().all()
     return templates.TemplateResponse(
-        "pages/trades.html", {"request": request, "trades": rows, "active": "trades"}
+        request, "pages/trades.html", {"trades": rows, "active": "trades"}
     )

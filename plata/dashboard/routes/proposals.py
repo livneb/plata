@@ -16,8 +16,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 async def index(request: Request):
     pending = await list_pending()
     return templates.TemplateResponse(
-        "pages/proposals.html",
-        {"request": request, "pending": pending, "active": "proposals"},
+        request, "pages/proposals.html", {"pending": pending, "active": "proposals"}
     )
 
 

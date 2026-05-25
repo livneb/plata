@@ -22,8 +22,7 @@ async def index(request: Request):
     redis = get_redis()
     config = await redis.hgetall("risk_config")
     return templates.TemplateResponse(
-        "pages/risk_config.html",
-        {"request": request, "config": config, "active": "risk_config"},
+        request, "pages/risk_config.html", {"config": config, "active": "risk_config"}
     )
 
 
