@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.058 — 2026-05-25
+- `trade_sampler` now caches the latest price **per symbol per tick** — N trades sharing a symbol = ONE Bybit fetch, not N.
+- "Sampled" log line distinct-deduplicates the symbol list (so 3 XAUUSDT trades show as `(1 symbol(s): XAUUSDT)` instead of `XAUUSDT, XAUUSDT, XAUUSDT`).
+
 ## 2.24.057 — 2026-05-25
 - Graph: **circle/halo behind every node removed** — the emoji (flag, 👤, 🏢, 📰, etc.) is the node on its own, no background fill, no border ring.
 - Graph: **icon stays a stable on-screen size when you zoom in**. Logical node width is shrunk in proportion to `sqrt(zoom)` (capped at 3.5×), so icons don't dominate the canvas at high zoom; text label scales down with them.

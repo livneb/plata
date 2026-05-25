@@ -107,13 +107,20 @@ async def _latest_price(symbol: str) -> float | None:
 
 
 async def _sample_one(trade: TradeLedger) -> None:
-    redis = get_redis()
+    """Fetch and store a single sample. Convenience wrapper."""
     price = await _latest_price(trade.symbol)
+    await _sample_one_with_price(trade, price)
+
+
+async def _sample_one_with_price(trade: TradeLedger, price: float | None) -> None:
+    """Store a sample using a pre-fetched price. Used to dedupe Bybit calls per tick
+    when multiple open trades share a symbol."""
     if price is None or price <= 0:
         return
     entry = float(trade.entry_price or 0)
     if entry <= 0:
         return
+    redis = get_redis()
     sign = 1.0 if (trade.side or "").lower() == "long" else -1.0
     pct = sign * (price - entry) / entry * 100.0
     rec = {
@@ -124,7 +131,6 @@ async def _sample_one(trade: TradeLedger) -> None:
     key = f"trade:samples:{trade.trade_ulid}"
     await redis.rpush(key, json.dumps(rec))
     await redis.ltrim(key, -MAX_SAMPLES_PER_TRADE, -1)
-    # also stash latest price for the dashboard tile
     await redis.hset(f"trade:latest:{trade.trade_ulid}", mapping={
         "price": price, "pct": rec["pct"], "ts": rec["ts"],
     })
@@ -156,6 +162,9 @@ async def run_sampler_loop() -> None:
             })
             now = time.monotonic()
             sampled_now: list[str] = []
+            # Cache the latest price per symbol so N trades on the same symbol
+            # = ONE Bybit fetch per tick, not N.
+            price_cache: dict[str, float | None] = {}
             for trade in rows:
                 if trade.trade_ulid not in cadences:
                     longest = await _longest_milestone_eta(trade.proposal_id)
@@ -165,16 +174,20 @@ async def run_sampler_loop() -> None:
                 if now - last < cad:
                     continue
                 try:
-                    await _sample_one(trade)
+                    if trade.symbol not in price_cache:
+                        price_cache[trade.symbol] = await _latest_price(trade.symbol)
+                    await _sample_one_with_price(trade, price_cache[trade.symbol])
                     last_sample[trade.trade_ulid] = now
                     sampled_now.append(trade.symbol)
                 except Exception as exc:  # noqa: BLE001
                     _log.warning("sample_failed", trade=trade.trade_ulid, error=str(exc)[:160])
             # Only log to /workflow/ Done when there's something worth showing.
             if sampled_now:
+                distinct = sorted(set(sampled_now))
                 await log_action(
                     "trade_sampler",
-                    f"Sampled {len(sampled_now)} of {len(rows)} open trade(s): {', '.join(sampled_now[:5])}",
+                    f"Sampled {len(sampled_now)} of {len(rows)} open trade(s) "
+                    f"({len(distinct)} symbol(s): {', '.join(distinct[:5])})",
                 )
         except Exception as exc:  # noqa: BLE001
             _log.exception("sampler_loop_error", error=str(exc))
