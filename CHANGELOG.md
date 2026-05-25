@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.025 — 2026-05-25
+- New **Historian seed** page (`/historian/`) — exposes the existing `plata.agents.historian.seed()` to the UI. Configure total events (10–2000) and batch size, click **Start seed**, and the agent:
+  - Asks the LLM to enumerate dramatic events from 2005-2025 (wars, crises, central-bank surprises, hacks, regulation).
+  - Embeds each via Voyage and inserts as an event node in the knowledge graph.
+  - Pulls **real Bybit OHLCV** for the affected symbols around the event date and attaches price-impact metrics (max move, time-to-max, drawdown).
+- Live progress: status badge, written/target counters, progress bar, last event date/category, last error. Page auto-refreshes every 3s; runs in the background.
+
 ## 2.24.024 — 2026-05-25
 - Graph page fix: dropped the `cose-bilkent` layout plugin (needed `cytoscape.use()` registration + a separate `cose-base` dep) and switched to Cytoscape's built-in `cose` layout. No more `No such layout 'cose-bilkent' found` console error.
 

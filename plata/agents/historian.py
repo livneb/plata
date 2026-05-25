@@ -47,10 +47,25 @@ Output JSON only, matching the schema."""
 
 
 async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
+    from plata.core.bus import get_redis  # local: avoid cycle at import
+    redis = get_redis()
+    status_key = "historian:status"
+    await redis.hset(status_key, mapping={
+        "state": "running",
+        "started_at": datetime.utcnow().isoformat(),
+        "total_target": total_events,
+        "batch_size": batch_size,
+        "written": 0,
+        "failed_batches": 0,
+        "last_event_date": "",
+        "last_event_category": "",
+        "last_error": "",
+    })
     await ensure_indexes()
     llm = LLMClient("historian")
     batches = total_events // batch_size
     written = 0
+    failed = 0
     for i in range(batches):
         prompt = (
             f"Generate batch #{i+1} of {batches}. {batch_size} unique events not in any prior batch.\n"
@@ -61,8 +76,13 @@ async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
                 messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
                 schema=BATCH_SCHEMA, schema_name="historian_batch",
             )
-        except Exception:
+        except Exception as exc:
             _log.exception("historian_batch_failed", batch=i)
+            failed += 1
+            await redis.hset(status_key, mapping={
+                "failed_batches": failed,
+                "last_error": f"batch {i}: {type(exc).__name__}: {str(exc)[:160]}",
+            })
             continue
         for ev in data.get("events", []):
             try:
@@ -86,9 +106,8 @@ async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
                 extra={"region": ev.get("region")},
             )
 
-            # Attach real OHLCV-derived metrics
             symbols = symbols_for_entities(entity_refs)
-            for sym in symbols[:3]:  # cap to 3 symbols per event
+            for sym in symbols[:3]:
                 try:
                     metrics = await compute_and_store(
                         event_ulid=event_ulid, symbol=sym, event_ts=ts
@@ -98,7 +117,18 @@ async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
                 except Exception:
                     _log.exception("historian_oracle_failed", ulid=event_ulid, symbol=sym)
             written += 1
+            await redis.hset(status_key, mapping={
+                "written": written,
+                "last_event_date": ev.get("date") or "",
+                "last_event_category": ev.get("category") or "",
+            })
         _log.info("historian_batch_done", batch=i, written=written)
+    await redis.hset(status_key, mapping={
+        "state": "done",
+        "finished_at": datetime.utcnow().isoformat(),
+        "written": written,
+        "failed_batches": failed,
+    })
     _log.info("historian_seed_complete", total=written)
 
 

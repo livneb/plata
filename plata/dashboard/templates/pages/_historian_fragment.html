@@ -1,0 +1,67 @@
+{% set state = status.state or 'never_run' %}
+{% set written = (status.written or 0) | int %}
+{% set target = (status.total_target or 0) | int %}
+{% set pct = (written * 100 // target) if target > 0 else 0 %}
+<div class="space-y-3">
+  <div class="flex items-center justify-between">
+    <h2 class="font-semibold text-sm">Status</h2>
+    {% if state == 'running' %}
+    <span class="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded animate-pulse">RUNNING</span>
+    {% elif state == 'done' %}
+    <span class="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded">DONE</span>
+    {% elif state == 'never_run' %}
+    <span class="bg-gray-200 text-gray-700 text-[10px] px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">NEVER RUN</span>
+    {% else %}
+    <span class="bg-gray-200 text-gray-700 text-[10px] px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">{{ state | upper }}</span>
+    {% endif %}
+  </div>
+
+  {% if state == 'never_run' %}
+  <p class="text-sm text-gray-500 italic">No seed has been run yet. Start one from the panel on the right.</p>
+  {% else %}
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div><div class="text-[10px] uppercase text-gray-500">Written</div><div class="text-xl font-bold">{{ written }}</div></div>
+    <div><div class="text-[10px] uppercase text-gray-500">Target</div><div class="text-xl font-bold">{{ target }}</div></div>
+    <div><div class="text-[10px] uppercase text-gray-500">Failed batches</div><div class="text-xl font-bold {% if (status.failed_batches or 0) | int %}text-red-500{% endif %}">{{ status.failed_batches or 0 }}</div></div>
+    <div><div class="text-[10px] uppercase text-gray-500">Batch size</div><div class="text-xl font-bold">{{ status.batch_size or 0 }}</div></div>
+  </div>
+
+  {% if target > 0 %}
+  <div>
+    <div class="flex justify-between text-[11px] text-gray-500 mb-1">
+      <span>Progress</span><span>{{ pct }}%</span>
+    </div>
+    <div class="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700 overflow-hidden">
+      <div class="bg-blue-600 h-2" style="width: {{ pct }}%"></div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+    {% if status.started_at %}
+    <div>
+      <div class="text-[10px] uppercase text-gray-500">Started</div>
+      <time data-utc="{{ status.started_at }}Z">{{ status.started_at }}</time>
+    </div>
+    {% endif %}
+    {% if status.finished_at %}
+    <div>
+      <div class="text-[10px] uppercase text-gray-500">Finished</div>
+      <time data-utc="{{ status.finished_at }}Z">{{ status.finished_at }}</time>
+    </div>
+    {% endif %}
+    {% if status.last_event_date %}
+    <div>
+      <div class="text-[10px] uppercase text-gray-500">Last event</div>
+      <div>{{ status.last_event_date }} · {{ status.last_event_category }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if status.last_error %}
+  <div class="text-[11px] text-red-500 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded p-2">
+    Last error: {{ status.last_error }}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
