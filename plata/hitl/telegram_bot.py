@@ -157,9 +157,27 @@ class TelegramBot(BaseAgent):
         app.add_handler(CallbackQueryHandler(cb_approval))
 
         # Start the bot and the alert subscriber
+        # Silence the noisy traceback on `Conflict: terminated by other getUpdates`
+        # (happens when the bot token is set on more than one service or a previous
+        # deploy is briefly still running). One concise log per occurrence.
+        from telegram.error import Conflict
+        _conflict_warned = {"v": False}
+
+        def _on_polling_error(exc: Exception) -> None:
+            if isinstance(exc, Conflict):
+                if not _conflict_warned["v"]:
+                    _log.warning(
+                        "telegram_conflict",
+                        msg="Another bot instance is polling the same token. "
+                            "Make sure TELEGRAM_BOT_TOKEN is only set on ingestion_hub.",
+                    )
+                    _conflict_warned["v"] = True
+                return
+            _log.warning("telegram_polling_error", error_type=type(exc).__name__, error=str(exc))
+
         await app.initialize()
         await app.start()
-        await app.updater.start_polling()
+        await app.updater.start_polling(error_callback=_on_polling_error)
 
         try:
             await asyncio.gather(

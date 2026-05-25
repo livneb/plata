@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.037 — 2026-05-25
+- Telegram polling: `Conflict: terminated by other getUpdates` no longer floods the logs with stack traces. It's now a single concise WARN line on first occurrence, with the actionable hint to remove `TELEGRAM_BOT_TOKEN` from any service other than ingestion_hub.
+
 ## 2.24.036 — 2026-05-25
 - Fix historian **Reset status** button: previously it lived inside an htmx fragment that swaps every 3s, so the form's confirm-then-submit handler was racing the swap and silently no-op'ing. Now it's a plain button bound once at the page level via event delegation; it calls `POST /historian/reset` directly through `fetch` and reloads the page.
 
