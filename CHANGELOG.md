@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.024 — 2026-05-25
+- Graph page fix: dropped the `cose-bilkent` layout plugin (needed `cytoscape.use()` registration + a separate `cose-base` dep) and switched to Cytoscape's built-in `cose` layout. No more `No such layout 'cose-bilkent' found` console error.
+
 ## 2.24.023 — 2026-05-25
 - New **Graph** page (`/graph/`). Interactive Cytoscape.js view of the live knowledge graph stored in Redis:
   - Event nodes (circles), colored by category. Entity nodes (rounded rectangles), colored by entity type.

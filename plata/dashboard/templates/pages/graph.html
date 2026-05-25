@@ -51,7 +51,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.0/dist/cytoscape.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/[email protected]/cytoscape-cose-bilkent.js"></script>
 <script>
   (function () {
     const cyEl = document.getElementById('cy');
@@ -77,7 +76,14 @@
       cy = cytoscape({
         container: cyEl,
         elements,
-        layout: { name: 'cose-bilkent', animate: false, idealEdgeLength: 110, nodeRepulsion: 8000 },
+        layout: {
+          name: 'cose',
+          animate: false,
+          idealEdgeLength: 110,
+          nodeRepulsion: 8000,
+          gravity: 0.4,
+          numIter: 1500,
+        },
         wheelSensitivity: 0.2,
         style: [
           {
