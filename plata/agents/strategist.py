@@ -57,17 +57,22 @@ class Strategist(BaseAgent):
         self._llm = LLMClient(self.name)
 
     async def handle(self, payload: dict[str, Any]) -> None:
+        from plata.core.bus import get_redis  # local import to avoid cycles
+        redis = get_redis()
         event = EnrichedEvent(**payload)
         if event.sentiment_magnitude < SENTIMENT_TRIGGER_THRESHOLD:
+            await redis.hincrby(f"agent_stats:{self.name}", "dropped_below_threshold", 1)
             return
 
         # Pull the full event document (has embedding + price_impact)
         full = await get_event(event.ulid)
         if not full:
             self.log.warning("event_missing_in_graph", ulid=event.ulid)
+            await redis.hincrby(f"agent_stats:{self.name}", "dropped_missing_event", 1)
             return
         embedding = full.get("embedding")
         if not embedding:
+            await redis.hincrby(f"agent_stats:{self.name}", "dropped_no_embedding", 1)
             return
 
         analogs_raw = await vector_search_events(

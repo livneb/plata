@@ -87,6 +87,13 @@ async def _agent_states() -> list[dict[str, Any]]:
         data = await redis.hgetall(k)
         name = k.split(":")[-1]
         dlq_stats = await redis.hgetall(f"dlq:stats:{name}")
+        stats = await redis.hgetall(f"agent_stats:{name}")
+        activity = await redis.lrange(f"agent_activity:{name}", 0, 7)
+        parsed_activity = []
+        for entry in activity:
+            parts = entry.split("|", 2)
+            if len(parts) == 3:
+                parsed_activity.append({"ts": parts[0], "kind": parts[1], "summary": parts[2]})
         out.append({
             "name": name,
             "container": data.get("container", "?"),
@@ -95,6 +102,9 @@ async def _agent_states() -> list[dict[str, Any]]:
             "halted": data.get("halted") == "True",
             "last_processed_ulid": data.get("last_processed_ulid"),
             "errors_total": int(dlq_stats.get("count") or 0),
+            "processed_total": int(stats.get("processed_total") or 0),
+            "dropped": {k.replace("dropped_", ""): int(v) for k, v in stats.items() if k.startswith("dropped_")},
+            "activity": parsed_activity,
         })
     return out
 

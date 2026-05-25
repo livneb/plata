@@ -5,6 +5,7 @@ import asyncio
 import os
 import traceback
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Any
 
 from plata.core.bus import (
@@ -90,6 +91,8 @@ class BaseAgent(ABC):
 
     async def _consume_loop(self) -> None:
         assert self.input_stream and self.group
+        redis = get_redis()
+        activity_key = f"agent_activity:{self.name}"
         async for msg in consume(self.input_stream, self.group, self.consumer_name):
             if self._halted.is_set():
                 self.log.info("paused_due_to_halt", redis_id=msg.redis_id)
@@ -98,6 +101,18 @@ class BaseAgent(ABC):
             try:
                 await self.handle(msg.payload)
                 self._last_processed_ulid = msg.payload.get("ulid")
+                await redis.hincrby(f"agent_stats:{self.name}", "processed_total", 1)
+                # Live activity tail: keep last 50 entries per agent (newest first).
+                try:
+                    summary = (msg.payload.get("title")
+                               or msg.payload.get("symbol")
+                               or msg.payload.get("ulid")
+                               or msg.stream)
+                    entry = f"{datetime.now(timezone.utc).isoformat()}|ok|{str(summary)[:120]}"
+                    await redis.lpush(activity_key, entry)
+                    await redis.ltrim(activity_key, 0, 49)
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception as e:
                 self._error_count_60s += 1
                 tb = traceback.format_exc()
@@ -117,6 +132,13 @@ class BaseAgent(ABC):
                     traceback_str=tb,
                     agent=self.name,
                 )
+                try:
+                    await redis.hincrby(f"agent_stats:{self.name}", "errors_total", 1)
+                    entry = f"{datetime.now(timezone.utc).isoformat()}|err|{type(e).__name__}: {str(e)[:120]}"
+                    await redis.lpush(activity_key, entry)
+                    await redis.ltrim(activity_key, 0, 49)
+                except Exception:  # noqa: BLE001
+                    pass
             finally:
                 self._in_flight -= 1
                 await ack(msg.stream, self.group, msg.redis_id)

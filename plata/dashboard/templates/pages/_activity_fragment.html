@@ -36,45 +36,63 @@
     {% endfor %}
   </div>
 
-  <!-- Per-agent table -->
-  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-    <div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
-      <h3 class="font-semibold">Agents</h3>
-      <span class="text-xs text-gray-400">{{ as_of }}</span>
+  <!-- Per-agent cards with activity tail -->
+  <div>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="font-semibold">Agents — live activity</h3>
+      <span class="text-xs text-gray-400">{{ as_of }} (refresh 5s)</span>
     </div>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm text-left">
-        <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
-          <tr>
-            <th class="px-3 py-2">Agent</th>
-            <th class="px-3 py-2">Container</th>
-            <th class="px-3 py-2">Heartbeat</th>
-            <th class="px-3 py-2">In-flight</th>
-            <th class="px-3 py-2">Errors</th>
-            <th class="px-3 py-2">State</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for a in agents %}
-          <tr class="border-t border-gray-100 dark:border-gray-700">
-            <td class="px-3 py-2 font-mono">{{ a.name }}</td>
-            <td class="px-3 py-2 text-gray-500">{{ a.container }}</td>
-            <td class="px-3 py-2" title="{{ a.last_heartbeat or '' }}">{{ a.last_heartbeat | time_ago }}</td>
-            <td class="px-3 py-2">{{ a.in_flight }}</td>
-            <td class="px-3 py-2 {% if a.errors_total %}text-red-500 font-semibold{% else %}text-gray-400{% endif %}">{{ a.errors_total }}</td>
-            <td class="px-3 py-2">
-              {% if a.halted %}
-              <span class="bg-red-100 text-red-800 text-xs px-2 py-0.5 rounded dark:bg-red-900 dark:text-red-300">HALTED</span>
-              {% else %}
-              <span class="bg-green-100 text-green-800 text-xs px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">RUNNING</span>
-              {% endif %}
-            </td>
-          </tr>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {% for a in agents %}
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-mono text-sm font-semibold">{{ a.name }}</div>
+            <div class="text-[10px] text-gray-500">{{ a.container }}</div>
+          </div>
+          {% if a.halted %}
+          <span class="bg-red-100 text-red-800 text-[10px] px-2 py-0.5 rounded dark:bg-red-900 dark:text-red-300">HALTED</span>
           {% else %}
-          <tr><td colspan="6" class="px-3 py-6 text-center text-gray-400">No agents reporting yet.</td></tr>
+          <span class="bg-green-100 text-green-800 text-[10px] px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">RUNNING</span>
+          {% endif %}
+        </div>
+        <div class="grid grid-cols-4 gap-2 mt-2 text-xs">
+          <div><div class="text-gray-500 text-[10px] uppercase">HB</div><div title="{{ a.last_heartbeat or '' }}">{{ a.last_heartbeat | time_ago }}</div></div>
+          <div><div class="text-gray-500 text-[10px] uppercase">In-flight</div><div>{{ a.in_flight }}</div></div>
+          <div><div class="text-gray-500 text-[10px] uppercase">Done</div><div class="text-green-500 font-semibold">{{ a.processed_total }}</div></div>
+          <div><div class="text-gray-500 text-[10px] uppercase">Errors</div><div class="{% if a.errors_total %}text-red-500 font-semibold{% else %}text-gray-400{% endif %}">{{ a.errors_total }}</div></div>
+        </div>
+        {% if a.dropped %}
+        <div class="text-[10px] text-gray-400 mt-1">
+          dropped:
+          {% for reason, count in a.dropped.items() %}
+          <span class="ml-1">{{ reason }}={{ count }}</span>
           {% endfor %}
-        </tbody>
-      </table>
+        </div>
+        {% endif %}
+        {% if a.activity %}
+        <div class="mt-2 border-t border-gray-100 dark:border-gray-700 pt-2">
+          <div class="text-[10px] uppercase text-gray-500 mb-1">Last events</div>
+          <ul class="text-[11px] space-y-0.5">
+            {% for ev in a.activity %}
+            <li class="flex gap-2">
+              <span class="text-gray-400 whitespace-nowrap" title="{{ ev.ts }}">{{ ev.ts | time_ago }}</span>
+              {% if ev.kind == 'err' %}
+              <span class="text-red-500 truncate">{{ ev.summary }}</span>
+              {% else %}
+              <span class="truncate">{{ ev.summary }}</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% else %}
+        <div class="text-[11px] text-gray-400 mt-2 italic">no recent events</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="text-gray-400 text-sm">No agents reporting yet.</div>
+      {% endfor %}
     </div>
   </div>
 
