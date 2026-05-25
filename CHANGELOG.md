@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.008 — 2026-05-25
+- Error log timestamps are rendered in the browser's local timezone (was UTC). Reusable: any `<time data-utc="...">` element is now auto-converted on load and after htmx swaps.
+
 ## 2.24.007 — 2026-05-25
 - Errors table: per-row copy-to-clipboard button (timestamp, agent, severity, type, message, context, traceback).
 - LLM client now strips JSON-schema keywords Bedrock-backed providers reject (`minimum`, `maximum`, `pattern`, etc.). Fixes `graph_ingestion` failing with `output_config.format.schema: For 'number' type, properties maximum, minimum are not supported`.

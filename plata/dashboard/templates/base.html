@@ -216,6 +216,23 @@
       plataToast(r.ok ? 'Halt requested.' : 'Halt failed.', r.ok ? 'success' : 'error');
     });
 
+    // ---------- Local-time formatter ----------
+    // Any <time data-utc="ISO"> element will render in the browser's locale + timezone.
+    function plataFormatLocalTimes(root) {
+      (root || document).querySelectorAll('time[data-utc]').forEach(el => {
+        const iso = el.getAttribute('data-utc');
+        if (!iso) return;
+        try {
+          const d = new Date(iso);
+          if (isNaN(d.getTime())) return;
+          el.textContent = d.toLocaleString();
+          el.setAttribute('title', d.toString());
+        } catch {}
+      });
+    }
+    document.addEventListener('DOMContentLoaded', () => plataFormatLocalTimes());
+    document.body.addEventListener('htmx:afterSwap', e => plataFormatLocalTimes(e.target));
+
     // ---------- Theme toggle ----------
     document.getElementById('theme-toggle')?.addEventListener('click', () => {
       const html = document.documentElement;

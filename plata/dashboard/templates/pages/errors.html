@@ -51,7 +51,9 @@ Traceback:
             </svg>
           </button>
         </td>
-        <td class="px-3 py-3 whitespace-nowrap">{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td class="px-3 py-3 whitespace-nowrap">
+          <time data-utc="{{ e.ts.isoformat() }}">{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') }} UTC</time>
+        </td>
         <td class="px-3 py-3">
           <span class="px-2 py-0.5 rounded text-xs
             {% if e.severity == 'CRITICAL' %}bg-red-200 text-red-900
