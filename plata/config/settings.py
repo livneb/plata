@@ -5,7 +5,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,7 +63,10 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr | None = None
     telegram_allowed_user_ids: str = ""  # comma-separated chat IDs
     dashboard_session_secret: SecretStr | None = None
-    dashboard_port: Annotated[int, Field(ge=1, le=65535)] = 8080
+    dashboard_port: Annotated[
+        int,
+        Field(ge=1, le=65535, validation_alias=AliasChoices("DASHBOARD_PORT", "PORT")),
+    ] = 8080
 
     # --- Bootstrap defaults (used only if risk_config has no row yet) ---
     default_paper_trading_mode: bool = True

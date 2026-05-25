@@ -29,6 +29,23 @@ async def _run_dashboard() -> None:
     await server.serve()
 
 
+async def _run_health_server() -> None:
+    from fastapi import FastAPI
+
+    app = FastAPI()
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    settings = get_settings()
+    config = uvicorn.Config(
+        app, host="0.0.0.0", port=settings.dashboard_port, log_level="warning", lifespan="on"
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
 async def _run_ingestion_hub() -> None:
     from plata.agents.orchestrator import Orchestrator
     from plata.agents.scraper.runner import Scraper
@@ -53,6 +70,7 @@ async def _run_intelligence_sandbox() -> None:
         asyncio.create_task(GraphIngestion().run(), name="graph_ingestion"),
         asyncio.create_task(Strategist().run(), name="strategist"),
         asyncio.create_task(Reviewer().run(), name="reviewer"),
+        asyncio.create_task(_run_health_server(), name="health"),
     ]
     _log.info("intelligence_sandbox_started", agents=[t.get_name() for t in tasks])
     await asyncio.gather(*tasks)
@@ -69,6 +87,7 @@ async def _run_execution_vault() -> None:
     tasks = [
         asyncio.create_task(RiskManager().run(), name="risk_manager"),
         asyncio.create_task(Executor().run(), name="executor"),
+        asyncio.create_task(_run_health_server(), name="health"),
     ]
     _log.info("execution_vault_started", agents=[t.get_name() for t in tasks])
     await asyncio.gather(*tasks)
