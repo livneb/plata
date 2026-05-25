@@ -16,7 +16,9 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Plata Dashboard", docs_url=None, redoc_url=None)
-    app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+    static_dir = BASE_DIR / "static"
+    if static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     @app.get("/health")
     async def health():
