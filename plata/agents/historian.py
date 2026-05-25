@@ -41,12 +41,17 @@ BATCH_SCHEMA: dict[str, Any] = {
     },
 }
 
-SYSTEM = """You are a financial historian. List dramatic events from 2005-2025 that
+SYSTEM = """You are a financial historian. List dramatic events that
 moved markets (wars, financial crises, central bank surprises, hacks, regulation).
 Output JSON only, matching the schema."""
 
 
-async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
+async def seed(
+    total_events: int = 1000,
+    batch_size: int = 10,
+    start_year: int = 2005,
+    end_year: int = 2025,
+) -> None:
     from plata.core.bus import get_redis  # local: avoid cycle at import
     redis = get_redis()
     status_key = "historian:status"
@@ -55,6 +60,8 @@ async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
         "started_at": datetime.utcnow().isoformat(),
         "total_target": total_events,
         "batch_size": batch_size,
+        "start_year": start_year,
+        "end_year": end_year,
         "written": 0,
         "failed_batches": 0,
         "last_event_date": "",
@@ -69,7 +76,9 @@ async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
     for i in range(batches):
         prompt = (
             f"Generate batch #{i+1} of {batches}. {batch_size} unique events not in any prior batch.\n"
-            f"Cover varied years, regions, categories. Be specific (named entities, dates)."
+            f"All event dates MUST fall between {start_year}-01-01 and {end_year}-12-31 inclusive.\n"
+            f"Cover varied years within that window, varied regions, varied categories. "
+            f"Rank by market impact (largest first). Be specific (named entities, real dates)."
         )
         try:
             data = await llm.structured(
@@ -88,6 +97,9 @@ async def seed(total_events: int = 1000, batch_size: int = 10) -> None:
             try:
                 ts = datetime.fromisoformat(ev["date"])
             except Exception:
+                continue
+            # Drop events outside the requested window (LLM sometimes ignores instructions).
+            if ts.year < start_year or ts.year > end_year:
                 continue
             event_ulid = new_ulid()
             embedding = await embed(ev["narrative"], input_type="document")

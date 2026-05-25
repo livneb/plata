@@ -25,6 +25,9 @@
     <div><div class="text-[10px] uppercase text-gray-500">Failed batches</div><div class="text-xl font-bold {% if (status.failed_batches or 0) | int %}text-red-500{% endif %}">{{ status.failed_batches or 0 }}</div></div>
     <div><div class="text-[10px] uppercase text-gray-500">Batch size</div><div class="text-xl font-bold">{{ status.batch_size or 0 }}</div></div>
   </div>
+  {% if status.start_year and status.end_year %}
+  <div class="text-xs text-gray-500">Window: <span class="font-mono">{{ status.start_year }} – {{ status.end_year }}</span></div>
+  {% endif %}
 
   {% if target > 0 %}
   <div>

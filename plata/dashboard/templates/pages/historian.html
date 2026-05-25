@@ -32,6 +32,18 @@
                  class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
           <p class="text-[10px] text-gray-500 mt-1">Capped to 2000. Roughly 2-5s per event.</p>
         </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-medium mb-1">From year</label>
+            <input name="start_year" type="number" min="1990" max="2100" value="2005"
+                   class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1">To year</label>
+            <input name="end_year" type="number" min="1990" max="2100" value="2025"
+                   class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
+          </div>
+        </div>
         <div>
           <label class="block text-xs font-medium mb-1">Batch size (events per LLM call)</label>
           <input name="batch_size" type="number" min="1" max="25" value="10"

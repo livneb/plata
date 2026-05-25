@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.026 — 2026-05-25
+- Historian seed UI: added **From year** / **To year** inputs. The LLM prompt now constrains the window, and any out-of-range events the LLM produces anyway are dropped at validation time. The status panel shows the active window.
+- Prompt also asks the LLM to rank by market impact (largest first).
+
 ## 2.24.025 — 2026-05-25
 - New **Historian seed** page (`/historian/`) — exposes the existing `plata.agents.historian.seed()` to the UI. Configure total events (10–2000) and batch size, click **Start seed**, and the agent:
   - Asks the LLM to enumerate dramatic events from 2005-2025 (wars, crises, central-bank surprises, hacks, regulation).
