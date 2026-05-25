@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.011 — 2026-05-25
+- Workflow page rewritten as a **Kanban**: Background → Ready → Doing → Done lanes.
+  - **Background**: always-on watchers (scraper source polls, orchestrator, telegram bot).
+  - **Ready**: per-stream queue depth (XPENDING for each consumer group).
+  - **Doing**: agents currently in-flight, with the last message they touched.
+  - **Done**: most recent successful handler calls across all agents, newest first.
+  - Each card has a colored **category** chip (ingestion / intelligence / execution / hitl / ops), status badge, agent name, and relative-time stamp.
+
 ## 2.24.010 — 2026-05-25
 - New **Workflow** page (`/workflow/`) — operational live board showing what the system is *doing*, not which signals are flowing. Five columns:
   - **Polling** — one card per scraper source with status (RUNNING/IDLE/ERROR), last fetch time, items fetched, poll interval.
