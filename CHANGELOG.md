@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.068 — 2026-05-25
+- **Layer-2 self-improving risk_manager.** The Reviewer agent now maintains rolling win-rate stats in Redis keyed by `(symbol, category, conviction-bucket)` — buckets `<0.6 / 0.6-0.7 / 0.7-0.8 / 0.8-0.9 / 0.9-1.0`. Every 25 closed trades it finds the worst-performing slice and asks the LLM whether ONE small, conservative tweak to a `guard_*` config key is warranted.
+- Proposed tweaks land in the Postgres `audit_log` as `action=proposed_config_tweak` with the full evidence + rationale, status=`pending`.
+- New **🎚️ Tuning** tab on `/settings/?tab=tuning` lists every pending proposal with Apply / Reject buttons. Apply writes the new value with a version bump (same flow as user-driven updates), mirrors to Redis, and publishes a `CONFIG_UPDATED` channel message so all agents reload. Reject just marks the row resolved.
+
 ## 2.24.067 — 2026-05-25
 - Trade-detail **predicted-vs-actual** chart upgraded to Flowbite-style **area chart** with gradient fill, smooth actual line, dashed predicted line, Inter font.
 - Dashboard tile **sparklines**: PnL-today tile shows last 30 d of daily PnL; Signals-today tile shows last 24 h hourly counts. Fed by new `GET /api/dashboard/sparklines` endpoint (one query each, server-side bucketing).
