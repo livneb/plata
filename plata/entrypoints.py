@@ -46,15 +46,29 @@ async def _run_health_server() -> None:
     await server.serve()
 
 
+async def _supervise(name: str, coro_factory) -> None:
+    """Run an agent coroutine, logging any exception so it doesn't tear down siblings."""
+    try:
+        await coro_factory()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _log.error("agent_crashed", agent=name, error=str(exc))
+
+
+def _agent_task(name: str, factory) -> asyncio.Task:
+    return asyncio.create_task(_supervise(name, factory), name=name)
+
+
 async def _run_ingestion_hub() -> None:
     from plata.agents.orchestrator import Orchestrator
     from plata.agents.scraper.runner import Scraper
     from plata.hitl.telegram_bot import TelegramBot
 
     tasks = [
-        asyncio.create_task(Orchestrator().run(), name="orchestrator"),
-        asyncio.create_task(Scraper().run(), name="scraper"),
-        asyncio.create_task(TelegramBot().run(), name="telegram_bot"),
+        _agent_task("orchestrator", lambda: Orchestrator().run()),
+        _agent_task("scraper", lambda: Scraper().run()),
+        _agent_task("telegram_bot", lambda: TelegramBot().run()),
         asyncio.create_task(_run_dashboard(), name="dashboard"),
     ]
     _log.info("ingestion_hub_started", agents=[t.get_name() for t in tasks])
@@ -67,9 +81,9 @@ async def _run_intelligence_sandbox() -> None:
     from plata.agents.strategist import Strategist
 
     tasks = [
-        asyncio.create_task(GraphIngestion().run(), name="graph_ingestion"),
-        asyncio.create_task(Strategist().run(), name="strategist"),
-        asyncio.create_task(Reviewer().run(), name="reviewer"),
+        _agent_task("graph_ingestion", lambda: GraphIngestion().run()),
+        _agent_task("strategist", lambda: Strategist().run()),
+        _agent_task("reviewer", lambda: Reviewer().run()),
         asyncio.create_task(_run_health_server(), name="health"),
     ]
     _log.info("intelligence_sandbox_started", agents=[t.get_name() for t in tasks])
@@ -85,8 +99,8 @@ async def _run_execution_vault() -> None:
         _log.warning("execution_vault_missing_bybit_keys_running_paper_only")
 
     tasks = [
-        asyncio.create_task(RiskManager().run(), name="risk_manager"),
-        asyncio.create_task(Executor().run(), name="executor"),
+        _agent_task("risk_manager", lambda: RiskManager().run()),
+        _agent_task("executor", lambda: Executor().run()),
         asyncio.create_task(_run_health_server(), name="health"),
     ]
     _log.info("execution_vault_started", agents=[t.get_name() for t in tasks])
