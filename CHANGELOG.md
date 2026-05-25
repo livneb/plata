@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.017 — 2026-05-25
+- Collapsed `WATCHING` / `LISTENING` into a single `ACTIVE` status — both meant the same thing operationally.
+- **Background cards now show the last concrete action** each watcher performed:
+  - Orchestrator logs each DLQ scan, heartbeat check, halt trigger, and dead-agent detection.
+  - Telegram bot logs every inbound command + each HITL prompt push, with user ID.
+- New shared helper `plata.agents.base.log_action(agent, summary, kind)` for instrumenting any event-driven background loop.
+
 ## 2.24.016 — 2026-05-25
 - New **Dead Letters** page (`/dlq/`). Per-stream view of parked messages with **Replay** (re-publish to source stream, agents reprocess) and **Discard** buttons. Useful after a deploy fixes a bug — recover the parked work.
 - Workflow Background lane: clearer status labels — sources now show **POLLING** (mid-fetch, pulses) or **SLEEPING** (between polls); orchestrator shows **WATCHING**; telegram_bot shows **LISTENING**. No more vague "running".

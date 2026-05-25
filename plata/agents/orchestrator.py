@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from plata.agents.base import BaseAgent
+from plata.agents.base import BaseAgent, log_action
 from plata.core.bus import Channels, Streams, get_redis, publish_channel
 
 DEAD_AGENT_THRESHOLD_SEC = 60
@@ -64,8 +64,17 @@ class Orchestrator(BaseAgent):
                     await publish_channel(Channels.SYSTEM_HALT, {
                         "reason": "dlq_spike", "key": k, "count": window_count,
                     })
+                    await log_action(
+                        self.name,
+                        f"HALT triggered: dlq spike on {k} (+{window_count})",
+                        kind="err",
+                    )
                 await redis.hset(k, "_last_seen", count)
                 await redis.hset(k, "_last_checked", now.isoformat())
+            await log_action(
+                self.name,
+                f"Checked {len(keys)} DLQ stat keys",
+            )
 
     async def _liveness_watcher(self) -> None:
         redis = get_redis()
@@ -84,8 +93,15 @@ class Orchestrator(BaseAgent):
                 if (now - last_dt).total_seconds() > DEAD_AGENT_THRESHOLD_SEC:
                     agent_name = k.split(":")[-1]
                     self.log.warning("agent_appears_dead", agent=agent_name, last_heartbeat=last_hb)
+                    await log_action(self.name, f"Agent {agent_name} appears dead", kind="err")
                     # If a trading-critical agent is dead → halt.
                     if agent_name in {"risk_manager", "executor"}:
                         await publish_channel(Channels.SYSTEM_HALT, {
                             "reason": "critical_agent_dead", "agent": agent_name,
                         })
+                        await log_action(
+                            self.name,
+                            f"HALT triggered: critical agent dead ({agent_name})",
+                            kind="err",
+                        )
+            await log_action(self.name, f"Heartbeat check across {len(keys)} agents")

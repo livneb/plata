@@ -89,20 +89,27 @@ async def _background_cards() -> list[dict[str, Any]]:
             "error": data.get("last_error") or "",
         })
 
-    # Orchestrator (watching) and telegram_bot (listening) — they're event-driven, not polling.
-    for name, watch_status in (("orchestrator", "watching"), ("telegram_bot", "listening")):
+    # Orchestrator + telegram_bot — both are event-driven background loops; same status.
+    for name in ("orchestrator", "telegram_bot"):
         data = await redis.hgetall(f"agent_status:{name}")
         if not data:
             continue
+        # Show the last action this watcher performed (if any).
+        recent = await redis.lrange(f"agent_activity:{name}", 0, 0)
+        last_action = ""
+        if recent:
+            parts = recent[0].split("|", 2)
+            if len(parts) == 3:
+                last_action = parts[2]
         cards.append({
             "lane": "background",
             "category": CATEGORY.get(name, "ops"),
             "agent": name,
             "title": AGENT_VERB.get(name, name),
             "subtitle": data.get("container", ""),
-            "status": "halted" if data.get("halted") == "True" else watch_status,
+            "status": "halted" if data.get("halted") == "True" else "active",
             "ts": data.get("last_heartbeat"),
-            "extra": "",
+            "extra": last_action,
         })
 
     return cards

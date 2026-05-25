@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import Any
 
-from plata.agents.base import BaseAgent
+from plata.agents.base import BaseAgent, log_action
 from plata.config.settings import get_settings
 from plata.core.bus import Channels, get_redis, publish_channel, subscribe
 from plata.core.observability import get_logger
@@ -58,7 +58,14 @@ class TelegramBot(BaseAgent):
                 if allowed and uid not in allowed:
                     if update.effective_message:
                         await update.effective_message.reply_text("Unauthorized.")
+                    await log_action(self.name, f"Rejected unauthorized user {uid}", kind="err")
                     return
+                # Log the inbound command/text for visibility
+                text = ""
+                if update.effective_message and update.effective_message.text:
+                    text = update.effective_message.text[:80]
+                if text:
+                    await log_action(self.name, f"Received: {text} (user {uid})")
                 await handler(update, ctx)
             return wrapper
 
@@ -193,5 +200,9 @@ class TelegramBot(BaseAgent):
                         )
                     except Exception:  # pragma: no cover
                         _log.exception("hitl_push_failed", uid=uid)
+                await log_action(
+                    self.name,
+                    f"Sent HITL prompt for {proposal_ulid} to {len(allowed)} user(s)",
+                )
             except Exception:  # pragma: no cover
                 _log.exception("hitl_subscriber_error")

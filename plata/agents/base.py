@@ -8,6 +8,22 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
 
+
+async def log_action(agent: str, summary: str, *, kind: str = "ok") -> None:
+    """Push an action entry onto `agent_activity:<agent>` (capped at 50 newest).
+
+    Use this in watchers / event-driven agents that don't go through `_consume_loop`
+    so their actions still show up on the dashboard activity tail.
+    """
+    try:
+        from plata.core.bus import get_redis  # local import to avoid cycle at module load
+        redis = get_redis()
+        entry = f"{datetime.now(timezone.utc).isoformat()}|{kind}|{summary[:160]}"
+        await redis.lpush(f"agent_activity:{agent}", entry)
+        await redis.ltrim(f"agent_activity:{agent}", 0, 49)
+    except Exception:  # noqa: BLE001 — never break the caller
+        pass
+
 from plata.core.bus import (
     Channels,
     Streams,
