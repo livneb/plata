@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/help.html" import help_icon %}
 {% block title %}Settings · Plata{% endblock %}
 {% block content %}
 <div class="space-y-4">
@@ -109,7 +110,7 @@
           <tbody>
             {% for row in risk_rows %}
             <tr class="border-t border-gray-100 dark:border-gray-700">
-              <td class="px-4 py-3 font-mono">{{ row.key }}</td>
+              <td class="px-4 py-3 font-mono">{{ row.key }}{{ help_icon(row.key) }}</td>
               <td class="px-4 py-3 font-mono break-all">{{ row.value }}</td>
               <td class="px-4 py-3">{{ row.version }}</td>
               <td class="px-4 py-3 text-gray-500" title="{{ row.updated_at or '' }}">{{ row.updated_at | time_ago }}</td>

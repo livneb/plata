@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/help.html" import help_icon %}
 {% block title %}Trade {{ trade.trade_ulid if trade else '?' }} · Plata{% endblock %}
 {% block content %}
 <div class="space-y-4">
@@ -26,9 +27,9 @@
       <div><div class="text-[10px] uppercase text-gray-500">Proposal</div><div class="font-mono break-all">{{ trade.proposal_id or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Venue</div><div>{{ trade.venue }} ({{ trade.instrument_type }})</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Opened</div><div><time data-utc="{{ trade.opened_at.isoformat() }}">{{ trade.opened_at.strftime('%Y-%m-%d %H:%M') }}</time></div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">SL / TP</div><div>{{ trade.sl_price or '—' }} / {{ trade.tp_price or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">SL{{ help_icon('sl') }} / TP{{ help_icon('tp') }}</div><div>{{ trade.sl_price or '—' }} / {{ trade.tp_price or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Exit</div><div>{{ trade.exit_price or '—' }}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">Net PnL</div><div>{{ trade.net_pnl or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Net PnL{{ help_icon('net_pnl') }}</div><div>{{ trade.net_pnl or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Closed</div><div>{{ trade.closed_at.strftime('%Y-%m-%d %H:%M') if trade.closed_at else '—' }}</div></div>
     </div>
   </section>
@@ -38,10 +39,10 @@
     <h2 class="font-semibold mb-2">Strategist proposal</h2>
     {% if proposal %}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-      <div><div class="text-[10px] uppercase text-gray-500">Conviction</div><div class="text-lg font-bold">{{ '%.2f' % (proposal.conviction or 0) }}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">Suggested SL %</div><div>{{ proposal.suggested_sl_pct or '—' }}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">Suggested TP %</div><div>{{ proposal.suggested_tp_pct or '—' }}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">Suggested notional</div><div>{{ proposal.suggested_notional_usd or '—' }} USD</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Conviction{{ help_icon('conviction') }}</div><div class="text-lg font-bold">{{ '%.2f' % (proposal.conviction or 0) }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Suggested SL %{{ help_icon('suggested_sl_pct') }}</div><div>{{ proposal.suggested_sl_pct or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Suggested TP %{{ help_icon('suggested_tp_pct') }}</div><div>{{ proposal.suggested_tp_pct or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Suggested notional{{ help_icon('suggested_notional') }}</div><div>{{ proposal.suggested_notional_usd or '—' }} USD</div></div>
     </div>
     <div class="mb-3">
       <div class="text-[10px] uppercase text-gray-500 mb-1">Reasoning</div>
@@ -49,7 +50,7 @@
     </div>
     {% if proposal.similar_events %}
     <div>
-      <div class="text-[10px] uppercase text-gray-500 mb-1">Analogous past events used ({{ proposal.similar_events | length }})</div>
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Analogous past events used ({{ proposal.similar_events | length }}){{ help_icon('analogs') }}</div>
       <ul class="space-y-1 text-xs">
         {% for a in proposal.similar_events %}
         <li class="flex gap-2">
@@ -74,7 +75,7 @@
       <div><div class="text-[10px] uppercase text-gray-500">Source</div><div>{{ event_doc.source or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Category</div><div>{{ event_doc.category or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">When</div><div>{{ event_doc.ts or '—' }}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">Sentiment magnitude</div><div>{{ event_doc.sentiment_magnitude or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Sentiment magnitude{{ help_icon('sentiment_magnitude') }}</div><div>{{ event_doc.sentiment_magnitude or '—' }}</div></div>
     </div>
     <div class="mb-3">
       <div class="text-[10px] uppercase text-gray-500 mb-1">Summary</div>

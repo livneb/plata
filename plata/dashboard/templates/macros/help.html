@@ -1,0 +1,52 @@
+{# Reusable info-circle with tooltip. Pulls glossary by key. Usage:
+   {% from "macros/help.html" import help_icon %}
+   {{ help_icon('conviction') }}
+   or with custom text:
+   {{ help_icon(text="Explain anything") }}
+#}
+{% set GLOSSARY = {
+  'sl': "Stop Loss. The price at which the trade automatically exits to limit losses. Lower for long trades, higher for shorts.",
+  'tp': "Take Profit. The price at which the trade automatically exits to lock in gains. Higher for longs, lower for shorts.",
+  'suggested_sl_pct': "How far the stop-loss sits from entry, as a fraction of the entry price. 0.015 = 1.5% away.",
+  'suggested_tp_pct': "How far the take-profit sits from entry, as a fraction of the entry price. 0.035 = 3.5% away.",
+  'suggested_notional': "Total USD value the strategist thinks should be at risk on this trade (quantity × price), not your collateral.",
+  'conviction': "The strategist LLM's 0.00–1.00 confidence in this trade. Higher means it's more sure the move will happen. Risk manager scales the position size by this.",
+  'similarity': "Cosine similarity between the new event's embedding and a past event. 1.00 = nearly identical wording / context; 0.50 = loosely related.",
+  'sentiment_magnitude': "How emotionally charged the headline is, on 0.00–1.00. Big crises (war, default) score near 1.0. Routine headlines score below 0.5 and are filtered out before reaching the strategist.",
+  'sentiment_ewma': "An entity's average sentiment over time, weighted toward recent events. Tells you whether the system has been seeing mostly bullish or bearish news on a given asset / country / person lately.",
+  'mode_paper': "Paper trading mode. Trades are simulated — no real money or Bybit order is sent. Default for safety.",
+  'mode_live': "Live trading. Actual orders are placed on Bybit with real funds.",
+  'net_pnl': "Profit and loss after exchange fees. Positive = profit, negative = loss.",
+  'gross_pnl': "Profit and loss before fees.",
+  'side_long': "Bet the price will go up. Buy now, sell later.",
+  'side_short': "Bet the price will go down. Sell-borrow now, buy back later.",
+  'in_flight': "Messages this agent is processing right now.",
+  'processed_total': "Total messages this agent has finished processing successfully since startup.",
+  'errors_total': "Messages that ended in this agent's dead-letter queue (parked for replay).",
+  'dropped': "Messages this agent saw but intentionally skipped (e.g. sentiment too low to bother analyzing).",
+  'spend_today': "USD spent on LLM tokens by this agent today. Reset at midnight UTC.",
+  'system_running': "All agents are accepting and processing messages.",
+  'system_halted': "The kill switch was triggered or an automatic safeguard fired. Agents are paused.",
+  'pending_hitl': "Trade proposals waiting for a human approval before they can execute. Approve or reject via Telegram or the proposals page.",
+  'open_positions': "Trades that have been opened but not yet closed.",
+  'daily_pnl': "Total profit/loss across trades closed today.",
+  'llm_spend_today': "USD spent on LLM calls across all agents today.",
+  'signals_today': "Raw news/social signals scraped and archived since midnight UTC.",
+  'venue': "Where the trade is/was executed. bybit_testnet = no real money. bybit_mainnet = real funds.",
+  'instrument_type': "perp = perpetual futures (crypto derivatives with no expiry). spot = own the asset directly.",
+  'analogs': "Past events with similar content to this one. Used to compare 'what happened to prices when something like this happened before'.",
+  'category': "What kind of event this is — macro (broad economy), regulatory, company-specific, geopolitics, crypto, tech.",
+  'paper_trading_mode': "When true, executor simulates trades instead of placing real orders. Default true.",
+  'risk_per_trade_pct': "Max % of equity to risk on a single trade. E.g. 1.0 = 1%.",
+  'max_open_positions': "Max number of trades that can be open at the same time.",
+  'max_daily_loss_pct': "If today's losses exceed this %, the system auto-halts.",
+  'auto_approve_threshold_usd': "Trades smaller than this USD notional skip human approval.",
+  'llm_daily_budget_usd_total': "Hard cap on combined LLM spend per day. If exceeded, the system auto-halts.",
+} %}
+
+{% macro help_icon(key='', text='') -%}
+  {% set body = text if text else (GLOSSARY[key] if key in GLOSSARY else key) %}
+  <span class="help-icon inline-flex items-center justify-center w-4 h-4 ml-1 rounded-full bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-[10px] font-semibold align-middle cursor-help"
+        data-help-text="{{ body | e }}"
+        tabindex="0">?</span>
+{%- endmacro %}

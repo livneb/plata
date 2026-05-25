@@ -252,6 +252,48 @@
     // ---------- Kill / Resume ----------
     // Kill switch moved to /settings/?tab=controls.
 
+    // ---------- Help tooltips ----------
+    // <span class="help-icon" data-help-text="..."> shows a small tooltip on hover/focus.
+    (function () {
+      let tip = null;
+      function ensureTip() {
+        if (tip) return tip;
+        tip = document.createElement('div');
+        tip.className = 'fixed hidden z-[90] max-w-xs px-2 py-1.5 rounded-lg shadow text-[11px] bg-gray-900 text-gray-100 border border-gray-700 pointer-events-none whitespace-pre-wrap';
+        document.body.appendChild(tip);
+        return tip;
+      }
+      function show(el) {
+        const t = ensureTip();
+        t.textContent = el.getAttribute('data-help-text') || '';
+        t.classList.remove('hidden');
+        const r = el.getBoundingClientRect();
+        const tw = t.offsetWidth;
+        const th = t.offsetHeight;
+        let x = r.right + 6;
+        let y = r.top - 4;
+        if (x + tw > window.innerWidth) x = r.left - tw - 6;
+        if (y + th > window.innerHeight) y = window.innerHeight - th - 6;
+        if (y < 4) y = 4;
+        t.style.left = x + 'px';
+        t.style.top = y + 'px';
+      }
+      function hide() { if (tip) tip.classList.add('hidden'); }
+      document.addEventListener('mouseover', (e) => {
+        const el = e.target.closest('.help-icon, [data-help-text]');
+        if (el) show(el);
+      });
+      document.addEventListener('mouseout', (e) => {
+        const el = e.target.closest('.help-icon, [data-help-text]');
+        if (el) hide();
+      });
+      document.addEventListener('focusin', (e) => {
+        const el = e.target.closest('.help-icon, [data-help-text]');
+        if (el) show(el);
+      });
+      document.addEventListener('focusout', hide);
+    })();
+
     // ---------- Form draft persistence ----------
     // Any <form data-persist="<key>"> auto-saves its inputs to localStorage on every keystroke,
     // restores them on load, and clears the saved draft on submit.

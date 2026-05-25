@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.039 — 2026-05-25
+- New **help tooltips** across the dashboard. A small grey ?-circle next to a value shows a plain-English explanation on hover/focus. Reusable Jinja macro `{{ help_icon('key') }}` reads from a central glossary so every page uses the same wording.
+- Applied to: trade detail (Stop Loss, Take Profit, Conviction, Suggested SL/TP %, Notional, Sentiment magnitude, Net PnL, Analogs), dashboard tiles (Open positions, PnL today, Pending HITL, Signals today, LLM spend today), agents (In-flight, Spend today), risk-config rows (paper_trading_mode, risk_per_trade_pct, max_open_positions, max_daily_loss_pct, auto_approve_threshold_usd, llm.daily_budget_usd_total).
+
 ## 2.24.038 — 2026-05-25
 - Graph readability pass:
   - Entity nodes carry a **type icon** (👤 person · 🏢 company · 🌍 country · 💰 asset · 🏛️ org · 💹 ticker) in the label.
