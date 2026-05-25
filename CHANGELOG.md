@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.046 — 2026-05-25
+- Global FastAPI exception handler on the dashboard. **Any uncaught exception in any route is now logged to `/errors/`** (Postgres `error_log`) — agent=`dashboard`, with path/method/user context — not just to stdout. No more "I had to dig in Railway deploy logs to find why my click failed".
+
 ## 2.24.045 — 2026-05-25
 - **Historian seed actually runs now.** Root cause: `asyncio.create_task(...)` without keeping a reference allowed the task to be garbage-collected before it executed — the status hash wrote "running" but the work never started. Fixed by stashing tasks in a module-level set (`_RUNNING_TASKS`) and removing them only on completion.
 - Historian start uses `loop.create_task` + immediately writes a `phase=starting` status; the seed coroutine now prints to stdout (`[historian] …`) at every step so a hang is diagnosable without structlog.

@@ -74,6 +74,30 @@ async def _lifespan(_app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Plata Dashboard", docs_url=None, redoc_url=None, lifespan=_lifespan)
+
+    # Global handler: any uncaught exception in any dashboard route is logged
+    # to /errors/ (Postgres `error_log`) instead of disappearing into stdout.
+    @app.exception_handler(Exception)
+    async def _global_exception_logger(req: Request, exc: Exception):
+        from starlette.responses import JSONResponse
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+        # Let FastAPI's normal flow handle HTTPException / redirects.
+        if isinstance(exc, StarletteHTTPException):
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        try:
+            from plata.core.error_reporter import get_error_reporter
+            await get_error_reporter().capture_exception(
+                exc, agent="dashboard", severity="ERROR",
+                context={
+                    "path": req.url.path,
+                    "method": req.method,
+                    "user": _current_user_or_none(req) or "anonymous",
+                },
+            )
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger("dashboard").exception("error_reporter_unavailable")
+        return JSONResponse({"detail": "internal server error"}, status_code=500)
     static_dir = BASE_DIR / "static"
     if static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
