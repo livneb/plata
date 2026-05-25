@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.055 — 2026-05-25
+- Fix the **Changelog modal "No changelog"** bug: `CHANGELOG.md` wasn't included in the Dockerfile `COPY` line, so the deployed image had no file for `/api/changelog` to read. Adding it. After redeploy the version-chip popup shows the full history with Older / Newer paging.
+
 ## 2.24.054 — 2026-05-25
 - **Historian seed is now resumable** and **auto-resumes on dashboard startup**. The seed records `next_batch` in Redis after each batch; if the container is killed mid-run (Railway deploy, OOM, whatever), the next dashboard boot detects `state=running|stale` + a non-final `next_batch` and continues from that batch — keeping the written counter, brief, window, focus, and category limits intact. No more 30/100 forever.
 

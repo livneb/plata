@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md VERSION ./
+COPY pyproject.toml README.md VERSION CHANGELOG.md ./
 COPY plata ./plata
 COPY alembic ./alembic
 COPY alembic.ini ./
