@@ -23,6 +23,17 @@ async def create_pending(proposal_ulid: str, proposal: dict[str, Any], reason: s
     await publish_channel(Channels.hitl_requested(), {
         "proposal_ulid": proposal_ulid, "reason": reason,
     })
+    # Push to the dashboard SSE pipe so all open browser tabs react instantly.
+    try:
+        await publish_channel("dashboard:events", {
+            "kind": "proposal_pending",
+            "proposal_ulid": proposal_ulid,
+            "symbol": proposal.get("symbol"),
+            "side": proposal.get("side"),
+            "reason": reason,
+        })
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def list_pending() -> list[dict[str, Any]]:
@@ -57,4 +68,13 @@ async def resolve(proposal_ulid: str, *, approved: bool, actor: str) -> bool:
     await publish_channel(Channels.approval(proposal_ulid), {
         "approved": approved, "actor": actor,
     })
+    try:
+        await publish_channel("dashboard:events", {
+            "kind": "proposal_resolved",
+            "proposal_ulid": proposal_ulid,
+            "approved": approved,
+            "actor": actor,
+        })
+    except Exception:  # noqa: BLE001
+        pass
     return True

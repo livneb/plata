@@ -57,6 +57,18 @@ class Reviewer(BaseAgent):
                     close_reason=str(closure.close_reason),
                 )
             )
+        # Push trade closure to the dashboard SSE pipe.
+        try:
+            from plata.core.bus import publish_channel
+            await publish_channel("dashboard:events", {
+                "kind": "trade_closed",
+                "trade_ulid": closure.trade_ulid,
+                "symbol": closure.symbol,
+                "net_pnl": float(closure.net_pnl or 0),
+                "close_reason": str(closure.close_reason),
+            })
+        except Exception:  # noqa: BLE001
+            pass
 
         prompt = (
             f"Trade: {closure.symbol} {closure.side} qty={closure.qty}\n"

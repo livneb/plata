@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.056 — 2026-05-25
+- **Live updates via SSE.** Producers publish to Redis channel `dashboard:events` at four moments: new HITL proposal pending, proposal approved/rejected, trade opened, trade closed, system halted/resumed. The frontend opens `EventSource('/sse')` once per tab and reacts immediately: toasts for every event, `plata:pending_changed` / `plata:trades_changed` custom events for pages to refresh their tiles, instant recolor of the system-state badge.
+
 ## 2.24.055 — 2026-05-25
 - Fix the **Changelog modal "No changelog"** bug: `CHANGELOG.md` wasn't included in the Dockerfile `COPY` line, so the deployed image had no file for `/api/changelog` to read. Adding it. After redeploy the version-chip popup shows the full history with Older / Newer paging.
 

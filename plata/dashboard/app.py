@@ -132,6 +132,7 @@ def create_app() -> FastAPI:
         from plata.core.bus import Channels, get_redis, publish_channel
         await publish_channel(Channels.SYSTEM_HALT, {"reason": "manual_killswitch"})
         await get_redis().set("system:state", "HALTED")
+        await publish_channel("dashboard:events", {"kind": "system_state", "state": "HALTED"})
         return {"ok": True, "state": "HALTED"}
 
     @app.post("/api/resume")
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
         from plata.core.bus import Channels, get_redis, publish_channel
         await publish_channel(Channels.SYSTEM_RESUME, {"reason": "manual_resume"})
         await get_redis().set("system:state", "RUNNING")
+        await publish_channel("dashboard:events", {"kind": "system_state", "state": "RUNNING"})
         return {"ok": True, "state": "RUNNING"}
 
     @app.post("/api/agents/{name}/resume")

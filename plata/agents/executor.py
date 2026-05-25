@@ -115,6 +115,19 @@ class Executor(BaseAgent):
 
         await publish(Streams.EXECUTED_TRADES, executed)
         self.log.info("trade_executed", trade_ulid=trade_ulid, mode=str(mode), symbol=symbol)
+        # Push to the dashboard SSE pipe for real-time UI updates.
+        try:
+            from plata.core.bus import publish_channel
+            await publish_channel("dashboard:events", {
+                "kind": "trade_opened",
+                "trade_ulid": trade_ulid,
+                "symbol": symbol,
+                "side": str(side),
+                "mode": str(mode),
+                "entry_price": float(entry_price or 0),
+            })
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _load_proposal(self, proposal_ulid: str) -> dict[str, Any] | None:
         """Look up the proposal from a Redis cache that Strategist populates.
