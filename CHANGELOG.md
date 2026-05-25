@@ -2,6 +2,24 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.065 — 2026-05-25
+- **Alpaca (US equities + ETFs) execution adapter**, alongside the existing Bybit (crypto perps).
+  - `plata/execution/alpaca_client.py` — async httpx client (no extra dep). `fetch_balance` / `fetch_positions` / `fetch_ticker` / `fetch_ohlcv` / `create_market_order` mirror the Bybit interface so consumers stay venue-agnostic. Paper account by default (`ALPACA_PAPER=true`); flip to live with `ALPACA_PAPER=false`.
+  - `plata/execution/router.py:venue_for(symbol, …)` decides per-proposal: `XXXUSDT/XXXUSD/XXXBTC` → Bybit, 1-5 uppercase letters (NVDA, SPY, AAPL) → Alpaca, with explicit `proposal.venue` / `proposal.instrument_type` hints overriding.
+  - `executor` initializes both clients on startup; uses `_client_for(symbol, hint_venue, hint_class)` to dispatch each order.
+  - `trade_sampler._latest_price` routes through the same logic — stocks pull the Alpaca latest-trade endpoint, crypto uses Bybit 1m bars.
+- New settings: `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `ALPACA_PAPER` (default true).
+- Settings → Environment tab shows Bybit + Alpaca status cards. Activity page API status grid adds an Alpaca row.
+
+To enable Alpaca paper trading, on your Mac:
+
+```bash
+railway service execution_vault
+railway variables --set "ALPACA_API_KEY=PK..." --set "ALPACA_API_SECRET=..." --set "ALPACA_PAPER=true"
+```
+
+(Free paper key from https://alpaca.markets — Dashboard → API Keys → "Generate Paper Key".)
+
 ## 2.24.064 — 2026-05-25
 - **Per-event sub-cards on the Workflow Kanban.** Each event the historian writes is pushed to a capped Redis list (`historian:events_live`, last 30, 90 s TTL); the workflow renderer surfaces up to 8 of them as cards. Within 30 s they appear in Doing as `running`, then age into Done as `ok`. Live view of the seeder filling the graph in real time.
 

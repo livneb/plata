@@ -89,20 +89,26 @@ async def _longest_milestone_eta(proposal_ulid: str | None) -> int:
 
 
 async def _latest_price(symbol: str) -> float | None:
-    """Fetch the last close price from Bybit's 1-min OHLCV. Returns None on failure."""
-    end = datetime.now(timezone.utc)
-    start = end.replace(microsecond=0)
+    """Last close price for `symbol`. Routes to Bybit (crypto perps) or Alpaca (US equities)
+    based on the symbol shape. Returns None on failure."""
+    from plata.execution.router import venue_for
+    venue = venue_for(symbol)
     try:
+        if venue == "alpaca":
+            from plata.execution.alpaca_client import AlpacaClient
+            client = AlpacaClient(agent="trade_sampler")
+            if not client.configured():
+                return None
+            t = await client.fetch_ticker(symbol)
+            return float(t.get("last") or t.get("close") or 0) or None
+        # Default: Bybit OHLCV
+        end = datetime.now(timezone.utc)
         bars = await fetch_ohlcv_bybit(symbol, start_ts=end, end_ts=end, interval="1")
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("price_fetch_failed", symbol=symbol, error=str(exc)[:160])
-        return None
-    if not bars:
-        return None
-    # Bybit returns rows like [openTime, open, high, low, close, volume, turnover].
-    try:
+        if not bars:
+            return None
         return float(bars[-1][4])
-    except (ValueError, IndexError, TypeError):
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("price_fetch_failed", symbol=symbol, venue=venue, error=str(exc)[:160])
         return None
 
 

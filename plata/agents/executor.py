@@ -22,12 +22,29 @@ class Executor(BaseAgent):
     def __init__(self) -> None:
         super().__init__()
         self._bybit: BybitClient | None = None
+        self._alpaca = None  # type: ignore[assignment]
 
     async def setup(self) -> None:
         try:
             self._bybit = BybitClient(agent=self.name)
         except Exception as e:
             self.log.warning("bybit_init_failed", error=str(e))
+        try:
+            from plata.execution.alpaca_client import AlpacaClient
+            a = AlpacaClient(agent=self.name)
+            if a.configured():
+                self._alpaca = a
+        except Exception as e:  # noqa: BLE001
+            self.log.warning("alpaca_init_failed", error=str(e))
+
+    def _client_for(self, symbol: str, hint_venue: str | None = None,
+                    hint_class: str | None = None):
+        """Pick the right execution client for a symbol. Falls back to Bybit if Alpaca is unset."""
+        from plata.execution.router import venue_for
+        venue = venue_for(symbol, hint_venue=hint_venue, hint_class=hint_class)
+        if venue == "alpaca" and self._alpaca is not None:
+            return self._alpaca
+        return self._bybit
 
     async def handle(self, payload: dict[str, Any]) -> None:
         decision = RiskDecision(**payload)
@@ -59,9 +76,12 @@ class Executor(BaseAgent):
         trade_ulid = new_ulid()
         raw_response: dict[str, Any] = {}
 
-        if mode == TradeMode.LIVE and self._bybit:
+        # Pick the venue client based on the symbol (crypto → Bybit, stock → Alpaca).
+        client = self._client_for(symbol, hint_venue=proposal.get("venue"),
+                                  hint_class=proposal.get("instrument_type"))
+        if mode == TradeMode.LIVE and client:
             try:
-                order = await self._bybit.create_market_order(
+                order = await client.create_market_order(
                     symbol=symbol,
                     side="buy" if side == Side.LONG else "sell",
                     qty=decision.final_qty or Decimal("0"),
@@ -151,9 +171,10 @@ class Executor(BaseAgent):
         return None
 
     async def _last_price(self, symbol: str) -> float | None:
-        if self._bybit:
+        client = self._client_for(symbol)
+        if client:
             try:
-                t = await self._bybit.fetch_ticker(symbol)
+                t = await client.fetch_ticker(symbol)
                 return float(t.get("last") or t.get("close") or 0)
             except Exception:
                 return None

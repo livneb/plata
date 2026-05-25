@@ -216,8 +216,32 @@
         <div><span class="text-gray-500">App version:</span> <span class="font-mono">{{ app_version }}</span></div>
         <div><span class="text-gray-500">System state:</span> <span class="font-mono">{{ system_state }}</span></div>
         <div><span class="text-gray-500">Paper mode default:</span> <span class="font-mono">{{ paper_mode }}</span></div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+          <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold">🪙 Bybit</span>
+              {% if bybit_configured %}
+              <span class="bg-green-100 text-green-800 text-[10px] px-1.5 py-0.5 rounded">CONFIGURED · {{ bybit_mode }}</span>
+              {% else %}
+              <span class="bg-gray-200 text-gray-700 text-[10px] px-1.5 py-0.5 rounded">NOT SET</span>
+              {% endif %}
+            </div>
+            <p class="text-[11px] text-gray-500 mt-1">Crypto perps. Routes proposals whose symbol matches XXXUSDT / XXXUSD / XXXBTC.</p>
+          </div>
+          <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold">📈 Alpaca</span>
+              {% if alpaca_configured %}
+              <span class="bg-green-100 text-green-800 text-[10px] px-1.5 py-0.5 rounded">CONFIGURED · {{ alpaca_mode }}</span>
+              {% else %}
+              <span class="bg-gray-200 text-gray-700 text-[10px] px-1.5 py-0.5 rounded">NOT SET</span>
+              {% endif %}
+            </div>
+            <p class="text-[11px] text-gray-500 mt-1">US equities + ETFs. Routes proposals with 1–5 uppercase-letter tickers (NVDA, SPY, AAPL).</p>
+          </div>
+        </div>
         <p class="text-xs text-gray-500 mt-3">
-          Secrets (Bybit, Voyage, OpenRouter, Telegram, etc.) are configured per Railway service. See <span class="font-mono">.env.example</span>.
+          Secrets (Bybit, Alpaca, Voyage, OpenRouter, Telegram, etc.) are configured per Railway service. See <span class="font-mono">.env.example</span> and <span class="font-mono">docs/SPEC.md</span>.
         </p>
       </div>
     </div>

@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     bybit_api_secret: SecretStr | None = None
     bybit_testnet: bool = True
 
+    # --- Trading: Alpaca (US equities + ETFs) ---
+    alpaca_api_key: SecretStr | None = None
+    alpaca_api_secret: SecretStr | None = None
+    alpaca_paper: bool = True
+
     # --- HITL / dashboard ---
     telegram_bot_token: SecretStr | None = None
     telegram_allowed_user_ids: str = ""  # comma-separated chat IDs

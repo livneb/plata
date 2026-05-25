@@ -54,8 +54,11 @@ def _api_statuses() -> list[dict[str, Any]]:
         {"name": "Telegram", "desc": "HITL approval channel for proposals.",
          "configured": ok(s.telegram_bot_token)},
         {"name": "Bybit",
-         "desc": f"Exchange ({'TESTNET' if s.bybit_testnet else 'MAINNET'}).",
+         "desc": f"Crypto-perp exchange ({'TESTNET' if s.bybit_testnet else 'MAINNET'}).",
          "configured": ok(s.bybit_api_key) and ok(s.bybit_api_secret)},
+        {"name": "Alpaca",
+         "desc": f"US equities + ETFs broker ({'PAPER' if s.alpaca_paper else 'LIVE'}).",
+         "configured": ok(s.alpaca_api_key) and ok(s.alpaca_api_secret)},
     ]
 
 

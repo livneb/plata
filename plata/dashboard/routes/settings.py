@@ -29,5 +29,9 @@ async def index(request: Request, tab: str = "controls"):
             "paper_mode": s.default_paper_trading_mode,
             "app_version": s.app_version,
             "admin_email": s.dashboard_admin_email or "",
+            "bybit_configured": bool(s.bybit_api_key and s.bybit_api_secret),
+            "bybit_mode": "TESTNET" if s.bybit_testnet else "MAINNET",
+            "alpaca_configured": bool(s.alpaca_api_key and s.alpaca_api_secret),
+            "alpaca_mode": "PAPER" if s.alpaca_paper else "LIVE",
         },
     )
