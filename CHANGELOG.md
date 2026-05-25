@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.032 — 2026-05-25
+- Done lane no longer shows orchestrator heartbeats / telegram-bot commands / scraper polls. Those are continuous watcher activity — they belong in the watcher's own card (Active lane), not in Done.
+
 ## 2.24.031 — 2026-05-25
 - Trade ledger rows clickable → new **decision-chain** page `/trades/<ulid>` showing the strategist proposal (conviction, reasoning, analogs), the triggering event, and any HITL/risk audit log entries.
 - Dashboard tiles are now smart links: **Open positions** → single trade if exactly one, else `/trades/`; PnL today → `/trades/`; Pending HITL → `/proposals/`; Signals today → `/activity/`; LLM spend today → `/agents/`.

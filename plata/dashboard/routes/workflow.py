@@ -270,11 +270,19 @@ async def _doing_cards() -> list[dict[str, Any]]:
 
 
 async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
-    """Recent successful handler calls across all agents, newest first."""
+    """Recent successful handler calls across pipeline agents, newest first.
+
+    Excludes orchestrator / telegram_bot / scraper — their "did one tick" entries
+    are continuous watcher activity, shown on the watchers' own card last-action line,
+    not pipeline progress.
+    """
     redis = get_redis()
-    entries: list[tuple[str, str, str]] = []  # (iso_ts, agent, summary)
+    skip = {"orchestrator", "telegram_bot", "scraper"}
+    entries: list[tuple[str, str, str]] = []
     async for k in redis.scan_iter(match="agent_activity:*", count=100):
         agent = k.split(":")[-1]
+        if agent in skip:
+            continue
         rows = await redis.lrange(k, 0, limit)
         for row in rows:
             parts = row.split("|", 2)
