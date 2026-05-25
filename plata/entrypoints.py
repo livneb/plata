@@ -125,11 +125,14 @@ async def _run_execution_vault() -> None:
     if not settings.bybit_api_key or not settings.bybit_api_secret:
         _log.warning("execution_vault_missing_bybit_keys_running_paper_only")
 
+    from plata.execution.trade_sampler import run_sampler_loop
+
     await _bind_then_run(
         _run_health_server,
         [
             ("risk_manager", lambda: RiskManager().run()),
             ("executor", lambda: Executor().run()),
+            ("trade_sampler", lambda: run_sampler_loop()),
         ],
     )
 

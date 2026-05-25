@@ -58,6 +58,21 @@ async def _find_audit(target_ulid: str) -> list[AuditLog]:
     return rows
 
 
+@router.get("/{trade_ulid}/samples")
+async def samples(trade_ulid: str):
+    """Return recorded price samples for an open trade (newest at end)."""
+    from fastapi.responses import JSONResponse
+    redis = get_redis()
+    raw = await redis.lrange(f"trade:samples:{trade_ulid}", 0, -1)
+    out = []
+    for s in raw:
+        try:
+            out.append(json.loads(s))
+        except Exception:  # noqa: BLE001
+            pass
+    return JSONResponse({"count": len(out), "samples": out})
+
+
 @router.get("/{trade_ulid}", response_class=HTMLResponse)
 async def detail(request: Request, trade_ulid: str):
     async with session_scope() as session:

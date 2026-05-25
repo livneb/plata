@@ -177,39 +177,75 @@
 </div>
 
 <script>
-  (function () {
+  (async function () {
     const dark = document.documentElement.classList.contains('dark');
     const axisColor = dark ? '#9ca3af' : '#4b5563';
     const gridColor = dark ? '#374151' : '#e5e7eb';
 
     {% if proposal and proposal.milestones %}
     // Predicted trajectory: x = hours from entry, y = signed % move (cumulative).
-    const milestones = {{ proposal.milestones | map(attribute='__dict__') | list | tojson if false else proposal.milestones | tojson }};
-    // Pydantic models JSON-encode via FastAPI; in Jinja we manually project them.
     const msData = [
       {% for m in proposal.milestones %}
       { x: {{ (m.eta_minutes / 60) | round(2) }}, y: {{ (m.expected_pct_move * 100) | round(3) }}, confidence: {{ m.confidence }}, rationale: {{ (m.rationale or '') | tojson }} },
       {% endfor %}
     ];
+    const tradeOpenedISO = {{ (trade.opened_at.isoformat() if trade and trade.opened_at else '') | tojson }};
+    let chart = null;
+    async function loadActualSeries() {
+      if (!tradeOpenedISO) return [];
+      try {
+        const r = await fetch('/trades/{{ trade.trade_ulid }}/samples');
+        const d = await r.json();
+        const t0 = new Date(tradeOpenedISO).getTime();
+        return (d.samples || []).map(s => ({
+          x: (new Date(s.ts).getTime() - t0) / 3600000.0,
+          y: Number(s.pct),
+        }));
+      } catch { return []; }
+    }
     if (msData.length && window.ApexCharts) {
       const el = document.getElementById('milestone-chart');
-      new ApexCharts(el, {
-        chart: { type: 'line', height: 220, toolbar: { show: false }, foreColor: axisColor, background: 'transparent' },
-        series: [{ name: 'Expected % move', data: msData.map(p => ({ x: p.x, y: p.y })) }],
-        xaxis: { type: 'numeric', title: { text: 'Hours from entry' }, labels: { formatter: v => Number(v).toFixed(0) + 'h' } },
-        yaxis: { title: { text: '% move' }, labels: { formatter: v => Number(v).toFixed(1) + '%' } },
-        markers: { size: 6 },
-        stroke: { curve: 'straight', width: 2 },
-        colors: ['#3b82f6'],
+      const initial = await loadActualSeries();
+      chart = new ApexCharts(el, {
+        chart: { type: 'line', height: 260, toolbar: { show: false }, foreColor: axisColor, background: 'transparent', animations: { enabled: false } },
+        series: [
+          { name: 'Predicted % move', type: 'line', data: msData.map(p => ({ x: p.x, y: p.y })) },
+          { name: 'Actual price (live)', type: 'line', data: initial },
+        ],
+        xaxis: { type: 'numeric', title: { text: 'Hours from entry' }, labels: { formatter: v => Number(v).toFixed(2) + 'h' } },
+        yaxis: { title: { text: '% move from entry' }, labels: { formatter: v => Number(v).toFixed(2) + '%' } },
+        markers: { size: [6, 0] },
+        stroke: { curve: ['straight', 'smooth'], width: [2, 1.5], dashArray: [4, 0] },
+        colors: ['#3b82f6', '#f59e0b'],
         grid: { borderColor: gridColor },
         annotations: { yaxis: [{ y: 0, borderColor: gridColor, strokeDashArray: 3 }] },
+        legend: { showForSingleSeries: true },
         tooltip: {
-          custom: ({ dataPointIndex }) => {
-            const p = msData[dataPointIndex];
-            return `<div style="padding:6px 8px;font-size:11px"><b>${p.y.toFixed(2)}%</b> after ${p.x}h<br/>confidence ${(p.confidence*100).toFixed(0)}%<br/>${p.rationale ? p.rationale : ''}</div>`;
+          shared: false,
+          custom: ({ seriesIndex, dataPointIndex, w }) => {
+            if (seriesIndex === 0) {
+              const p = msData[dataPointIndex];
+              if (!p) return '';
+              return `<div style="padding:6px 8px;font-size:11px"><b>${p.y.toFixed(2)}%</b> after ${p.x}h<br/>confidence ${(p.confidence*100).toFixed(0)}%<br/>${p.rationale ? p.rationale : ''}</div>`;
+            }
+            const pt = w.config.series[seriesIndex].data[dataPointIndex];
+            if (!pt) return '';
+            return `<div style="padding:6px 8px;font-size:11px"><b>${Number(pt.y).toFixed(2)}%</b> @ ${Number(pt.x).toFixed(2)}h since open</div>`;
           },
         },
-      }).render();
+      });
+      chart.render();
+      // Refresh actual line every 15s while the trade is open.
+      {% if trade and not trade.closed_at %}
+      setInterval(async () => {
+        if (!chart) return;
+        const fresh = await loadActualSeries();
+        chart.updateSeries([
+          { name: 'Predicted % move', type: 'line', data: msData.map(p => ({ x: p.x, y: p.y })) },
+          { name: 'Actual price (live)', type: 'line', data: fresh },
+        ], false);
+      }, 15000);
+      {% endif %}
     }
     {% endif %}
 

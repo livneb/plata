@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.048 — 2026-05-25
+- New **trade_sampler** loop in `execution_vault`. For every open trade it samples Bybit's latest price at an adaptive cadence picked from the longest milestone ETA: ≤15 min → every 5 s; ≤4 h → 1 min; ≤24 h → 5 min; ≤7 d → 30 min; longer → 6 h. Samples land in Redis (`trade:samples:<ulid>`, capped 720 entries).
+- New endpoint `GET /trades/<ulid>/samples` returns the recorded samples.
+- Trade detail page: the predicted-trajectory chart now overlays an **Actual price (live)** series (% move vs entry, time since open). Auto-refreshes every 15 s while the trade is open; static after close.
+
 ## 2.24.047 — 2026-05-25
 - New **Seeded events** panel at the bottom of `/historian/`. Lists every historian-sourced event in the graph (newest first) — date, category, region, summary, entities (chips), and whether real Bybit price-impact data was attached. Click any row to jump to `/graph/?focus=<ulid>` and see it in the knowledge graph.
 - New endpoint `GET /historian/events?limit=N`.
