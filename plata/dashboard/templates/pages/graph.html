@@ -28,10 +28,11 @@
 
       <!-- Floating toolbar -->
       <div class="absolute top-2 right-2 flex flex-col gap-1 bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 rounded-lg shadow p-1">
-        <button id="zoom-in"  title="Zoom in"   class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-lg leading-none">+</button>
-        <button id="zoom-out" title="Zoom out"  class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-lg leading-none">−</button>
-        <button id="zoom-fit" title="Fit all"   class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-base leading-none">⤢</button>
-        <button id="zoom-1"   title="Reset 100%" class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-[10px] leading-none">1:1</button>
+        <button id="zoom-in"  title="Zoom in"     class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-lg leading-none">+</button>
+        <button id="zoom-out" title="Zoom out"    class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-lg leading-none">−</button>
+        <button id="zoom-fit" title="Fit all"     class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-base leading-none">⤢</button>
+        <button id="zoom-1"   title="Reset 100%"  class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-[10px] leading-none">1:1</button>
+        <button id="relayout" title="Re-run layout" class="w-8 h-8 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-base leading-none">⟳</button>
       </div>
 
       <!-- Hint when focused -->
@@ -111,14 +112,25 @@
         layout: {
           name: 'cose',
           animate: false,
-          idealEdgeLength: 130,
-          nodeRepulsion: 14000,
-          gravity: 0.3,
-          numIter: 2000,
+          randomize: true,
+          fit: true,
+          padding: 40,
+          idealEdgeLength: 220,
+          nodeRepulsion: function(node) { return 80000; },
+          edgeElasticity: function() { return 80; },
+          nodeOverlap: 60,
+          gravity: 0.15,
+          gravityRange: 4.0,
+          gravityCompound: 1.5,
+          componentSpacing: 120,
+          numIter: 3500,
+          initialTemp: 250,
+          coolingFactor: 0.97,
+          minTemp: 1.0,
         },
         wheelSensitivity: 0.25,
-        minZoom: 0.15,
-        maxZoom: 4.0,
+        minZoom: 0.1,
+        maxZoom: 5.0,
         style: [
           {
             selector: 'node[kind="event"]',
@@ -224,6 +236,14 @@
     document.getElementById('zoom-out').addEventListener('click', () => zoomBy(0.8));
     document.getElementById('zoom-fit').addEventListener('click', fitAll);
     document.getElementById('zoom-1').addEventListener('click', resetZoom);
+    document.getElementById('relayout').addEventListener('click', () => {
+      if (!cy) return;
+      cy.layout({
+        name: 'cose', animate: true, randomize: true, fit: true, padding: 40,
+        idealEdgeLength: 220, nodeRepulsion: () => 80000, nodeOverlap: 60,
+        gravity: 0.15, numIter: 3500,
+      }).run();
+    });
     reloadBtn.addEventListener('click', () => { focusKey = null; loadGraph(); });
     limitSel.addEventListener('change', () => loadGraph());
     clearFocusBtn.addEventListener('click', back);

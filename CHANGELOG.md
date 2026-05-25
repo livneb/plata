@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.034 — 2026-05-25
+- Graph layout: much stronger node repulsion (80k), mandatory `nodeOverlap` gap (60px), longer edges (220), more iterations. Hub entities (USA / IRN / EUR) won't pile on top of each other any more.
+- New **⟳ Re-layout** button on the graph toolbar — re-runs the force layout if the current arrangement isn't great.
+
 ## 2.24.033 — 2026-05-25
 - Workflow lanes are **collapsible**. Click the header (or the ⌃ icon) to collapse a lane down to just title + count. State persists in localStorage and survives the 3-second htmx refresh.
 
