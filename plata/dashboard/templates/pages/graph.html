@@ -64,13 +64,14 @@
           <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#f59e0b"></span> event · regulatory</li>
           <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#34d399"></span> event · company</li>
           <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#fb7185"></span> event · geopolitics</li>
-          <li><span class="inline-block w-3 h-3 align-middle" style="background:#10b981"></span> 🏢 company</li>
-          <li><span class="inline-block w-3 h-3 align-middle" style="background:#fb923c"></span> 👤 person</li>
-          <li><span class="inline-block w-3 h-3 align-middle" style="background:#eab308"></span> 💰 asset</li>
-          <li><span class="inline-block w-3 h-3 align-middle" style="background:#3b82f6"></span> 🌍 country</li>
-          <li><span class="inline-block w-3 h-3 align-middle" style="background:#a78bfa"></span> 🏛️ org</li>
+          <li><span class="inline-block">📰</span> event (sized by connections)</li>
+          <li><span class="inline-block">🇺🇸 🇮🇷 …</span> country (flag = the node)</li>
+          <li><span class="inline-block">👨 👩 👤</span> person</li>
+          <li><span class="inline-block">🏢</span> company</li>
+          <li><span class="inline-block">🏛️</span> organisation</li>
+          <li><span class="inline-block">💰 💹</span> asset / ticker</li>
         </ul>
-        <p class="text-[10px] text-gray-500 mt-3">Hover any node to highlight its relations. Hover an edge to see the relation label.</p>
+        <p class="text-[10px] text-gray-500 mt-3">Hover any node to highlight its relations · double-click anywhere to zoom in.</p>
       </div>
     </div>
   </div>
@@ -232,13 +233,76 @@
       // Trim labels for readability. Full text is in the side panel on click.
       const ENTITY_ICONS = {
         person: '👤', company: '🏢', country: '🌍', asset: '💰',
-        org: '🏛️', ticker: '💹', default: '◾',
+        org: '🏛️', ticker: '💹', event: '📰', default: '◾',
       };
-      // Trim labels for readability and prefix entity labels with a type icon.
+      // Best-effort gendered person icon from common first names.
+      const FEMALE = new Set(['mary','jane','sarah','rachel','michelle','janet','christine','kamala','angela','margaret','theresa','ursula','lisa','hillary','melinda','melania','elizabeth','queen','janet_yellen','kristalina','gita','nikki']);
+      const MALE = new Set(['donald','barack','joe','joseph','vladimir','xi','kim','jerome','warren','elon','jeff','bill','mark','sundar','satya','mohammed','abdullah','benjamin','volodymyr','emmanuel','olaf','rishi','keir','jay','jamie','jeffrey','larry','christopher']);
+      const FLAG = {
+        USA:'🇺🇸',US:'🇺🇸',UNITED_STATES:'🇺🇸',AMERICA:'🇺🇸',
+        IRN:'🇮🇷',IR:'🇮🇷',IRAN:'🇮🇷',
+        ISR:'🇮🇱',IL:'🇮🇱',ISRAEL:'🇮🇱',
+        RUS:'🇷🇺',RU:'🇷🇺',RUSSIA:'🇷🇺',
+        CHN:'🇨🇳',CN:'🇨🇳',CHINA:'🇨🇳',
+        DEU:'🇩🇪',DE:'🇩🇪',GERMANY:'🇩🇪',
+        GBR:'🇬🇧',UK:'🇬🇧',UNITED_KINGDOM:'🇬🇧',BRITAIN:'🇬🇧',
+        EUR:'🇪🇺',EU:'🇪🇺',EUROPEAN_UNION:'🇪🇺',
+        IND:'🇮🇳',IN:'🇮🇳',INDIA:'🇮🇳',
+        JPN:'🇯🇵',JP:'🇯🇵',JAPAN:'🇯🇵',
+        KOR:'🇰🇷',KR:'🇰🇷',SOUTH_KOREA:'🇰🇷',
+        FRA:'🇫🇷',FR:'🇫🇷',FRANCE:'🇫🇷',
+        ESP:'🇪🇸',ES:'🇪🇸',SPAIN:'🇪🇸',
+        ITA:'🇮🇹',IT:'🇮🇹',ITALY:'🇮🇹',
+        BRA:'🇧🇷',BR:'🇧🇷',BRAZIL:'🇧🇷',
+        CAN:'🇨🇦',CA:'🇨🇦',CANADA:'🇨🇦',
+        AUS:'🇦🇺',AU:'🇦🇺',AUSTRALIA:'🇦🇺',
+        MEX:'🇲🇽',MX:'🇲🇽',MEXICO:'🇲🇽',
+        SAU:'🇸🇦',SA:'🇸🇦',SAUDI_ARABIA:'🇸🇦',
+        ARE:'🇦🇪',AE:'🇦🇪',UAE:'🇦🇪',
+        QAT:'🇶🇦',QA:'🇶🇦',QATAR:'🇶🇦',
+        TUR:'🇹🇷',TR:'🇹🇷',TURKEY:'🇹🇷',
+        UKR:'🇺🇦',UA:'🇺🇦',UKRAINE:'🇺🇦',
+        NGA:'🇳🇬',NG:'🇳🇬',NIGERIA:'🇳🇬',
+        IDN:'🇮🇩',ID:'🇮🇩',INDONESIA:'🇮🇩',
+        PAK:'🇵🇰',PK:'🇵🇰',PAKISTAN:'🇵🇰',
+        EGY:'🇪🇬',EG:'🇪🇬',EGYPT:'🇪🇬',
+        ZAF:'🇿🇦',ZA:'🇿🇦',SOUTH_AFRICA:'🇿🇦',
+        AFG:'🇦🇫',AF:'🇦🇫',AFGHANISTAN:'🇦🇫',
+        LBN:'🇱🇧',LB:'🇱🇧',LEBANON:'🇱🇧',
+        SYR:'🇸🇾',SY:'🇸🇾',SYRIA:'🇸🇾',
+        IRQ:'🇮🇶',IQ:'🇮🇶',IRAQ:'🇮🇶',
+        SGP:'🇸🇬',SG:'🇸🇬',SINGAPORE:'🇸🇬',
+        HKG:'🇭🇰',HK:'🇭🇰',HONG_KONG:'🇭🇰',
+        TWN:'🇹🇼',TW:'🇹🇼',TAIWAN:'🇹🇼',
+        PRK:'🇰🇵',KP:'🇰🇵',NORTH_KOREA:'🇰🇵',
+      };
+      function iconFor(d) {
+        if (d.kind === 'event') return ENTITY_ICONS.event;
+        const t = (d.etype || 'default').toLowerCase();
+        if (t === 'country') {
+          const key = String(d.label || '').toUpperCase().replace(/[\s-]+/g, '_');
+          return FLAG[key] || ENTITY_ICONS.country;
+        }
+        if (t === 'person') {
+          const first = String(d.label || '').toLowerCase().split(/[\s_-]/)[0];
+          const full = String(d.label || '').toLowerCase().replace(/\s+/g, '_');
+          if (FEMALE.has(first) || FEMALE.has(full)) return '👩';
+          if (MALE.has(first)   || MALE.has(full))   return '👨';
+          return ENTITY_ICONS.person;
+        }
+        return ENTITY_ICONS[t] || ENTITY_ICONS.default;
+      }
+      function iconToDataUri(emoji, size = 80) {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">`
+                  + `<text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="${Math.round(size * 0.7)}">${emoji}</text></svg>`;
+        return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+      }
+      // The icon is now the node's face (background image). Text label sits underneath.
       const nodes = data.nodes.map(n => {
         const data_ = { ...n.data };
-        const icon = data_.kind === 'entity' ? (ENTITY_ICONS[(data_.etype || 'default').toLowerCase()] || ENTITY_ICONS.default) : '';
-        data_.shortLabel = (icon ? icon + ' ' : '') + shortLabel(data_.label, data_.kind === 'event' ? 32 : 22);
+        data_.icon = iconFor(data_);
+        data_.iconUri = iconToDataUri(data_.icon);
+        data_.shortLabel = shortLabel(data_.label, data_.kind === 'event' ? 32 : 22);
         const node = { ...n, data: data_ };
         if (opts.positions && opts.positions[n.data.id]) {
           node.position = { ...opts.positions[n.data.id] };
@@ -273,17 +337,21 @@
         maxZoom: 5.0,
         style: [
           {
+            // Events: emoji 📰 is the node face, summary sits below.
             selector: 'node[kind="event"]',
             style: {
               'background-color': 'data(color)',
+              'background-image': 'data(iconUri)',
+              'background-fit': 'contain',
+              'background-clip': 'none',
+              'background-opacity': 0.5,
               'label': 'data(shortLabel)',
               'shape': 'ellipse',
-              // Size scales modestly with degree so hub-ish events stand out.
-              'width': function(ele) { return 22 + Math.min(20, (degree[ele.id()] || 0) * 2); },
-              'height': function(ele) { return 22 + Math.min(20, (degree[ele.id()] || 0) * 2); },
+              'width': function(ele) { return 36 + Math.min(28, (degree[ele.id()] || 0) * 2); },
+              'height': function(ele) { return 36 + Math.min(28, (degree[ele.id()] || 0) * 2); },
               'font-size': 11, 'color': '#e5e7eb',
               'text-wrap': 'wrap', 'text-max-width': 180,
-              'text-valign': 'bottom', 'text-margin-y': 8,
+              'text-valign': 'bottom', 'text-margin-y': 6,
               'text-background-color': '#1f2937',
               'text-background-opacity': 0.7,
               'text-background-padding': 3,
@@ -293,18 +361,26 @@
             }
           },
           {
+            // Entities: the icon (flag / 👤 / 🏢 …) IS the node; type-color is a halo border.
             selector: 'node[kind="entity"]',
             style: {
-              'background-color': 'data(color)',
+              'background-color': '#ffffff',
+              'background-image': 'data(iconUri)',
+              'background-fit': 'contain',
+              'background-clip': 'none',
+              'background-opacity': 0,
               'label': 'data(shortLabel)',
-              'shape': 'round-rectangle',
-              'width': function(ele) { return 28 + Math.min(36, (degree[ele.id()] || 0) * 4); },
-              'height': 20,
-              'font-size': 11, 'color': '#0f172a',
-              'text-valign': 'center', 'text-halign': 'center',
-              'text-outline-width': 0,
+              'shape': 'ellipse',
+              'width': function(ele) { return 32 + Math.min(24, (degree[ele.id()] || 0) * 2); },
+              'height': function(ele) { return 32 + Math.min(24, (degree[ele.id()] || 0) * 2); },
+              'font-size': 11, 'color': '#e5e7eb',
+              'text-valign': 'bottom', 'text-margin-y': 4,
+              'text-background-color': '#1f2937',
+              'text-background-opacity': 0.7,
+              'text-background-padding': 3,
+              'text-background-shape': 'roundrectangle',
               'min-zoomed-font-size': 9,
-              'border-width': 1, 'border-color': '#1f2937',
+              'border-width': 2, 'border-color': 'data(color)',
             }
           },
           {
@@ -358,6 +434,16 @@
       cy.on('mouseout', 'node', (ev) => {
         ev.target.connectedEdges().removeClass('hovered');
         if (lastHovered) { lastHovered.removeClass('hovered'); lastHovered = null; }
+      });
+      // Double-click anywhere: zoom in 1.6× centered on the click point.
+      // Cytoscape fires `dbltap` for double click / two-finger-tap.
+      cy.on('dbltap', (ev) => {
+        const newZoom = Math.min(cy.maxZoom(), cy.zoom() * 1.6);
+        try {
+          cy.animate({ zoom: { level: newZoom, position: ev.position } }, { duration: 220 });
+        } catch (e) {
+          cy.zoom(newZoom); cy.center();
+        }
       });
       cy.on('mouseover', 'edge', (ev) => ev.target.addClass('hovered'));
       cy.on('mouseout',  'edge', (ev) => ev.target.removeClass('hovered'));

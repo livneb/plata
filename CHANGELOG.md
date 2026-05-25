@@ -2,6 +2,17 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.053 — 2026-05-25
+- **Graph icons are now the node itself**:
+  - Event nodes show 📰 inside a colored circle (category color).
+  - Country entities show the **flag emoji** (🇺🇸 USA, 🇮🇷 IRN, 🇮🇱 ISR, 🇪🇺 EUR + 30 others). Plain 🌍 fallback for unknown countries.
+  - Person entities try a small first-name lookup → 👨 / 👩, otherwise 👤.
+  - Org 🏛️, company 🏢, asset 💰, ticker 💹.
+  - Type color is now a halo border, not the background — the icon is unobstructed.
+  - Text label sits underneath the icon (no more icon-in-label).
+- **Double-click anywhere on the graph zooms in 1.6× centered on the click point** (Cytoscape `dbltap`, animated 220ms).
+- Legend updated to reflect the icon-as-node model.
+
 ## 2.24.052 — 2026-05-25
 - **Risk manager Layer-1 guards** — all config-driven via `/settings/?tab=risk`, no redeploy needed:
   - `guard_min_conviction` (default 0.6) — reject proposals below this conviction.
