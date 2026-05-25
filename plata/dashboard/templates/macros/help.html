@@ -49,9 +49,61 @@
   'guard_max_per_category_day': "Max trades opened per event category (macro / regulatory / etc.) per UTC day. Limits over-exposure to one narrative.",
 } %}
 
+{# Hebrew translations. Add the same keys as GLOSSARY; missing keys fall back to English. #}
+{% set GLOSSARY_HE = {
+  'sl': "סטופ-לוס. המחיר שבו העסקה נסגרת אוטומטית כדי להגביל הפסד. נמוך מהכניסה בלונג, גבוה ממנה בשורט.",
+  'tp': "טייק-פרופיט. המחיר שבו העסקה נסגרת אוטומטית כדי לנעול רווח. גבוה מהכניסה בלונג, נמוך ממנה בשורט.",
+  'suggested_sl_pct': "מרחק הסטופ-לוס מהכניסה, כאחוז (0.015 = 1.5%).",
+  'suggested_tp_pct': "מרחק הטייק-פרופיט מהכניסה, כאחוז (0.035 = 3.5%).",
+  'suggested_notional': "סך הדולרים שהסטרטג ממליץ לחשוף בעסקה (כמות × מחיר), לא הקולטרל.",
+  'conviction': "מידת הביטחון של מודל השפה ב-0..1. מנהל הסיכון מדרג את גודל הפוזיציה לפי זה.",
+  'similarity': "דמיון קוסינוס בין האירוע הנוכחי לאירוע עבר. 1.00 = כמעט זהה, 0.50 = קשר רופף.",
+  'sentiment_magnitude': "כמה האירוע טעון רגשית, 0..1. אסונות גדולים מגיעים ל-1.0; כותרות שגרתיות מתחת ל-0.5 ולא מגיעות אפילו לסטרטג.",
+  'sentiment_ewma': "ממוצע סנטימנט נע של ישות, ממוצק לכיוון אירועים אחרונים.",
+  'mode_paper': "מסחר נייר. עסקאות מדומות, בלי כסף אמיתי. ברירת מחדל לבטיחות.",
+  'mode_live': "מסחר חי. הזמנות אמיתיות בבורסה עם כסף אמיתי.",
+  'net_pnl': "רווח / הפסד נטו, אחרי עמלות.",
+  'gross_pnl': "רווח / הפסד ברוטו, לפני עמלות.",
+  'side_long': "הימור שהמחיר יעלה.",
+  'side_short': "הימור שהמחיר ירד.",
+  'in_flight': "ההודעות שהסוכן מעבד כרגע.",
+  'processed_total': "סך ההודעות שהסוכן סיים לעבד בהצלחה.",
+  'errors_total': "הודעות שנכשלו ועברו לתור DLQ.",
+  'dropped': "הודעות שהסוכן ראה ובחר לדלג עליהן (למשל סנטימנט נמוך מדי).",
+  'spend_today': "דולרים שנשרפו על מודל השפה היום על ידי הסוכן הזה.",
+  'system_running': "כל הסוכנים פעילים ומעבדים הודעות.",
+  'system_halted': "כפתור הקיל-סוויץ' הופעל או הגנה אוטומטית נתפסה. הסוכנים בעצירה.",
+  'pending_hitl': "הצעות מסחר ממתינות לאישור אנושי לפני ביצוע.",
+  'open_positions': "עסקאות פתוחות שעדיין לא נסגרו.",
+  'daily_pnl': "סיכום רווח/הפסד של עסקאות שנסגרו היום.",
+  'llm_spend_today': "סך הדולרים שנשרפו על מודלי שפה היום.",
+  'signals_today': "מספר הסיגנלים שנאספו והגיעו לארכיון מאז חצות UTC.",
+} %}
+
+{# "Like I'm 5" versions. Same keys; falls back to English/Hebrew if missing. #}
+{% set GLOSSARY_KIDS = {
+  'sl': "כפתור 'הפסקה' אוטומטי. אם המחיר ירד / יעלה יותר מדי בכיוון הלא נכון - העסקה נסגרת לבד כדי שלא נפסיד יותר.",
+  'tp': "כפתור 'יופי, מספיק' אוטומטי. כשהמחיר הגיע ליעד שתכננו - העסקה נסגרת לבד עם הרווח.",
+  'conviction': "כמה הסוכן בטוח בעצמו, מ-0 (ניחוש) ועד 1 (ממש בטוח). אם הוא לא בטוח - שמים פחות כסף.",
+  'similarity': "כמה האירוע הנוכחי דומה לאירוע מהעבר. 1 = ממש דומה, 0 = שונה לגמרי.",
+  'sentiment_magnitude': "כמה האירוע 'דרמטי'. אסונות גדולים = 1. חדשות משעממות = 0.",
+  'net_pnl': "כמה כסף הרווחנו או הפסדנו בסוף, אחרי שמסירים את העמלה של הבורסה.",
+  'side_long': "אנחנו מאמינים שהמחיר יעלה - קונים עכשיו ומוכרים אחר כך כשהוא יעלה.",
+  'side_short': "אנחנו מאמינים שהמחיר ירד - שואלים את המטבע, מוכרים, ומחזירים כשהוא ייפול.",
+  'system_halted': "המערכת בעצירה. אף עסקה חדשה לא תיפתח עד שמישהו ילחץ Resume.",
+  'pending_hitl': "הצעות מסחר שמחכות שאדם יגיד 'כן' או 'לא' לפני שמבצעים אותן.",
+  'open_positions': "עסקאות שכבר פתחנו ועדיין לא סגרנו.",
+  'daily_pnl': "כמה רווח (או הפסד) יש לנו היום מכל מה שנסגר היום.",
+} %}
+
 {% macro help_icon(key='', text='') -%}
-  {% set body = text if text else (GLOSSARY[key] if key in GLOSSARY else key) %}
+  {% set en = text if text else (GLOSSARY[key] if key in GLOSSARY else key) %}
+  {% set he = GLOSSARY_HE[key] if (not text and key in GLOSSARY_HE) else en %}
+  {% set kids = GLOSSARY_KIDS[key] if (not text and key in GLOSSARY_KIDS) else en %}
   <span class="help-icon inline-flex items-center justify-center w-4 h-4 ml-1 rounded-full bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-[10px] font-semibold align-middle cursor-help"
-        data-help-text="{{ body | e }}"
+        data-help-text="{{ en | e }}"
+        data-help-en="{{ en | e }}"
+        data-help-he="{{ he | e }}"
+        data-help-kids="{{ kids | e }}"
         tabindex="0">?</span>
 {%- endmacro %}

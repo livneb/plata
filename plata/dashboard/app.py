@@ -27,6 +27,7 @@ from plata.dashboard.routes import (
     proposals,
     push as push_route,
     sse as sse_route,
+    translate as translate_route,
     risk_config,
     settings as settings_route,
     trades,
@@ -229,6 +230,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_route.router)
     app.include_router(push_route.router)
     app.include_router(sse_route.router)
+    app.include_router(translate_route.router)
     return app
 
 

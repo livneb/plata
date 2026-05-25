@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.066 — 2026-05-25
+- **Hebrew + kid-friendly help tooltips.** Every `?` icon now ships three variants in its data attributes (`data-help-en`, `data-help-he`, `data-help-kids`); JS picks one based on two cookies (`plata_lang`, `plata_aud`). Switch them on **Settings → Account → Preferences** — every tooltip updates instantly, no reload.
+- **🌐 Translate / explain-further button** on long-form text (strategist reasoning, triggering-event summary, every analog summary). One click → POST `/api/translate/` (lang + audience from cookies) → LLM rewrite cached per `(text,lang,audience)` for 30 days in Redis (`translate:<sha256>`). Click again to toggle back to the original.
+- Any element with `data-translate` automatically gets the button (so adding it to new prose blocks is a one-attribute change).
+
 ## 2.24.065 — 2026-05-25
 - **Alpaca (US equities + ETFs) execution adapter**, alongside the existing Bybit (crypto perps).
   - `plata/execution/alpaca_client.py` — async httpx client (no extra dep). `fetch_balance` / `fetch_positions` / `fetch_ticker` / `fetch_ohlcv` / `create_market_order` mirror the Bybit interface so consumers stay venue-agnostic. Paper account by default (`ALPACA_PAPER=true`); flip to live with `ALPACA_PAPER=false`.

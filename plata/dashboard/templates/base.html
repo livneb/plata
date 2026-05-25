@@ -306,6 +306,57 @@
       if (btn) btn.addEventListener('click', enablePush);
     })();
 
+    // ---------- 🌐 translate-this — wraps any element with data-translate ----------
+    // Usage: <div data-translate>...long text...</div> → small 🌐 button appears.
+    // Click → POST /api/translate (lang+aud from cookies) → replaces the text. Original
+    // is kept on the element so you can flip back.
+    (function () {
+      function cookie(name) { const m = document.cookie.match('(^|; )' + name + '=([^;]*)'); return m ? decodeURIComponent(m[2]) : ''; }
+      function decorate(root) {
+        (root || document).querySelectorAll('[data-translate]:not([data-translate-bound])').forEach(el => {
+          el.setAttribute('data-translate-bound', '1');
+          if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'inline-block ml-1 align-middle text-[11px] px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700';
+          btn.title = 'Translate / explain';
+          btn.textContent = '🌐';
+          btn.addEventListener('click', async () => {
+            const lang = cookie('plata_lang') || 'en';
+            const aud  = cookie('plata_aud')  || 'tech';
+            // Toggle back to original if already translated
+            if (el.dataset.translated === '1') {
+              el.textContent = el.dataset.originalText;
+              el.dataset.translated = '0';
+              return;
+            }
+            btn.disabled = true; const prev = btn.textContent; btn.textContent = '⏳';
+            try {
+              const r = await fetch('/api/translate/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: el.dataset.originalText || el.textContent, lang, aud }),
+              });
+              if (!r.ok) throw new Error('HTTP ' + r.status);
+              const j = await r.json();
+              if (j.text) {
+                el.textContent = j.text;
+                el.dataset.translated = '1';
+                el.dir = lang === 'he' ? 'rtl' : 'ltr';
+              }
+            } catch (e) {
+              plataToast('Translate failed: ' + e.message, 'error');
+            } finally {
+              btn.disabled = false; btn.textContent = prev;
+            }
+          });
+          el.parentNode.appendChild(btn);
+        });
+      }
+      document.addEventListener('DOMContentLoaded', () => decorate());
+      document.body.addEventListener('htmx:afterSwap', e => decorate(e.target));
+    })();
+
     // ---------- Server-Sent Events (live updates from agents) ----------
     (function () {
       if (!('EventSource' in window)) return;
@@ -385,9 +436,20 @@
         document.body.appendChild(tip);
         return tip;
       }
+      function cookie(name) {
+        const m = document.cookie.match('(^|; )' + name + '=([^;]*)');
+        return m ? decodeURIComponent(m[2]) : '';
+      }
+      function pickHelpText(el) {
+        const aud = cookie('plata_aud') || 'tech';
+        const lang = cookie('plata_lang') || 'en';
+        if (aud === 'kids' && el.hasAttribute('data-help-kids')) return el.getAttribute('data-help-kids');
+        if (lang === 'he' && el.hasAttribute('data-help-he')) return el.getAttribute('data-help-he');
+        return el.getAttribute('data-help-en') || el.getAttribute('data-help-text') || '';
+      }
       function show(el) {
         const t = ensureTip();
-        t.textContent = el.getAttribute('data-help-text') || '';
+        t.textContent = pickHelpText(el);
         t.classList.remove('hidden');
         const r = el.getBoundingClientRect();
         const tw = t.offsetWidth;

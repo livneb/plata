@@ -46,7 +46,7 @@
     </div>
     <div class="mb-3">
       <div class="text-[10px] uppercase text-gray-500 mb-1">Reasoning</div>
-      <p class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ proposal.reasoning }}</p>
+      <p data-translate class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ proposal.reasoning }}</p>
     </div>
     {% if proposal.milestones %}
     <div class="mb-3">
@@ -100,7 +100,7 @@
         {% for a in proposal.similar_events %}
         <li class="flex gap-2">
           <span class="text-gray-400 font-mono whitespace-nowrap">sim {{ '%.2f' % (a.similarity or 0) }}</span>
-          <span class="flex-1">{{ a.summary }}</span>
+          <span data-translate class="flex-1">{{ a.summary }}</span>
           {% if a.price_impact %}<span class="text-gray-400 text-[10px] font-mono">{{ a.price_impact | tojson }}</span>{% endif %}
         </li>
         {% endfor %}
@@ -124,7 +124,7 @@
     </div>
     <div class="mb-3">
       <div class="text-[10px] uppercase text-gray-500 mb-1">Summary</div>
-      <p class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ event_doc.summary }}</p>
+      <p data-translate class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ event_doc.summary }}</p>
     </div>
     {% if event_doc.entity_refs %}
     <div>
