@@ -23,6 +23,105 @@
   {% include "pages/_workflow_fragment.html" %}
 </div>
 
+<!-- Reusable card-detail modal -->
+<div id="card-modal" tabindex="-1"
+     class="hidden fixed inset-0 z-[70] w-full h-full bg-black/50 flex items-center justify-center">
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-full max-w-xl p-5 max-h-[85vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <span id="cm-cat" class="text-[10px] px-1.5 py-0.5 rounded"></span>
+        <span id="cm-status" class="text-[10px] px-1.5 py-0.5 rounded"></span>
+      </div>
+      <button type="button" data-card-close class="text-gray-400 hover:text-gray-200 text-lg leading-none">✕</button>
+    </div>
+    <h2 id="cm-title" class="text-lg font-semibold mb-2"></h2>
+    <div id="cm-subtitle" class="text-sm text-gray-500 mb-2"></div>
+    <div class="grid grid-cols-2 gap-3 text-sm mb-3">
+      <div><div class="text-[10px] uppercase text-gray-500">Agent</div><div id="cm-agent" class="font-mono"></div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Lane</div><div id="cm-lane" class="font-mono"></div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">When</div><div id="cm-ts" class="font-mono"></div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Count</div><div id="cm-count" class="font-mono"></div></div>
+    </div>
+    <div id="cm-extra-wrap" class="hidden mb-3">
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Last touched</div>
+      <div id="cm-extra" class="text-sm bg-gray-50 dark:bg-gray-900 rounded p-2 border border-gray-200 dark:border-gray-700 whitespace-pre-wrap"></div>
+    </div>
+    <div id="cm-error-wrap" class="hidden mb-3">
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Error</div>
+      <div id="cm-error" class="text-sm text-red-500 bg-red-50 dark:bg-red-900/30 rounded p-2 border border-red-200 dark:border-red-800 whitespace-pre-wrap"></div>
+    </div>
+    <div id="cm-grouped-wrap" class="hidden mb-3">
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Grouped entries</div>
+      <ul id="cm-grouped" class="text-xs space-y-1 list-disc pl-5"></ul>
+    </div>
+    <details class="text-xs">
+      <summary class="cursor-pointer text-gray-500">Raw card JSON</summary>
+      <pre id="cm-raw" class="mt-2 p-2 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 whitespace-pre-wrap break-all"></pre>
+    </details>
+  </div>
+</div>
+
+<script>
+  // Click → card modal (event delegation survives the htmx 3-s swap).
+  (function () {
+    const modal = document.getElementById('card-modal');
+    function close() { modal.classList.add('hidden'); }
+    modal.querySelectorAll('[data-card-close]').forEach(b => b.addEventListener('click', close));
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+    document.addEventListener('click', async (ev) => {
+      // Dismiss (×) button on a card
+      const dismiss = ev.target.closest('[data-kanban-dismiss]');
+      if (dismiss) {
+        ev.stopPropagation();
+        const kind = dismiss.getAttribute('data-kanban-dismiss');
+        if (kind === 'historian') {
+          if (!await plataConfirm({ title: 'Dismiss historian card', message: 'Clear the historian status?', confirmLabel: 'Dismiss', danger: true })) return;
+          const r = await fetch('/historian/reset', { method: 'POST' });
+          plataToast(r.ok || r.redirected ? 'Cleared.' : 'Reset failed.', r.ok ? 'success' : 'error');
+        }
+        return;
+      }
+      const card = ev.target.closest('.kanban-card');
+      if (!card) return;
+      let data;
+      try { data = JSON.parse(card.getAttribute('data-card') || '{}'); } catch { return; }
+      document.getElementById('cm-title').textContent = data.title || '';
+      document.getElementById('cm-subtitle').textContent = data.subtitle || '';
+      const catEl = document.getElementById('cm-cat');
+      catEl.textContent = data.category || '';
+      catEl.className = 'text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+      const stEl = document.getElementById('cm-status');
+      stEl.textContent = data.status || '';
+      stEl.className = 'text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+      document.getElementById('cm-agent').textContent = data.agent || '';
+      document.getElementById('cm-lane').textContent = data.lane || '';
+      document.getElementById('cm-ts').textContent = data.ts ? new Date(data.ts).toLocaleString() : '—';
+      document.getElementById('cm-count').textContent = data.count || 1;
+      const extraWrap = document.getElementById('cm-extra-wrap');
+      if (data.extra) { extraWrap.classList.remove('hidden'); document.getElementById('cm-extra').textContent = data.extra; }
+      else extraWrap.classList.add('hidden');
+      const errWrap = document.getElementById('cm-error-wrap');
+      if (data.error) { errWrap.classList.remove('hidden'); document.getElementById('cm-error').textContent = data.error; }
+      else errWrap.classList.add('hidden');
+      const grpWrap = document.getElementById('cm-grouped-wrap');
+      const grpList = document.getElementById('cm-grouped');
+      grpList.innerHTML = '';
+      if (Array.isArray(data.older_summaries) && data.older_summaries.length) {
+        grpWrap.classList.remove('hidden');
+        data.older_summaries.slice(0, 30).forEach(s => {
+          const li = document.createElement('li');
+          li.textContent = s;
+          grpList.appendChild(li);
+        });
+      } else grpWrap.classList.add('hidden');
+      document.getElementById('cm-raw').textContent = JSON.stringify(data, null, 2);
+      modal.classList.remove('hidden');
+    });
+  })();
+</script>
+
+
 <script>
   // Collapsible lanes — state persists across reloads + htmx swaps.
   (function () {

@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.040 — 2026-05-25
+- Workflow: **Done lane groups same-agent entries within 5 s** into a single card showing `Title (N)` and exposing all the merged entries in the detail modal.
+- Workflow: **click any card → details modal** (category, status, agent, lane, when, count, last touched, error, grouped entries, raw JSON).
+- Workflow: small **×** dismiss button on the Historian card to clear status without leaving the page.
+- Historian: each batch publishes its own Redis key (`historian:batch:<i>`) — visible as a per-batch card in the Kanban (Doing while running, Done when finished, Active+error if it failed). Bounded to 8 most-recent batches in the lanes.
+- History page: signal rows with an image (metadata `image`/`image_url`/`thumbnail` or URL ending in .jpg/.png/.gif/.webp) show a **thumbnail** next to the title.
+
 ## 2.24.039 — 2026-05-25
 - New **help tooltips** across the dashboard. A small grey ?-circle next to a value shows a plain-English explanation on hover/focus. Reusable Jinja macro `{{ help_icon('key') }}` reads from a central glossary so every page uses the same wording.
 - Applied to: trade detail (Stop Loss, Take Profit, Conviction, Suggested SL/TP %, Notional, Sentiment magnitude, Net PnL, Analogs), dashboard tiles (Open positions, PnL today, Pending HITL, Signals today, LLM spend today), agents (In-flight, Spend today), risk-config rows (paper_trading_mode, risk_per_trade_pct, max_open_positions, max_daily_loss_pct, auto_approve_threshold_usd, llm.daily_budget_usd_total).

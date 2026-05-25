@@ -97,6 +97,41 @@ async def _source_cards() -> list[dict[str, Any]]:
     return cards
 
 
+async def _historian_batch_cards() -> list[dict[str, Any]]:
+    """One card per active historian batch (running / failed)."""
+    redis = get_redis()
+    out: list[dict[str, Any]] = []
+    async for k in redis.scan_iter(match="historian:batch:*", count=200):
+        data = await redis.hgetall(k)
+        if not data:
+            continue
+        state = data.get("state") or "running"
+        i = data.get("i", "?")
+        total = data.get("total_batches", "?")
+        evs = data.get("events_in_batch", "0")
+        size = data.get("size", "?")
+        lane = "doing"
+        status = "running"
+        if state == "done":
+            lane = "done"; status = "ok"
+        elif state == "failed":
+            lane = "active"; status = "error"
+        out.append({
+            "lane": lane,
+            "category": "intelligence",
+            "agent": "historian",
+            "title": f"Batch {int(i)+1 if str(i).isdigit() else i}/{total} · {evs}/{size} events",
+            "subtitle": data.get("last_event_date") or "",
+            "status": status,
+            "ts": data.get("started_at"),
+            "extra": "",
+            "error": data.get("last_error") or "",
+        })
+    # Newest batches first
+    out.sort(key=lambda c: c.get("ts") or "", reverse=True)
+    return out
+
+
 async def _historian_card() -> dict[str, Any] | None:
     """A card describing the current Historian seed run, if any."""
     redis = get_redis()
@@ -270,11 +305,10 @@ async def _doing_cards() -> list[dict[str, Any]]:
 
 
 async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
-    """Recent successful handler calls across pipeline agents, newest first.
+    """Recent successful handler calls across pipeline agents.
 
-    Excludes orchestrator / telegram_bot / scraper — their "did one tick" entries
-    are continuous watcher activity, shown on the watchers' own card last-action line,
-    not pipeline progress.
+    Adjacent entries from the same agent within 5 s are merged into a single card
+    showing the latest summary and a (N) count.
     """
     redis = get_redis()
     skip = {"orchestrator", "telegram_bot", "scraper"}
@@ -283,27 +317,56 @@ async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
         agent = k.split(":")[-1]
         if agent in skip:
             continue
-        rows = await redis.lrange(k, 0, limit)
+        rows = await redis.lrange(k, 0, limit * 4)
         for row in rows:
             parts = row.split("|", 2)
             if len(parts) != 3 or parts[1] != "ok":
                 continue
             entries.append((parts[0], agent, parts[2]))
     entries.sort(key=lambda x: x[0], reverse=True)
-    return [
-        {
+
+    # Group consecutive same-agent entries within a 5-second window into a single card.
+    cards: list[dict[str, Any]] = []
+    for ts, agent, summary in entries:
+        try:
+            ts_dt = datetime.fromisoformat(ts)
+        except Exception:  # noqa: BLE001
+            ts_dt = None
+        if cards:
+            last = cards[-1]
+            if (last["agent"] == agent
+                    and ts_dt is not None
+                    and last.get("_ts_dt") is not None
+                    and (last["_ts_dt"] - ts_dt).total_seconds() <= 5
+                    and (last["_ts_dt"] - ts_dt).total_seconds() >= 0):
+                last["count"] = last.get("count", 1) + 1
+                # keep the newest summary visible (already the first one we saw)
+                last["older_summaries"].append(summary)
+                continue
+        cards.append({
             "lane": "done",
             "category": CATEGORY.get(agent, "intelligence"),
             "agent": agent,
-            # The summary already follows the "<verb> <object>" pattern (e.g. "Enriched [gdelt] ...").
             "title": summary or AGENT_VERB.get(agent, agent),
             "subtitle": "",
             "status": "ok",
             "ts": ts,
+            "_ts_dt": ts_dt,
             "extra": "",
-        }
-        for ts, agent, summary in entries[:limit]
-    ]
+            "count": 1,
+            "older_summaries": [],
+        })
+        if len(cards) >= limit:
+            break
+    # Drop helper field before returning; format title with (N) if grouped.
+    out: list[dict[str, Any]] = []
+    for c in cards:
+        c.pop("_ts_dt", None)
+        n = c.get("count", 1)
+        if n > 1:
+            c["title"] = f"{c['title']}  ({n})"
+        out.append(c)
+    return out
 
 
 async def _gather() -> dict[str, Any]:
@@ -331,6 +394,15 @@ async def _gather() -> dict[str, Any]:
             active.append(historian_card)
         elif historian_card["lane"] == "done":
             done.insert(0, historian_card)
+
+    # Per-batch cards from the active historian run, capped so they don't drown the lanes.
+    for bc in (await _historian_batch_cards())[:8]:
+        if bc["lane"] == "doing":
+            doing.append(bc)
+        elif bc["lane"] == "active":
+            active.append(bc)
+        elif bc["lane"] == "done":
+            done.append(bc)
 
     return {
         "system_state": state or "RUNNING",

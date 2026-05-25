@@ -38,7 +38,13 @@
     </div>
     <div class="lane-body space-y-2">
       {% for c in cards %}
-      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 shadow-sm">
+      <div class="kanban-card relative bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 shadow-sm cursor-pointer hover:border-blue-400 dark:hover:border-blue-500"
+           data-card='{{ c | tojson | e }}'>
+        {% if c.agent == 'historian' and c.status in ('error','ok') %}
+        <button type="button" data-kanban-dismiss="historian"
+                class="absolute top-1 right-1 w-5 h-5 text-gray-400 hover:text-red-500 text-xs leading-none"
+                title="Dismiss">✕</button>
+        {% endif %}
         <div class="flex items-center justify-between mb-1">
           <span class="text-[10px] px-1.5 py-0.5 rounded {{ cat_colors.get(c.category, 'bg-gray-200 text-gray-700') }}">{{ c.category }}</span>
           <span class="text-[10px] px-1.5 py-0.5 rounded {{ status_colors.get(c.status, 'bg-gray-200 text-gray-700') }}">{{ c.status }}</span>

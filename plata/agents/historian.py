@@ -103,6 +103,14 @@ async def seed(
         # Heartbeat at the start of every batch so dashboards can tell apart
         # "actively working" from "process died mid-flight".
         await redis.hset(status_key, "last_progress_at", datetime.utcnow().isoformat())
+        # Per-batch card visible in the Kanban (capped TTL so it disappears once stale).
+        batch_key = f"historian:batch:{i}"
+        await redis.hset(batch_key, mapping={
+            "i": i, "total_batches": batches, "size": batch_size,
+            "state": "running", "started_at": datetime.utcnow().isoformat(),
+            "events_in_batch": 0,
+        })
+        await redis.expire(batch_key, 3600)
         prompt = (
             f"{steering_block}"
             f"Generate batch #{i+1} of {batches}. {batch_size} unique events not in any prior batch.\n"
@@ -122,6 +130,11 @@ async def seed(
             await redis.hset(status_key, mapping={
                 "failed_batches": failed,
                 "last_error": f"batch {i}: {type(exc).__name__}: {str(exc)[:160]}",
+            })
+            await redis.hset(batch_key, mapping={
+                "state": "failed",
+                "last_error": f"{type(exc).__name__}: {str(exc)[:160]}",
+                "finished_at": datetime.utcnow().isoformat(),
             })
             continue
         for ev in data.get("events", []):
@@ -166,6 +179,12 @@ async def seed(
                 "last_event_category": ev.get("category") or "",
                 "last_progress_at": datetime.utcnow().isoformat(),
             })
+            await redis.hincrby(batch_key, "events_in_batch", 1)
+            await redis.hset(batch_key, "last_event_date", ev.get("date") or "")
+        await redis.hset(batch_key, mapping={
+            "state": "done",
+            "finished_at": datetime.utcnow().isoformat(),
+        })
         _log.info("historian_batch_done", batch=i, written=written)
     await redis.hset(status_key, mapping={
         "state": "done",

@@ -39,6 +39,16 @@ async def index(request: Request, hours: int = 24, kind: str | None = None):
                 .limit(200)
             )).scalars().all()
             for r in rows:
+                # Try a few common spots for an image: metadata fields or a URL ending in .jpg/.png/etc.
+                image_url = None
+                md = r.metadata_ or {}
+                for k in ("image", "image_url", "thumbnail", "img"):
+                    if isinstance(md.get(k), str) and md[k].startswith("http"):
+                        image_url = md[k]; break
+                if not image_url and r.url:
+                    low = r.url.lower().split("?", 1)[0]
+                    if any(low.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp")):
+                        image_url = r.url
                 events.append({
                     "ts": r.fetched_at,
                     "kind": "signal",
@@ -47,6 +57,7 @@ async def index(request: Request, hours: int = 24, kind: str | None = None):
                     "subtitle": f"source={r.source}{' · dup' if r.is_duplicate else ''}",
                     "ref": r.signal_ulid,
                     "url": r.url,
+                    "image_url": image_url,
                 })
         if kind in (None, "decision"):
             rows = (await session.execute(

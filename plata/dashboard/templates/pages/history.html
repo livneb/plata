@@ -47,11 +47,22 @@
           </td>
           <td class="px-3 py-2 font-mono text-xs">{{ e.actor }}</td>
           <td class="px-3 py-2">
-            {% if e.url %}
-            <a href="{{ e.url }}" target="_blank" rel="noopener" class="hover:underline">{{ e.title }}</a>
-            {% else %}
-            {{ e.title }}
-            {% endif %}
+            <div class="flex items-start gap-2">
+              {% if e.image_url %}
+              <a href="{{ e.url or e.image_url }}" target="_blank" rel="noopener">
+                <img src="{{ e.image_url }}" alt="" loading="lazy"
+                     class="w-12 h-12 object-cover rounded border border-gray-200 dark:border-gray-700 flex-shrink-0"
+                     onerror="this.remove()" />
+              </a>
+              {% endif %}
+              <div>
+                {% if e.url %}
+                <a href="{{ e.url }}" target="_blank" rel="noopener" class="hover:underline">{{ e.title }}</a>
+                {% else %}
+                {{ e.title }}
+                {% endif %}
+              </div>
+            </div>
           </td>
           <td class="px-3 py-2 text-xs text-gray-500">{{ e.subtitle }}</td>
         </tr>
