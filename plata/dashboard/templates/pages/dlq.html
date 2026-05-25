@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}DLQ · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Dead-letter queues</h1>
+    <p class="text-sm text-gray-500 mt-1">
+      Messages that crashed during processing are parked here. Click <span class="font-medium">Replay</span> to re-publish them to the source stream — useful after a bug fix.
+    </p>
+  </div>
+
+  {% for it in items %}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    <div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
+      <div>
+        <h2 class="font-semibold font-mono text-sm">{{ it.dlq }}</h2>
+        <p class="text-xs text-gray-500">{{ it.length }} parked → replays to <span class="font-mono">{{ it.stream }}</span></p>
+      </div>
+      <div class="flex gap-2">
+        <form method="post" action="/dlq/{{ it.stream }}/replay" class="inline"
+              data-confirm="Replay {{ it.length }} message(s) from {{ it.dlq }} back into {{ it.stream }}? Agents will reprocess them."
+              data-confirm-title="Replay DLQ" data-confirm-label="Replay">
+          <button type="submit" {% if not it.length %}disabled{% endif %}
+                  class="text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium rounded-lg text-sm px-3 py-1.5">
+            ▶ Replay {{ it.length }}
+          </button>
+        </form>
+        <form method="post" action="/dlq/{{ it.stream }}/clear" class="inline"
+              data-confirm="Delete {{ it.length }} parked message(s) from {{ it.dlq }}? They cannot be recovered."
+              data-confirm-title="Discard DLQ" data-confirm-label="Discard" data-confirm-danger>
+          <button type="submit" {% if not it.length %}disabled{% endif %}
+                  class="text-white bg-red-700 hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium rounded-lg text-sm px-3 py-1.5">
+            Discard
+          </button>
+        </form>
+      </div>
+    </div>
+    {% if it.entries %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left">
+        <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+          <tr>
+            <th class="px-3 py-2">DLQ id</th>
+            <th class="px-3 py-2">Agent</th>
+            <th class="px-3 py-2">Error</th>
+            <th class="px-3 py-2">Payload preview</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in it.entries %}
+          <tr class="border-t border-gray-100 dark:border-gray-700">
+            <td class="px-3 py-2 font-mono text-xs text-gray-500">{{ e.redis_id }}</td>
+            <td class="px-3 py-2 font-mono text-xs">{{ e.agent }}</td>
+            <td class="px-3 py-2 text-red-500">{{ e.error_type }}</td>
+            <td class="px-3 py-2 text-xs truncate max-w-md" title="{{ e.payload_preview }}">{{ e.payload_preview }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

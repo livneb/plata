@@ -66,17 +66,17 @@ async def _background_cards() -> list[dict[str, Any]]:
     redis = get_redis()
     cards: list[dict[str, Any]] = []
 
-    # Scraper sources — collapse the brief "idle" between polls into "running".
+    # Scraper sources — clearer status: POLLING (mid-fetch) vs SLEEPING (between polls).
     async for k in redis.scan_iter(match="scraper:source:*", count=100):
         data = await redis.hgetall(k)
         name = k.split(":")[-1]
-        raw = data.get("status") or "running"
+        raw = data.get("status") or "sleeping"
         status = {
-            "polling": "polling",   # mid-fetch (brief, pulses)
-            "idle": "running",      # between polls — healthy
+            "polling": "polling",    # mid-fetch (brief, pulses)
+            "idle": "sleeping",      # between polls — healthy
             "halted": "halted",
             "error": "error",
-        }.get(raw, "running")
+        }.get(raw, "sleeping")
         cards.append({
             "lane": "background",
             "category": "ingestion",
@@ -89,8 +89,8 @@ async def _background_cards() -> list[dict[str, Any]]:
             "error": data.get("last_error") or "",
         })
 
-    # Orchestrator + telegram (driven by agent_status hash)
-    for name in ("orchestrator", "telegram_bot"):
+    # Orchestrator (watching) and telegram_bot (listening) — they're event-driven, not polling.
+    for name, watch_status in (("orchestrator", "watching"), ("telegram_bot", "listening")):
         data = await redis.hgetall(f"agent_status:{name}")
         if not data:
             continue
@@ -100,7 +100,7 @@ async def _background_cards() -> list[dict[str, Any]]:
             "agent": name,
             "title": AGENT_VERB.get(name, name),
             "subtitle": data.get("container", ""),
-            "status": "halted" if data.get("halted") == "True" else "running",
+            "status": "halted" if data.get("halted") == "True" else watch_status,
             "ts": data.get("last_heartbeat"),
             "extra": "",
         })
