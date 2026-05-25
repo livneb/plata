@@ -1,66 +1,107 @@
 """Entity canonical-id resolver.
 
 Different signals (and the LLM) refer to the same real-world entity with different
-strings: USA / US / United States / America. This module collapses common aliases to a
-single canonical id per entity type, so the graph stops creating duplicate nodes.
+strings: USA / US / United States / America → "United States". This module collapses
+common aliases to a single human-readable canonical name per entity type, so the graph
+stops creating duplicate nodes. ISO codes become aliases of the canonical full name.
 
 The function is called both at write time (in `graph_ingestion`) AND by the maintenance
-endpoint that merges historical duplicates.
+endpoint that merges historical duplicates (`POST /graph/normalize_aliases`).
 """
 from __future__ import annotations
 
 
-# ISO-3 (the canonical form we want everywhere) keyed by every known alias.
+# Canonical human-readable country name keyed by every known alias.
+# The right-hand side is what the entity node will be called; ISO-2 / ISO-3 / informal
+# names all collapse into it.
 COUNTRY_ALIASES: dict[str, str] = {
     # United States
-    "US": "USA", "USA": "USA", "UNITED_STATES": "USA", "UNITED STATES": "USA",
-    "AMERICA": "USA", "U.S.": "USA", "U.S.A.": "USA",
+    "US": "United States", "USA": "United States", "UNITED_STATES": "United States",
+    "UNITED STATES": "United States", "AMERICA": "United States",
+    "U.S.": "United States", "U.S.A.": "United States",
     # Israel
-    "IL": "ISR", "ISR": "ISR", "ISRAEL": "ISR",
+    "IL": "Israel", "ISR": "Israel", "ISRAEL": "Israel",
     # Iran
-    "IR": "IRN", "IRN": "IRN", "IRAN": "IRN",
+    "IR": "Iran", "IRN": "Iran", "IRAN": "Iran",
     # Russia
-    "RU": "RUS", "RUS": "RUS", "RUSSIA": "RUS", "RUSSIAN_FEDERATION": "RUS",
+    "RU": "Russia", "RUS": "Russia", "RUSSIA": "Russia",
+    "RUSSIAN_FEDERATION": "Russia", "RUSSIAN FEDERATION": "Russia",
     # China
-    "CN": "CHN", "CHN": "CHN", "CHINA": "CHN", "PRC": "CHN",
+    "CN": "China", "CHN": "China", "CHINA": "China", "PRC": "China",
     # Germany
-    "DE": "DEU", "DEU": "DEU", "GERMANY": "DEU",
+    "DE": "Germany", "DEU": "Germany", "GERMANY": "Germany",
     # United Kingdom
-    "UK": "GBR", "GB": "GBR", "GBR": "GBR", "BRITAIN": "GBR",
-    "UNITED_KINGDOM": "GBR", "UNITED KINGDOM": "GBR", "ENGLAND": "GBR",
+    "UK": "United Kingdom", "GB": "United Kingdom", "GBR": "United Kingdom",
+    "BRITAIN": "United Kingdom", "UNITED_KINGDOM": "United Kingdom",
+    "UNITED KINGDOM": "United Kingdom", "ENGLAND": "United Kingdom",
     # European Union
-    "EU": "EUR", "EUR": "EUR", "EUROPEAN_UNION": "EUR", "EUROPEAN UNION": "EUR",
-    # Major others
-    "IN": "IND", "IND": "IND", "INDIA": "IND",
-    "JP": "JPN", "JPN": "JPN", "JAPAN": "JPN",
-    "KR": "KOR", "KOR": "KOR", "SOUTH_KOREA": "KOR", "KOREA": "KOR",
-    "FR": "FRA", "FRA": "FRA", "FRANCE": "FRA",
-    "ES": "ESP", "ESP": "ESP", "SPAIN": "ESP",
-    "IT": "ITA", "ITA": "ITA", "ITALY": "ITA",
-    "BR": "BRA", "BRA": "BRA", "BRAZIL": "BRA",
-    "CA": "CAN", "CAN": "CAN", "CANADA": "CAN",
-    "AU": "AUS", "AUS": "AUS", "AUSTRALIA": "AUS",
-    "MX": "MEX", "MEX": "MEX", "MEXICO": "MEX",
-    "SA": "SAU", "SAU": "SAU", "SAUDI_ARABIA": "SAU", "SAUDI ARABIA": "SAU",
-    "AE": "ARE", "ARE": "ARE", "UAE": "ARE",
-    "QA": "QAT", "QAT": "QAT", "QATAR": "QAT",
-    "TR": "TUR", "TUR": "TUR", "TURKEY": "TUR", "TÜRKIYE": "TUR",
-    "UA": "UKR", "UKR": "UKR", "UKRAINE": "UKR",
-    "NG": "NGA", "NGA": "NGA", "NIGERIA": "NGA",
-    "ID": "IDN", "IDN": "IDN", "INDONESIA": "IDN",
-    "PK": "PAK", "PAK": "PAK", "PAKISTAN": "PAK",
-    "EG": "EGY", "EGY": "EGY", "EGYPT": "EGY",
-    "ZA": "ZAF", "ZAF": "ZAF", "SOUTH_AFRICA": "ZAF", "SOUTH AFRICA": "ZAF",
-    "AF": "AFG", "AFG": "AFG", "AFGHANISTAN": "AFG",
-    "LB": "LBN", "LBN": "LBN", "LEBANON": "LBN",
-    "SY": "SYR", "SYR": "SYR", "SYRIA": "SYR",
-    "IQ": "IRQ", "IRQ": "IRQ", "IRAQ": "IRQ",
-    "SG": "SGP", "SGP": "SGP", "SINGAPORE": "SGP",
-    "HK": "HKG", "HKG": "HKG", "HONG_KONG": "HKG", "HONG KONG": "HKG",
-    "TW": "TWN", "TWN": "TWN", "TAIWAN": "TWN",
-    "KP": "PRK", "PRK": "PRK", "NORTH_KOREA": "PRK", "NORTH KOREA": "PRK",
-    "VN": "VNM", "VNM": "VNM", "VIETNAM": "VNM", "VIET_NAM": "VNM",
-    "TH": "THA", "THA": "THA", "THAILAND": "THA",
+    "EU": "European Union", "EUR": "European Union",
+    "EUROPEAN_UNION": "European Union", "EUROPEAN UNION": "European Union",
+    # India
+    "IN": "India", "IND": "India", "INDIA": "India",
+    # Japan
+    "JP": "Japan", "JPN": "Japan", "JAPAN": "Japan",
+    # South Korea
+    "KR": "South Korea", "KOR": "South Korea",
+    "SOUTH_KOREA": "South Korea", "SOUTH KOREA": "South Korea", "KOREA": "South Korea",
+    # France
+    "FR": "France", "FRA": "France", "FRANCE": "France",
+    # Spain
+    "ES": "Spain", "ESP": "Spain", "SPAIN": "Spain",
+    # Italy
+    "IT": "Italy", "ITA": "Italy", "ITALY": "Italy",
+    # Brazil
+    "BR": "Brazil", "BRA": "Brazil", "BRAZIL": "Brazil",
+    # Canada
+    "CA": "Canada", "CAN": "Canada", "CANADA": "Canada",
+    # Australia
+    "AU": "Australia", "AUS": "Australia", "AUSTRALIA": "Australia",
+    # Mexico
+    "MX": "Mexico", "MEX": "Mexico", "MEXICO": "Mexico",
+    # Saudi Arabia
+    "SA": "Saudi Arabia", "SAU": "Saudi Arabia",
+    "SAUDI_ARABIA": "Saudi Arabia", "SAUDI ARABIA": "Saudi Arabia",
+    # UAE
+    "AE": "United Arab Emirates", "ARE": "United Arab Emirates", "UAE": "United Arab Emirates",
+    # Qatar
+    "QA": "Qatar", "QAT": "Qatar", "QATAR": "Qatar",
+    # Turkey
+    "TR": "Turkey", "TUR": "Turkey", "TURKEY": "Turkey", "TÜRKIYE": "Turkey",
+    # Ukraine
+    "UA": "Ukraine", "UKR": "Ukraine", "UKRAINE": "Ukraine",
+    # Nigeria
+    "NG": "Nigeria", "NGA": "Nigeria", "NIGERIA": "Nigeria",
+    # Indonesia
+    "ID": "Indonesia", "IDN": "Indonesia", "INDONESIA": "Indonesia",
+    # Pakistan
+    "PK": "Pakistan", "PAK": "Pakistan", "PAKISTAN": "Pakistan",
+    # Egypt
+    "EG": "Egypt", "EGY": "Egypt", "EGYPT": "Egypt",
+    # South Africa
+    "ZA": "South Africa", "ZAF": "South Africa",
+    "SOUTH_AFRICA": "South Africa", "SOUTH AFRICA": "South Africa",
+    # Afghanistan
+    "AF": "Afghanistan", "AFG": "Afghanistan", "AFGHANISTAN": "Afghanistan",
+    # Lebanon
+    "LB": "Lebanon", "LBN": "Lebanon", "LEBANON": "Lebanon",
+    # Syria
+    "SY": "Syria", "SYR": "Syria", "SYRIA": "Syria",
+    # Iraq
+    "IQ": "Iraq", "IRQ": "Iraq", "IRAQ": "Iraq",
+    # Singapore
+    "SG": "Singapore", "SGP": "Singapore", "SINGAPORE": "Singapore",
+    # Hong Kong
+    "HK": "Hong Kong", "HKG": "Hong Kong",
+    "HONG_KONG": "Hong Kong", "HONG KONG": "Hong Kong",
+    # Taiwan
+    "TW": "Taiwan", "TWN": "Taiwan", "TAIWAN": "Taiwan",
+    # North Korea
+    "KP": "North Korea", "PRK": "North Korea",
+    "NORTH_KOREA": "North Korea", "NORTH KOREA": "North Korea",
+    # Vietnam
+    "VN": "Vietnam", "VNM": "Vietnam", "VIETNAM": "Vietnam", "VIET_NAM": "Vietnam",
+    # Thailand
+    "TH": "Thailand", "THA": "Thailand", "THAILAND": "Thailand",
 }
 
 
@@ -69,14 +110,13 @@ def _norm_key(s: str) -> str:
 
 
 def canonical_country(name_or_id: str) -> str:
-    """Return ISO-3 canonical id for a country alias. Unknown aliases pass through unchanged
-    (so a typo doesn't get silently absorbed into the wrong entity)."""
+    """Return canonical human-readable country name for any alias. Unknown aliases pass
+    through unchanged so a typo doesn't get silently absorbed into the wrong entity."""
     if not name_or_id:
         return name_or_id
     key = _norm_key(name_or_id)
     if key in COUNTRY_ALIASES:
         return COUNTRY_ALIASES[key]
-    # Try replacing space-with-underscore too
     key_u = key.replace(" ", "_")
     if key_u in COUNTRY_ALIASES:
         return COUNTRY_ALIASES[key_u]
@@ -86,11 +126,16 @@ def canonical_country(name_or_id: str) -> str:
 def canonicalize_entity(type_: str, id_: str, name: str) -> tuple[str, str]:
     """Return (canonical_id, canonical_name) for an entity.
 
-    Currently only countries are normalized — extend per type as needed (people by full
-    name + dob, tickers by Bybit symbol normalization, etc.).
+    - Country: collapse ISO codes + informal names → full English name.
+    - Other types: pass through unchanged for now (extend per type as needed).
     """
     t = (type_ or "").lower()
     if t == "country":
-        canon = canonical_country(id_) or canonical_country(name)
-        return (canon, canon)  # store name == ISO-3 for predictability
+        # Try both id and name; whichever resolves wins. id_ usually has the LLM's choice.
+        canon = canonical_country(id_)
+        if canon == id_:
+            canon = canonical_country(name)
+        if canon:
+            return (canon, canon)
+        return (id_, name)
     return (id_, name)

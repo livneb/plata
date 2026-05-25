@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.062 — 2026-05-25
+- Country canonical form flipped: canonical id/name is now the **human-readable full name** ("Israel", "United States", "United Kingdom", "European Union", …). ISO-2 / ISO-3 codes (IL/ISR, US/USA, …) become aliases of the canonical node. Re-run the 🧹 Dedup button on the graph to apply to existing nodes.
+
 ## 2.24.061 — 2026-05-25
 - 🧹 **Dedup** button on the graph toolbar. One click → previews how many alias-duplicate entity nodes will be merged (US↔USA, IL↔ISR, Iran↔IRN, etc.), confirms, then runs the merge through `POST /graph/normalize_aliases` and reloads. Cache invalidated automatically.
 
