@@ -49,10 +49,18 @@ Output JSON only, matching the schema."""
 async def seed(
     total_events: int = 1000,
     batch_size: int = 10,
-    start_year: int = 2005,
-    end_year: int = 2025,
+    start_date: str = "2005-01-01",
+    end_date: str = "2025-12-31",
+    brief: str = "",
+    focus: str = "",
 ) -> None:
-    from plata.core.bus import get_redis  # local: avoid cycle at import
+    """Seed historical events.
+
+    - start_date / end_date: ISO YYYY-MM-DD inclusive bounds for event dates.
+    - brief: optional free-text research direction (any language). Steers what the LLM looks for.
+    - focus: optional comma-separated assets/tickers/topics to bias the output toward.
+    """
+    from plata.core.bus import get_redis
     redis = get_redis()
     status_key = "historian:status"
     await redis.hset(status_key, mapping={
@@ -60,25 +68,45 @@ async def seed(
         "started_at": datetime.utcnow().isoformat(),
         "total_target": total_events,
         "batch_size": batch_size,
-        "start_year": start_year,
-        "end_year": end_year,
+        "start_date": start_date,
+        "end_date": end_date,
+        "brief": brief[:240],
+        "focus": focus[:240],
         "written": 0,
         "failed_batches": 0,
         "last_event_date": "",
         "last_event_category": "",
         "last_error": "",
     })
+    try:
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+    except Exception:
+        await redis.hset(status_key, mapping={"state": "failed", "last_error": "invalid date"})
+        return
+
     await ensure_indexes()
     llm = LLMClient("historian")
     batches = total_events // batch_size
     written = 0
     failed = 0
+
+    # Build the steering paragraph once.
+    steering = []
+    if brief.strip():
+        steering.append(f"RESEARCH BRIEF (in user's own words; translate if needed):\n{brief.strip()}")
+    if focus.strip():
+        steering.append(f"FOCUS ASSETS / TOPICS: {focus.strip()}")
+    steering_block = "\n\n".join(steering) + ("\n\n" if steering else "")
+
     for i in range(batches):
         prompt = (
+            f"{steering_block}"
             f"Generate batch #{i+1} of {batches}. {batch_size} unique events not in any prior batch.\n"
-            f"All event dates MUST fall between {start_year}-01-01 and {end_year}-12-31 inclusive.\n"
-            f"Cover varied years within that window, varied regions, varied categories. "
-            f"Rank by market impact (largest first). Be specific (named entities, real dates)."
+            f"All event dates MUST fall between {start_date} and {end_date} inclusive.\n"
+            f"Cover varied dates within that window. Rank by market impact (largest first). "
+            f"Be specific (named entities, real dates). If a research brief is given, every event "
+            f"should be relevant to it; otherwise return the largest market-moving events of the window."
         )
         try:
             data = await llm.structured(
@@ -99,7 +127,7 @@ async def seed(
             except Exception:
                 continue
             # Drop events outside the requested window (LLM sometimes ignores instructions).
-            if ts.year < start_year or ts.year > end_year:
+            if ts < start_dt or ts > end_dt:
                 continue
             event_ulid = new_ulid()
             embedding = await embed(ev["narrative"], input_type="document")

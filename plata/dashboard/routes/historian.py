@@ -46,23 +46,29 @@ async def fragment(request: Request):
 async def start(
     total: int = Form(100),
     batch_size: int = Form(10),
-    start_year: int = Form(2005),
-    end_year: int = Form(2025),
+    start_date: str = Form("2005-01-01"),
+    end_date: str = Form("2025-12-31"),
+    brief: str = Form(""),
+    focus: str = Form(""),
 ):
     total = max(10, min(int(total), 2000))
     batch_size = max(1, min(int(batch_size), 25))
-    start_year = max(1990, min(int(start_year), 2100))
-    end_year = max(1990, min(int(end_year), 2100))
-    if start_year > end_year:
-        start_year, end_year = end_year, start_year
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
     redis = get_redis()
     current = await redis.hget(STATUS_KEY, "state")
     if current == "running":
         return RedirectResponse(url="/historian/", status_code=303)
     from plata.agents.historian import seed
     asyncio.create_task(
-        seed(total_events=total, batch_size=batch_size,
-             start_year=start_year, end_year=end_year),
+        seed(
+            total_events=total,
+            batch_size=batch_size,
+            start_date=start_date,
+            end_date=end_date,
+            brief=brief[:2000],
+            focus=focus[:500],
+        ),
         name="historian-seed",
     )
     return RedirectResponse(url="/historian/", status_code=303)

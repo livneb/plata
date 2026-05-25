@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.027 — 2026-05-25
+- Historian seed now accepts a **research brief** (free text, any language) and **focus assets/topics**. The brief steers what the LLM looks for; if empty, the agent surfaces the largest market-moving events in the window.
+- Year inputs replaced with **date inputs** (day-level granularity). Out-of-range events are dropped at validation.
+- Status panel shows the active brief, focus list, and date window.
+
 ## 2.24.026 — 2026-05-25
 - Historian seed UI: added **From year** / **To year** inputs. The LLM prompt now constrains the window, and any out-of-range events the LLM produces anyway are dropped at validation time. The status panel shows the active window.
 - Prompt also asks the LLM to rank by market impact (largest first).
