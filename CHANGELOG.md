@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.028 — 2026-05-25
+- Graph page: floating toolbar with **+ / − / fit-all (⤢) / 1:1** zoom buttons (also keyboard `+ / − / 0`).
+- Graph page: **Esc** (or the new ← Back button) clears focus and returns to the last view.
+- Graph page: labels truncated to ~32 chars (full text in side panel), `min-zoomed-font-size` hides labels at low zoom so the graph is readable, text has a translucent background to keep it from blending into edges. Wider node spacing.
+- Workflow Kanban: a running **Historian** seed now shows up as a card with "Seeded N/M (P%)" progress in Doing; completed runs appear in Done; failures appear in Active.
+
 ## 2.24.027 — 2026-05-25
 - Historian seed now accepts a **research brief** (free text, any language) and **focus assets/topics**. The brief steers what the LLM looks for; if empty, the agent surfaces the largest market-moving events in the window.
 - Year inputs replaced with **date inputs** (day-level granularity). Out-of-range events are dropped at validation.

@@ -97,6 +97,54 @@ async def _source_cards() -> list[dict[str, Any]]:
     return cards
 
 
+async def _historian_card() -> dict[str, Any] | None:
+    """A card describing the current Historian seed run, if any."""
+    redis = get_redis()
+    data = await redis.hgetall("historian:status")
+    if not data:
+        return None
+    state = data.get("state") or ""
+    written = int(data.get("written") or 0)
+    target = int(data.get("total_target") or 0)
+    pct = (written * 100 // target) if target > 0 else 0
+    brief = (data.get("brief") or "").strip()
+    last = data.get("last_event_date") or ""
+    if state == "running":
+        return {
+            "lane": "doing",
+            "category": "intelligence",
+            "agent": "historian",
+            "title": f"Seeding {written}/{target} ({pct}%)",
+            "subtitle": brief[:80] or "largest market-moving events",
+            "status": "running",
+            "ts": data.get("started_at"),
+            "extra": f"last event: {last}" if last else "",
+        }
+    if state == "done":
+        return {
+            "lane": "done",
+            "category": "intelligence",
+            "agent": "historian",
+            "title": f"Seeded {written} historical events",
+            "subtitle": brief[:80] or "largest market-moving events",
+            "status": "ok",
+            "ts": data.get("finished_at"),
+            "extra": "",
+        }
+    if state == "failed":
+        return {
+            "lane": "active",
+            "category": "intelligence",
+            "agent": "historian",
+            "title": "Historian seed failed",
+            "subtitle": (data.get("last_error") or "")[:80],
+            "status": "error",
+            "ts": data.get("started_at"),
+            "extra": "",
+        }
+    return None
+
+
 async def _active_cards() -> list[dict[str, Any]]:
     """Event-driven observers — orchestrator, telegram bot."""
     redis = get_redis()
@@ -236,6 +284,7 @@ async def _gather() -> dict[str, Any]:
     sources = await _source_cards()
     active = await _active_cards()
     doing = await _doing_cards()
+    done = await _done_cards()
     sleeping_lane: list[dict] = []
     for c in sources:
         if c["lane"] == "doing":
@@ -245,6 +294,15 @@ async def _gather() -> dict[str, Any]:
         else:
             sleeping_lane.append(c)
 
+    historian_card = await _historian_card()
+    if historian_card:
+        if historian_card["lane"] == "doing":
+            doing.insert(0, historian_card)
+        elif historian_card["lane"] == "active":
+            active.append(historian_card)
+        elif historian_card["lane"] == "done":
+            done.insert(0, historian_card)
+
     return {
         "system_state": state or "RUNNING",
         "paper_mode": settings.default_paper_trading_mode,
@@ -252,7 +310,7 @@ async def _gather() -> dict[str, Any]:
         "active": active,
         "ready": await _ready_cards(),
         "doing": doing,
-        "done": await _done_cards(),
+        "done": done,
         "as_of": datetime.now(timezone.utc).isoformat(),
     }
 
