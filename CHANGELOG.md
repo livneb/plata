@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.061 — 2026-05-25
+- 🧹 **Dedup** button on the graph toolbar. One click → previews how many alias-duplicate entity nodes will be merged (US↔USA, IL↔ISR, Iran↔IRN, etc.), confirms, then runs the merge through `POST /graph/normalize_aliases` and reloads. Cache invalidated automatically.
+
 ## 2.24.060 — 2026-05-25
 - **Future-proof entity dedup**: new `plata/core/entity_aliases.py` maps country aliases (US/USA/UNITED_STATES/America → `USA`, IL/ISR/Israel → `ISR`, IR/IRN/Iran → `IRN`, +30 more) to a canonical ISO-3 id. `graph_ingestion` now canonicalises every entity before upserting — duplicate nodes stop being created.
 - **One-shot history merge**: new `POST /graph/normalize_aliases` endpoint. Default `?dry_run=true` previews which alias nodes would be merged into their canonical sibling; `?dry_run=false` actually does it (unions aliases, averages sentiment_ewma, rewrites every edge that points to the alias, deletes the alias node). Safe to re-run.

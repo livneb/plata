@@ -32,6 +32,8 @@
       <input id="min-degree" type="range" min="1" max="6" value="2" class="w-20 align-middle" />
       <span id="min-degree-val" class="text-gray-400 font-mono">2</span>
       <button id="reload-btn" class="px-3 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Reload</button>
+      <button id="normalize-btn" title="Merge duplicate entity nodes (US/USA, IL/ISR, …)"
+              class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">🧹 Dedup</button>
       <button id="clear-focus" class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hidden">← Back</button>
     </div>
   </div>
@@ -638,6 +640,27 @@
       }).run();
     });
     reloadBtn.addEventListener('click', () => { focusKey = null; loadGraph(); });
+    document.getElementById('normalize-btn').addEventListener('click', async () => {
+      // Preview first.
+      const r = await fetch('/graph/normalize_aliases?dry_run=true', { method: 'POST' });
+      const preview = await r.json();
+      if (!preview.count) { plataToast('No alias duplicates to merge.', 'success'); return; }
+      const ok = await plataConfirm({
+        title: 'Merge alias duplicates',
+        message: `Found ${preview.count} duplicate entity node(s) to merge into their canonical form (US→USA, IL→ISR, etc.). Apply?`,
+        confirmLabel: 'Merge',
+        danger: true,
+      });
+      if (!ok) return;
+      const r2 = await fetch('/graph/normalize_aliases?dry_run=false', { method: 'POST' });
+      const done = await r2.json();
+      plataToast(`Merged ${done.count} alias node(s). Reloading graph…`, 'success');
+      // Bust cache + reload.
+      try { localStorage.removeItem('plata-graph-cache:v1:' + limitSel.value); } catch {}
+      focusKey = null;
+      unfocusedCache = { limit: null, data: null, positions: null, viewport: null };
+      loadGraph();
+    });
     limitSel.addEventListener('change', () => loadGraph());
 
     // Filter & layout controls re-render from the current in-memory data (no fetch).
