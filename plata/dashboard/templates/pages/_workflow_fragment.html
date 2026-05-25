@@ -47,7 +47,7 @@
         <div class="flex items-center justify-between mt-1.5">
           <span class="text-[10px] font-mono text-gray-400">{{ c.agent }}</span>
           {% if c.ts %}
-          <span class="text-[10px] text-gray-400" title="{{ c.ts }}">{{ c.ts | time_ago }}</span>
+          <time class="text-[10px] text-gray-400 font-mono" data-elapsed="{{ c.ts }}" title="{{ c.ts }}">{{ c.ts | time_ago }}</time>
           {% endif %}
         </div>
       </div>

@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.013 — 2026-05-25
+- Kanban cards now show a live-ticking elapsed time (updates every second client-side).
+- Background lane: sources no longer flicker between "polling" and "idle". Steady state is now "RUNNING"; "POLLING" pulses only during the brief active fetch.
+
 ## 2.24.012 — 2026-05-25
 - Forms now auto-save drafts to `localStorage` on every keystroke and restore them on reload. Cleared on submit. Password inputs are never stored. Enabled on risk-config create/edit and login (email only).
 - Opt-in for any form: `<form data-persist="some-unique-key">`.

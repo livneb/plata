@@ -66,17 +66,24 @@ async def _background_cards() -> list[dict[str, Any]]:
     redis = get_redis()
     cards: list[dict[str, Any]] = []
 
-    # Scraper sources
+    # Scraper sources — collapse the brief "idle" between polls into "running".
     async for k in redis.scan_iter(match="scraper:source:*", count=100):
         data = await redis.hgetall(k)
         name = k.split(":")[-1]
+        raw = data.get("status") or "running"
+        status = {
+            "polling": "polling",   # mid-fetch (brief, pulses)
+            "idle": "running",      # between polls — healthy
+            "halted": "halted",
+            "error": "error",
+        }.get(raw, "running")
         cards.append({
             "lane": "background",
             "category": "ingestion",
             "agent": "scraper",
             "title": SOURCE_LABELS.get(name, f"Polling {name}"),
             "subtitle": f"every {data.get('interval_sec', '?')}s",
-            "status": data.get("status") or "idle",
+            "status": status,
             "ts": data.get("last_poll_at"),
             "extra": f"fetched {data.get('last_fetched', '0')} last cycle",
             "error": data.get("last_error") or "",

@@ -268,6 +268,31 @@
       document.body.addEventListener('htmx:afterSwap', e => init(e.target));
     })();
 
+    // ---------- Live elapsed-time ticker ----------
+    // <time data-elapsed="<ISO>"> elements re-render every second with a compact "Xs/Xm/Xh/Xd ago" string.
+    function plataFormatElapsed(iso) {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+      if (secs < 60) return secs + 's ago';
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return mins + 'm ' + (secs % 60) + 's ago';
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return hours + 'h ' + (mins % 60) + 'm ago';
+      const days = Math.floor(hours / 24);
+      return days + 'd ' + (hours % 24) + 'h ago';
+    }
+    function plataTickElapsed(root) {
+      (root || document).querySelectorAll('time[data-elapsed]').forEach(el => {
+        const iso = el.getAttribute('data-elapsed');
+        if (!iso) return;
+        el.textContent = plataFormatElapsed(iso);
+      });
+    }
+    setInterval(() => plataTickElapsed(), 1000);
+    document.addEventListener('DOMContentLoaded', () => plataTickElapsed());
+    document.body.addEventListener('htmx:afterSwap', e => plataTickElapsed(e.target));
+
     // ---------- Local-time formatter ----------
     // Any <time data-utc="ISO"> element will render in the browser's locale + timezone.
     function plataFormatLocalTimes(root) {
