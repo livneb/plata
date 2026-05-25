@@ -86,9 +86,11 @@ class Strategist(BaseAgent):
         for a in analogs_raw[:ANALOG_K]:
             doc = await get_event(a["ulid"]) if a.get("ulid") else None
             price_impact = (doc or {}).get("price_impact") if doc else None
+            # RediSearch cosine score is in [0, 2]; similarity = 1 - score may drift slightly outside [0,1] due to float32.
+            similarity = max(0.0, min(1.0, 1.0 - float(a.get("score") or 0.0)))
             analogs.append(AnalogousEvent(
                 event_ulid=a.get("ulid") or "",
-                similarity=1.0 - a.get("score", 0.0),
+                similarity=similarity,
                 summary=a.get("summary") or "",
                 price_impact=price_impact,
             ))

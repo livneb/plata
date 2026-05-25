@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.019 — 2026-05-25
+- Fix strategist `ValidationError` on `AnalogousEvent.similarity` when KNN returns a near-identical neighbor: `1 - score` could be `1.0000001` due to float32 precision. Now clamped to [0, 1].
+
 ## 2.24.018 — 2026-05-25
 - Done-lane cards now describe what each agent *did* instead of dumping the raw payload ULID. Per-agent summaries:
   - `Enriched [gdelt] <title>` — graph_ingestion
