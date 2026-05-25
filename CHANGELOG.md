@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.038 — 2026-05-25
+- Graph readability pass:
+  - Entity nodes carry a **type icon** (👤 person · 🏢 company · 🌍 country · 💰 asset · 🏛️ org · 💹 ticker) in the label.
+  - Node size scales with degree, so hub entities (USA, IRN, …) visually pop.
+  - Hub repulsion is degree-weighted (`120k + 30k × edges`) — the more connections, the more space they demand.
+  - `idealEdgeLength` 220 → **320**, `nodeOverlap` 60 → **120**, `componentSpacing` 120 → **200**, iterations 3500 → **4500**.
+  - Edge labels hidden by default to prevent the "mentions" text pileup. Hover an edge (or a node — which highlights its edges) to see the relation label.
+  - Event labels sit on a rounded translucent background; entity labels now sit **inside** the rounded rectangle, not below it.
+
 ## 2.24.037 — 2026-05-25
 - Telegram polling: `Conflict: terminated by other getUpdates` no longer floods the logs with stack traces. It's now a single concise WARN line on first occurrence, with the actionable hint to remove `TELEGRAM_BOT_TOKEN` from any service other than ingestion_hub.
 
