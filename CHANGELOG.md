@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.014 — 2026-05-25
+- Agents page now shows today's LLM spend per agent and the daily total in the header. Data comes from existing Redis counters (`cost:daily:<date>:agent:<name>`).
+
 ## 2.24.013 — 2026-05-25
 - Kanban cards now show a live-ticking elapsed time (updates every second client-side).
 - Background lane: sources no longer flicker between "polling" and "idle". Steady state is now "RUNNING"; "POLLING" pulses only during the brief active fetch.
