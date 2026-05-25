@@ -1,27 +1,99 @@
 {% extends "base.html" %}
-{% block title %}Dashboard – Plata{% endblock %}
+{% block title %}Dashboard · Plata{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">Overview</h1>
-<div class="grid gap-4 grid-cols-1 md:grid-cols-4 mb-4">
-  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">Open Positions</h5>
-    <p class="text-2xl font-semibold">—</p>
+<div class="space-y-4">
+  <div class="flex items-baseline justify-between">
+    <h1 class="text-2xl font-semibold">Overview</h1>
+    <div>
+      {% if system_state == 'RUNNING' %}
+      <span class="bg-green-100 text-green-800 text-sm font-semibold px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">RUNNING</span>
+      {% else %}
+      <span class="bg-red-100 text-red-800 text-sm font-semibold px-2 py-0.5 rounded dark:bg-red-900 dark:text-red-300">{{ system_state }}</span>
+      {% endif %}
+    </div>
   </div>
-  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">Daily PnL</h5>
-    <p class="text-2xl font-semibold">—</p>
+
+  <div class="grid gap-4 grid-cols-2 lg:grid-cols-5">
+    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+      <div class="text-xs uppercase text-gray-500">Open positions</div>
+      <div class="text-2xl font-semibold">{{ open_positions }}</div>
+    </div>
+    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+      <div class="text-xs uppercase text-gray-500">PnL today</div>
+      <div class="text-2xl font-semibold {% if daily_pnl > 0 %}text-green-500{% elif daily_pnl < 0 %}text-red-500{% endif %}">${{ '%.2f' % daily_pnl }}</div>
+    </div>
+    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+      <div class="text-xs uppercase text-gray-500">Pending HITL</div>
+      <div class="text-2xl font-semibold">{{ pending_hitl }}</div>
+    </div>
+    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+      <div class="text-xs uppercase text-gray-500">Signals today</div>
+      <div class="text-2xl font-semibold">{{ signals_24h }}</div>
+    </div>
+    <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+      <div class="text-xs uppercase text-gray-500">LLM spend today</div>
+      <div class="text-2xl font-semibold">${{ '%.4f' % llm_spend_today }}</div>
+    </div>
   </div>
-  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">Pending HITL</h5>
-    <p class="text-2xl font-semibold">—</p>
+
+  <div class="grid gap-4 grid-cols-1 lg:grid-cols-3">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+      <div class="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <h3 class="font-semibold">Recent signals</h3>
+        <a href="/activity/" class="text-xs text-blue-500 hover:underline">View all</a>
+      </div>
+      <ul class="divide-y divide-gray-100 dark:divide-gray-700">
+        {% for s in recent_signals %}
+        <li class="p-3 text-sm">
+          <div class="text-xs text-gray-400" title="{{ s.fetched_at or '' }}">{{ s.fetched_at | time_ago }} · {{ s.source }}</div>
+          <div class="truncate">{{ (s.title or s.body or '')[:120] }}</div>
+        </li>
+        {% else %}
+        <li class="p-6 text-center text-gray-400 text-sm">No signals yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+      <div class="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <h3 class="font-semibold">Recent trades</h3>
+        <a href="/trades/" class="text-xs text-blue-500 hover:underline">View all</a>
+      </div>
+      <ul class="divide-y divide-gray-100 dark:divide-gray-700">
+        {% for t in recent_trades %}
+        <li class="p-3 text-sm flex justify-between gap-2">
+          <div>
+            <div class="text-xs text-gray-400" title="{{ t.opened_at or '' }}">{{ t.opened_at | time_ago }}</div>
+            <div>{{ t.symbol }} <span class="text-xs text-gray-500">{{ t.side }} {{ t.qty }}</span></div>
+          </div>
+          <div class="text-right text-sm">
+            {% if t.net_pnl is not none %}
+            <span class="{% if t.net_pnl > 0 %}text-green-500{% elif t.net_pnl < 0 %}text-red-500{% endif %}">${{ '%.2f' % t.net_pnl }}</span>
+            {% else %}<span class="text-xs text-gray-400">open</span>{% endif %}
+          </div>
+        </li>
+        {% else %}
+        <li class="p-6 text-center text-gray-400 text-sm">No trades yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+      <div class="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <h3 class="font-semibold">Recent errors</h3>
+        <a href="/errors/" class="text-xs text-blue-500 hover:underline">View all</a>
+      </div>
+      <ul class="divide-y divide-gray-100 dark:divide-gray-700">
+        {% for e in recent_errors %}
+        <li class="p-3 text-sm">
+          <div class="text-xs text-gray-400" title="{{ e.ts or '' }}">{{ e.ts | time_ago }} · {{ e.agent }} · {{ e.severity }}</div>
+          <div class="truncate">{{ e.message }}</div>
+        </li>
+        {% else %}
+        <li class="p-6 text-center text-gray-400 text-sm">No errors logged.</li>
+        {% endfor %}
+      </ul>
+    </div>
   </div>
-  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-    <h5 class="text-xs uppercase text-gray-500 dark:text-gray-400">LLM Spend Today</h5>
-    <p class="text-2xl font-semibold">—</p>
-  </div>
-</div>
-<div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-  <h2 class="text-lg font-semibold mb-2">Recent Activity</h2>
-  <p class="text-gray-500">Dashboard data wires up in the next iteration. Browse the pages from the sidebar.</p>
 </div>
 {% endblock %}

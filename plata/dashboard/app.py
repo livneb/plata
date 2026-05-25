@@ -104,11 +104,57 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        return templates.TemplateResponse(
-            request,
-            "pages/dashboard.html",
-            {"active": "dashboard", "current_user": _current_user_or_none(request)},
-        )
+        from datetime import date, datetime, timezone
+        from sqlalchemy import func, select
+        from plata.core.bus import get_redis
+        from plata.core.db import ErrorLog, SignalArchive, TradeLedger, session_scope
+        from plata.hitl.approval_store import list_pending
+
+        ctx: dict = {"active": "dashboard", "current_user": _current_user_or_none(request)}
+        try:
+            redis = get_redis()
+            ctx["system_state"] = await redis.get("system:state") or "UNKNOWN"
+            today_key = f"cost:daily:{date.today().isoformat()}"
+            ctx["llm_spend_today"] = float(await redis.get(today_key) or 0)
+        except Exception:
+            ctx["system_state"] = "UNKNOWN"
+            ctx["llm_spend_today"] = 0.0
+        try:
+            ctx["pending_hitl"] = len(await list_pending())
+        except Exception:
+            ctx["pending_hitl"] = 0
+        try:
+            async with session_scope() as session:
+                ctx["open_positions"] = (await session.execute(
+                    select(func.count()).select_from(TradeLedger).where(TradeLedger.exit_price.is_(None))
+                )).scalar() or 0
+                today_utc = datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc)
+                ctx["daily_pnl"] = float((await session.execute(
+                    select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))
+                    .where(TradeLedger.exit_price.is_not(None))
+                    .where(TradeLedger.opened_at >= today_utc)
+                )).scalar() or 0)
+                ctx["signals_24h"] = (await session.execute(
+                    select(func.count()).select_from(SignalArchive)
+                    .where(SignalArchive.fetched_at >= datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0))
+                )).scalar() or 0
+                recent_errors = (await session.execute(
+                    select(ErrorLog).order_by(ErrorLog.ts.desc()).limit(8)
+                )).scalars().all()
+                recent_signals = (await session.execute(
+                    select(SignalArchive).order_by(SignalArchive.fetched_at.desc()).limit(8)
+                )).scalars().all()
+                recent_trades = (await session.execute(
+                    select(TradeLedger).order_by(TradeLedger.opened_at.desc()).limit(8)
+                )).scalars().all()
+        except Exception:
+            ctx.update(open_positions=0, daily_pnl=0.0, signals_24h=0,
+                       recent_errors=[], recent_signals=[], recent_trades=[])
+        else:
+            ctx["recent_errors"] = recent_errors
+            ctx["recent_signals"] = recent_signals
+            ctx["recent_trades"] = recent_trades
+        return templates.TemplateResponse(request, "pages/dashboard.html", ctx)
 
     app.include_router(auth.router)
     app.include_router(proposals.router)

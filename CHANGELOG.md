@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.003 — 2026-05-25
+- Dashboard "Overview" now shows real data: system state, open positions, today's PnL, pending HITL, signals today, LLM spend, plus three live feeds (recent signals / trades / errors).
+- Activity page now includes: per-agent table (heartbeat, in-flight, error count, halt status), DLQ depth per stream, LLM spend daily + monthly + cap, system RUNNING/HALTED + paper/live mode, last-hour signal count.
+
 ## 2.24.002 — 2026-05-25
 - Confirmation dialogs use a Flowbite modal + toast (replaces native confirm/alert).
 - Light/dark theme toggle in the topbar; choice persisted across reloads.
