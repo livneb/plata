@@ -29,13 +29,13 @@ STREAM_FLOW = [
 ]
 
 SOURCE_LABELS = {
-    "reddit": "Polling Reddit",
-    "cryptopanic": "Polling CryptoPanic",
-    "gdelt": "Polling GDELT",
-    "newsapi": "Polling NewsAPI",
-    "cryptonews": "Polling CryptoNews",
-    "lunarcrush": "Polling LunarCrush",
-    "whalealert": "Polling WhaleAlert",
+    "reddit": "Reddit",
+    "cryptopanic": "CryptoPanic",
+    "gdelt": "GDELT",
+    "newsapi": "NewsAPI",
+    "cryptonews": "CryptoNews",
+    "lunarcrush": "LunarCrush",
+    "whalealert": "WhaleAlert",
 }
 
 AGENT_VERB = {
@@ -61,26 +61,34 @@ CATEGORY = {
 }
 
 
-async def _sleeping_cards() -> list[dict[str, Any]]:
-    """Periodic pollers between cycles."""
+async def _source_cards() -> list[dict[str, Any]]:
+    """Per-source cards. Returned with `lane` set based on the source's current state."""
     redis = get_redis()
     cards: list[dict[str, Any]] = []
     async for k in redis.scan_iter(match="scraper:source:*", count=100):
         data = await redis.hgetall(k)
         name = k.split(":")[-1]
         raw = data.get("status") or "sleeping"
+        # Status badge value
         status = {
-            "polling": "polling",   # mid-fetch (brief, pulses)
-            "idle": "sleeping",     # between polls — healthy
+            "polling": "polling",
+            "idle": "sleeping",
             "halted": "halted",
             "error": "error",
         }.get(raw, "sleeping")
+        # Lane is driven by state — actively polling = Doing, errored = Active so it's prominent.
+        if status == "polling":
+            lane = "doing"
+        elif status == "error":
+            lane = "active"
+        else:
+            lane = "sleeping"
         cards.append({
-            "lane": "sleeping",
+            "lane": lane,
             "category": "ingestion",
             "agent": "scraper",
-            "title": SOURCE_LABELS.get(name, f"Polling {name}"),
-            "subtitle": f"every {data.get('interval_sec', '?')}s",
+            "title": SOURCE_LABELS.get(name, name),
+            "subtitle": f"polls every {data.get('interval_sec', '?')}s",
             "status": status,
             "ts": data.get("last_poll_at"),
             "extra": f"fetched {data.get('last_fetched', '0')} last cycle",
@@ -225,13 +233,25 @@ async def _gather() -> dict[str, Any]:
     settings = get_settings()
     redis = get_redis()
     state = await redis.get("system:state")
+    sources = await _source_cards()
+    active = await _active_cards()
+    doing = await _doing_cards()
+    sleeping_lane: list[dict] = []
+    for c in sources:
+        if c["lane"] == "doing":
+            doing.append(c)
+        elif c["lane"] == "active":
+            active.append(c)
+        else:
+            sleeping_lane.append(c)
+
     return {
         "system_state": state or "RUNNING",
         "paper_mode": settings.default_paper_trading_mode,
-        "sleeping": await _sleeping_cards(),
-        "active": await _active_cards(),
+        "sleeping": sleeping_lane,
+        "active": active,
         "ready": await _ready_cards(),
-        "doing": await _doing_cards(),
+        "doing": doing,
         "done": await _done_cards(),
         "as_of": datetime.now(timezone.utc).isoformat(),
     }

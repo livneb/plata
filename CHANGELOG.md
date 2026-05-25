@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.021 — 2026-05-25
+- Source cards no longer hard-code "Polling X" in the title — they're just "GDELT", "Reddit", etc. The card moves between lanes based on current state:
+  - `polling` (mid-fetch) → **Doing**
+  - `sleeping` (between polls) → **Sleeping**
+  - `error` → **Active** (so the failure is prominent)
+  - `halted` → **Sleeping** with halted badge
+
 ## 2.24.020 — 2026-05-25
 - Workflow Kanban: split the old "Background" lane into **💤 Sleeping** (periodic pollers between cycles) and **⚙️ Active** (event-driven observers — orchestrator + telegram bot). Five lanes total.
 - Ready lane: cards now show the age of the **oldest pending message** ("oldest 5m 12s ago"), and the "0 waiting" status is labelled **caught up** instead of the confusing "empty".
