@@ -50,7 +50,11 @@
     </div>
     {% if proposal.milestones %}
     <div class="mb-3">
-      <div class="text-[10px] uppercase text-gray-500 mb-1">Milestones — predicted trajectory</div>
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Predicted trajectory</div>
+      <div id="milestone-chart" class="bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"></div>
+    </div>
+    <div class="mb-3">
+      <div class="text-[10px] uppercase text-gray-500 mb-1">Milestones table</div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs text-left">
           <thead class="text-[10px] uppercase text-gray-500">
@@ -137,6 +141,23 @@
     {% endif %}
   </section>
 
+  {% if proposal and proposal.similar_events %}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="font-semibold mb-2">Pattern from analogous past events</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div>
+        <div class="text-[10px] uppercase text-gray-500 mb-1">Max move per analog (%)</div>
+        <div id="analog-bars" class="bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"></div>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase text-gray-500 mb-1">Trajectories overlaid (% change vs t=0)</div>
+        <div id="analog-overlay" class="bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"></div>
+      </div>
+    </div>
+    <p class="text-[10px] text-gray-500 mt-2">Bars and overlay are drawn from the analogs' price-impact metrics stored when the historian seeded them. Analogs without recorded impact data are skipped.</p>
+  </section>
+  {% endif %}
+
   {% if audits %}
   <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
     <h2 class="font-semibold mb-2">Risk / HITL decisions</h2>
@@ -154,4 +175,108 @@
   {% endif %}
   {% endif %}
 </div>
+
+<script>
+  (function () {
+    const dark = document.documentElement.classList.contains('dark');
+    const axisColor = dark ? '#9ca3af' : '#4b5563';
+    const gridColor = dark ? '#374151' : '#e5e7eb';
+
+    {% if proposal and proposal.milestones %}
+    // Predicted trajectory: x = hours from entry, y = signed % move (cumulative).
+    const milestones = {{ proposal.milestones | map(attribute='__dict__') | list | tojson if false else proposal.milestones | tojson }};
+    // Pydantic models JSON-encode via FastAPI; in Jinja we manually project them.
+    const msData = [
+      {% for m in proposal.milestones %}
+      { x: {{ (m.eta_minutes / 60) | round(2) }}, y: {{ (m.expected_pct_move * 100) | round(3) }}, confidence: {{ m.confidence }}, rationale: {{ (m.rationale or '') | tojson }} },
+      {% endfor %}
+    ];
+    if (msData.length && window.ApexCharts) {
+      const el = document.getElementById('milestone-chart');
+      new ApexCharts(el, {
+        chart: { type: 'line', height: 220, toolbar: { show: false }, foreColor: axisColor, background: 'transparent' },
+        series: [{ name: 'Expected % move', data: msData.map(p => ({ x: p.x, y: p.y })) }],
+        xaxis: { type: 'numeric', title: { text: 'Hours from entry' }, labels: { formatter: v => Number(v).toFixed(0) + 'h' } },
+        yaxis: { title: { text: '% move' }, labels: { formatter: v => Number(v).toFixed(1) + '%' } },
+        markers: { size: 6 },
+        stroke: { curve: 'straight', width: 2 },
+        colors: ['#3b82f6'],
+        grid: { borderColor: gridColor },
+        annotations: { yaxis: [{ y: 0, borderColor: gridColor, strokeDashArray: 3 }] },
+        tooltip: {
+          custom: ({ dataPointIndex }) => {
+            const p = msData[dataPointIndex];
+            return `<div style="padding:6px 8px;font-size:11px"><b>${p.y.toFixed(2)}%</b> after ${p.x}h<br/>confidence ${(p.confidence*100).toFixed(0)}%<br/>${p.rationale ? p.rationale : ''}</div>`;
+          },
+        },
+      }).render();
+    }
+    {% endif %}
+
+    {% if proposal and proposal.similar_events %}
+    // Analog price impact — best-effort: look for a `pct_max` (or similar) in price_impact
+    const analogs = [
+      {% for a in proposal.similar_events %}
+      { summary: {{ (a.summary or '') | tojson }}, similarity: {{ a.similarity }}, price_impact: {{ (a.price_impact or {}) | tojson }} },
+      {% endfor %}
+    ];
+
+    function pctOf(p) {
+      // Try a few common shapes for the max-move metric per symbol.
+      for (const sym of Object.keys(p || {})) {
+        const m = p[sym] || {};
+        const candidates = ['pct_max_move', 'max_pct_move', 'max_move_pct', 'pct_24h', 'pct_after', 'max_pct'];
+        for (const k of candidates) if (typeof m[k] === 'number') return { sym, v: m[k] * (Math.abs(m[k]) > 1.5 ? 1 : 100) };
+      }
+      return null;
+    }
+    const bars = [];
+    analogs.forEach((a, i) => {
+      const p = pctOf(a.price_impact);
+      if (p) bars.push({ x: '#' + (i+1) + ' ' + p.sym, y: p.v, label: a.summary.slice(0, 80) });
+    });
+    if (bars.length && window.ApexCharts) {
+      new ApexCharts(document.getElementById('analog-bars'), {
+        chart: { type: 'bar', height: 240, toolbar: { show: false }, foreColor: axisColor, background: 'transparent' },
+        plotOptions: { bar: { distributed: true, borderRadius: 3, dataLabels: { position: 'top' } } },
+        dataLabels: { enabled: false },
+        series: [{ name: 'Max move %', data: bars.map(b => ({ x: b.x, y: b.y })) }],
+        colors: bars.map(b => b.y >= 0 ? '#10b981' : '#ef4444'),
+        xaxis: { labels: { style: { fontSize: '10px' } } },
+        yaxis: { labels: { formatter: v => Number(v).toFixed(1) + '%' } },
+        grid: { borderColor: gridColor },
+        legend: { show: false },
+        tooltip: {
+          custom: ({ dataPointIndex }) => {
+            const b = bars[dataPointIndex];
+            return `<div style="padding:6px 8px;font-size:11px;max-width:280px"><b>${b.y.toFixed(2)}%</b><br/>${b.label}</div>`;
+          },
+        },
+      }).render();
+    } else if (document.getElementById('analog-bars')) {
+      document.getElementById('analog-bars').innerHTML = '<div class="p-6 text-center text-xs text-gray-400 italic">No analog price-impact metrics yet. Seed the historian first.</div>';
+    }
+
+    // Overlay (best-effort: simple two-point lines from 0% at t=0 to max% at unknown t — placeholder until per-bar OHLCV is exposed)
+    const overlayEl = document.getElementById('analog-overlay');
+    if (overlayEl) {
+      const series = bars.slice(0, 8).map((b, i) => ({ name: '#' + (i+1), data: [{ x: 0, y: 0 }, { x: 24, y: b.y }] }));
+      if (series.length && window.ApexCharts) {
+        new ApexCharts(overlayEl, {
+          chart: { type: 'line', height: 240, toolbar: { show: false }, foreColor: axisColor, background: 'transparent' },
+          series,
+          xaxis: { type: 'numeric', title: { text: 'hours since event' }, labels: { formatter: v => Number(v).toFixed(0) + 'h' } },
+          yaxis: { title: { text: '% change' }, labels: { formatter: v => Number(v).toFixed(1) + '%' } },
+          stroke: { curve: 'straight', width: 1.5 },
+          markers: { size: 3 },
+          grid: { borderColor: gridColor },
+          annotations: { yaxis: [{ y: 0, borderColor: gridColor, strokeDashArray: 3 }] },
+        }).render();
+      } else {
+        overlayEl.innerHTML = '<div class="p-6 text-center text-xs text-gray-400 italic">No analog price impact to overlay.</div>';
+      }
+    }
+    {% endif %}
+  })();
+</script>
 {% endblock %}

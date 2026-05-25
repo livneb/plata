@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.044 — 2026-05-25
+- **Trade detail charts** (the ones you asked for twice — finally landing):
+  - **Predicted trajectory** line chart from the strategist's milestones (hours from entry × signed % move). Tooltip shows confidence and rationale per milestone.
+  - **Analog max-move bars** (one bar per analog past event, green/red by sign).
+  - **Analog overlay** — straight-line trajectories per analog from t=0 (placeholder until the per-bar OHLCV is exposed).
+  - Charts use ApexCharts (already loaded site-wide).
+- Historian: date presets next to the form — **1d / 1w / 1mo / 3mo / 1y / 5y / 20y** buttons set the End date = Start date + N days.
+- Historian: more diagnostic logging on Start. The seed task is now wrapped — if it crashes during init, the failure is captured in Redis (`state=failed`) and shown in the UI instead of silently hanging until the 3-min stale detector kicks in.
+
 ## 2.24.043 — 2026-05-25
 - **Web Push** (VAPID): service worker at `/static/sw.js`, subscription store in Redis (`push:sub:<email>`), helper `plata.dashboard.push.send_to_user`, and a 🔔 button in the topbar that asks notification permission + registers + sends a test push.
 - **PWA manifest** at `/static/manifest.json` + SVG icon — Chrome desktop shows an install prompt, mobile gets "Add to Home Screen".

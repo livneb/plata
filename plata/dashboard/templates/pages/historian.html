@@ -35,14 +35,21 @@
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-xs font-medium mb-1">From date</label>
-            <input name="start_date" type="date" value="2005-01-01"
+            <input id="seed-from" name="start_date" type="date" value="2005-01-01"
                    class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
           </div>
           <div>
             <label class="block text-xs font-medium mb-1">To date</label>
-            <input name="end_date" type="date" value="2025-12-31"
+            <input id="seed-to" name="end_date" type="date" value="2025-12-31"
                    class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
           </div>
+        </div>
+        <div class="flex flex-wrap gap-1 text-[10px]">
+          <span class="text-gray-500 pr-1">window from start:</span>
+          {% for label, days in [('1d',1), ('1w',7), ('1mo',30), ('3mo',90), ('1y',365), ('5y',1825), ('20y',7300)] %}
+          <button type="button" data-preset-days="{{ days }}"
+                  class="px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">{{ label }}</button>
+          {% endfor %}
         </div>
         <div>
           <label class="block text-xs font-medium mb-1">Research brief <span class="text-gray-400">(optional, any language)</span></label>
@@ -73,6 +80,22 @@
 </div>
 
 <script>
+  // Date presets: clicking one sets the End date = Start date + N days.
+  (function () {
+    const fromEl = document.getElementById('seed-from');
+    const toEl = document.getElementById('seed-to');
+    if (!fromEl || !toEl) return;
+    document.querySelectorAll('[data-preset-days]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const days = parseInt(btn.getAttribute('data-preset-days'), 10);
+        const start = new Date(fromEl.value || new Date().toISOString().slice(0, 10));
+        if (isNaN(start.getTime())) return;
+        const end = new Date(start.getTime() + days * 86400 * 1000);
+        toEl.value = end.toISOString().slice(0, 10);
+      });
+    });
+  })();
+
   // Reset-button handler bound once at the page level via event delegation,
   // so it survives the htmx 3-second swap of the status fragment.
   document.addEventListener('click', async (ev) => {

@@ -79,16 +79,36 @@ async def start(
     status = await _status()
     if status.get("state") == "running":
         return RedirectResponse(url="/historian/", status_code=303)
-    from plata.agents.historian import seed
-    asyncio.create_task(
-        seed(
-            total_events=total,
-            batch_size=batch_size,
-            start_date=start_date,
-            end_date=end_date,
-            brief=brief[:2000],
-            focus=focus[:500],
-        ),
-        name="historian-seed",
-    )
+    from plata.core.observability import get_logger
+    _log = get_logger("historian.start")
+    _log.info("historian_seed_requested",
+              total=total, batch_size=batch_size,
+              start_date=start_date, end_date=end_date,
+              brief_preview=brief[:80], focus=focus[:80])
+
+    async def _run() -> None:
+        try:
+            from plata.agents.historian import seed
+            _log.info("historian_seed_invoking")
+            await seed(
+                total_events=total,
+                batch_size=batch_size,
+                start_date=start_date,
+                end_date=end_date,
+                brief=brief[:2000],
+                focus=focus[:500],
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.exception("historian_seed_crashed", error=str(exc))
+            try:
+                redis = get_redis()
+                await redis.hset(STATUS_KEY, mapping={
+                    "state": "failed",
+                    "last_error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                    "finished_at": datetime.utcnow().isoformat(),
+                })
+            except Exception:  # noqa: BLE001
+                pass
+
+    asyncio.create_task(_run(), name="historian-seed")
     return RedirectResponse(url="/historian/", status_code=303)
