@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from plata.core.db import TradeLedger, session_scope
-from plata.dashboard.app import BASE_DIR
+from plata.dashboard import BASE_DIR
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))

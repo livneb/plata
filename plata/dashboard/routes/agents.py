@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from plata.core.bus import get_redis
-from plata.dashboard.app import BASE_DIR
+from plata.dashboard import BASE_DIR
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))

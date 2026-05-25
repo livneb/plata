@@ -11,7 +11,7 @@ from sqlalchemy import desc, select
 
 from plata.core.bus import Channels, get_redis, publish_channel
 from plata.core.db import ConfigSetting, session_scope
-from plata.dashboard.app import BASE_DIR
+from plata.dashboard import BASE_DIR
 
 router = APIRouter(prefix="/risk_config", tags=["risk_config"])
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))

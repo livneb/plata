@@ -1,16 +1,14 @@
 """FastAPI dashboard — Flowbite Admin UI."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from plata.dashboard import BASE_DIR
 from plata.dashboard.routes import agents, errors, proposals, risk_config, trades
 
-BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 

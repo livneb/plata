@@ -5,7 +5,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from plata.dashboard.app import BASE_DIR
+from plata.dashboard import BASE_DIR
 from plata.hitl.approval_store import list_pending, resolve
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
