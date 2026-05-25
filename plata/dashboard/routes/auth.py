@@ -3,9 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
-from plata.dashboard import BASE_DIR
+from plata.dashboard import templates
 from plata.dashboard.auth import (
     SESSION_COOKIE,
     authenticate,
@@ -14,7 +13,6 @@ from plata.dashboard.auth import (
 )
 
 router = APIRouter(tags=["auth"])
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @router.get("/login", response_class=HTMLResponse)

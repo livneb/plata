@@ -6,16 +6,14 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
 
 from plata.config.settings import get_settings
 from plata.core.bus import Streams, get_redis
 from plata.core.db import SignalArchive, session_scope
-from plata.dashboard import BASE_DIR
+from plata.dashboard import templates
 
 router = APIRouter(prefix="/activity", tags=["activity"])
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 PIPELINE = [

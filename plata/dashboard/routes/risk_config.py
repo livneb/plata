@@ -9,15 +9,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, select
 
 from plata.core.bus import Channels, get_redis, publish_channel
 from plata.core.db import ConfigSetting, session_scope
-from plata.dashboard import BASE_DIR
+from plata.dashboard import templates
 
 router = APIRouter(prefix="/risk_config", tags=["risk_config"])
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 async def _load_rows() -> list[dict]:

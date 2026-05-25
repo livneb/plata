@@ -3,13 +3,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
-from plata.dashboard import BASE_DIR
+from plata.dashboard import templates
 from plata.hitl.approval_store import list_pending, resolve
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -3,14 +3,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, select
 
 from plata.core.db import ErrorLog, session_scope
-from plata.dashboard import BASE_DIR
+from plata.dashboard import templates
 
 router = APIRouter(prefix="/errors", tags=["errors"])
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @router.get("/", response_class=HTMLResponse)
