@@ -109,12 +109,12 @@ async def events(limit: int = 100) -> JSONResponse:
 
 
 def _kick_seed(total: int, batch_size: int, start_date: str, end_date: str,
-               brief: str, focus: str) -> tuple[bool, str]:
+               brief: str, focus: str, resume: bool = False) -> tuple[bool, str]:
     """Spawn the seed task and stash a reference so it isn't GC'd. Returns (ok, msg)."""
     from plata.core.observability import get_logger
     _log = get_logger("historian.start")
     print(f"[historian] kick_seed total={total} batch={batch_size} "
-          f"window={start_date}..{end_date} brief={brief[:40]!r}",
+          f"window={start_date}..{end_date} brief={brief[:40]!r} resume={resume}",
           flush=True)
     _log.info("historian_seed_requested",
               total=total, batch_size=batch_size,
@@ -155,6 +155,7 @@ def _kick_seed(total: int, batch_size: int, start_date: str, end_date: str,
                 end_date=end_date,
                 brief=brief[:2000],
                 focus=focus[:500],
+                resume=resume,
             )
             print("[historian] seed() returned cleanly", flush=True)
         except Exception as exc:  # noqa: BLE001
@@ -218,3 +219,39 @@ async def start(
     if accepts_json:
         return JSONResponse({"ok": ok, "reason": msg})
     return RedirectResponse(url="/historian/", status_code=303)
+
+
+async def _resume_if_interrupted() -> None:
+    """Called on dashboard startup. If the previous process died mid-seed,
+    pick up from where it left off using the recorded `next_batch` offset."""
+    redis = get_redis()
+    data = await redis.hgetall(STATUS_KEY)
+    if not data:
+        return
+    if (data.get("state") or "") not in ("running", "stale"):
+        return
+    try:
+        total = int(data.get("total_target") or 0)
+        batch_size = int(data.get("batch_size") or 0)
+        next_batch = int(data.get("next_batch") or 0)
+    except (TypeError, ValueError):
+        return
+    if total <= 0 or batch_size <= 0:
+        return
+    batches = total // batch_size
+    if next_batch >= batches:
+        await redis.hset(STATUS_KEY, mapping={
+            "state": "done",
+            "finished_at": datetime.utcnow().isoformat(),
+        })
+        return
+    print(f"[historian] auto-resume detected: batch {next_batch}/{batches}", flush=True)
+    _kick_seed(
+        total=total,
+        batch_size=batch_size,
+        start_date=data.get("start_date") or "2005-01-01",
+        end_date=data.get("end_date") or "2025-12-31",
+        brief=data.get("brief") or "",
+        focus=data.get("focus") or "",
+        resume=True,
+    )

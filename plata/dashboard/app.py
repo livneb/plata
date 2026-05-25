@@ -69,6 +69,13 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("dashboard").warning("admin_bootstrap_skipped: %s", exc)
+    # Auto-resume any historian seed that was killed by the previous restart.
+    try:
+        from plata.dashboard.routes.historian import _resume_if_interrupted
+        await _resume_if_interrupted()
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger("dashboard").warning("historian_resume_skipped: %s", exc)
     yield
 
 

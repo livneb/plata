@@ -53,30 +53,49 @@ async def seed(
     end_date: str = "2025-12-31",
     brief: str = "",
     focus: str = "",
+    resume: bool = False,
 ) -> None:
     """Seed historical events.
 
-    - start_date / end_date: ISO YYYY-MM-DD inclusive bounds for event dates.
-    - brief: optional free-text research direction (any language). Steers what the LLM looks for.
-    - focus: optional comma-separated assets/tickers/topics to bias the output toward.
+    - resume=True: continue a previously-interrupted run. Skips batches we've already
+      completed (tracked in `historian:status.next_batch`) and keeps the written counter.
     """
     from plata.core.bus import get_redis
     redis = get_redis()
     status_key = "historian:status"
+
+    start_batch = 0
+    if resume:
+        existing = await redis.hgetall(status_key)
+        try:
+            start_batch = int(existing.get("next_batch") or 0)
+            prior_written = int(existing.get("written") or 0)
+            prior_failed = int(existing.get("failed_batches") or 0)
+        except (TypeError, ValueError):
+            start_batch, prior_written, prior_failed = 0, 0, 0
+        print(f"[historian] resuming from batch {start_batch} (already written {prior_written})", flush=True)
+    else:
+        prior_written = 0
+        prior_failed = 0
+
     await redis.hset(status_key, mapping={
         "state": "running",
         "started_at": datetime.utcnow().isoformat(),
+        "last_progress_at": datetime.utcnow().isoformat(),
         "total_target": total_events,
         "batch_size": batch_size,
         "start_date": start_date,
         "end_date": end_date,
         "brief": brief[:240],
         "focus": focus[:240],
-        "written": 0,
-        "failed_batches": 0,
-        "last_event_date": "",
-        "last_event_category": "",
+        "written": prior_written,
+        "failed_batches": prior_failed,
+        "next_batch": start_batch,
+        "last_event_date": "" if not resume else (existing.get("last_event_date") or ""),
+        "last_event_category": "" if not resume else (existing.get("last_event_category") or ""),
         "last_error": "",
+        "resumed_count": int((existing.get("resumed_count") or 0)) + (1 if resume else 0)
+                          if resume else 0,
     })
     try:
         start_dt = datetime.fromisoformat(start_date)
@@ -88,8 +107,8 @@ async def seed(
     await ensure_indexes()
     llm = LLMClient("historian")
     batches = total_events // batch_size
-    written = 0
-    failed = 0
+    written = prior_written
+    failed = prior_failed
 
     # Build the steering paragraph once.
     steering = []
@@ -99,7 +118,9 @@ async def seed(
         steering.append(f"FOCUS ASSETS / TOPICS: {focus.strip()}")
     steering_block = "\n\n".join(steering) + ("\n\n" if steering else "")
 
-    for i in range(batches):
+    for i in range(start_batch, batches):
+        # Record where we are so a resume can pick up here after a restart.
+        await redis.hset(status_key, "next_batch", i)
         # Heartbeat at the start of every batch so dashboards can tell apart
         # "actively working" from "process died mid-flight".
         await redis.hset(status_key, "last_progress_at", datetime.utcnow().isoformat())
@@ -193,6 +214,8 @@ async def seed(
             "state": "done",
             "finished_at": datetime.utcnow().isoformat(),
         })
+        # Mark completion of this batch so resume starts from the next one.
+        await redis.hset(status_key, "next_batch", i + 1)
         _log.info("historian_batch_done", batch=i, written=written)
     await redis.hset(status_key, mapping={
         "state": "done",
