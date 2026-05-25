@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Workflow · Plata{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-semibold">Workflow</h1>
+  <div class="flex items-center gap-2">
+    <span class="text-xs uppercase text-gray-500">System:</span>
+    {% if system_state == 'HALTED' %}
+    <span class="bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-red-900 dark:text-red-300">HALTED</span>
+    {% else %}
+    <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">RUNNING</span>
+    {% endif %}
+    {% if paper_mode %}
+    <span class="bg-yellow-100 text-yellow-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">PAPER</span>
+    {% endif %}
+  </div>
+</div>
+
+<div id="workflow-pane"
+     hx-get="/workflow/_fragment"
+     hx-trigger="load delay:3s, every 3s"
+     hx-swap="innerHTML">
+  {% include "pages/_workflow_fragment.html" %}
+</div>
+{% endblock %}

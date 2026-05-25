@@ -38,20 +38,36 @@ class Scraper(BaseAgent):
 
     async def _poll_loop(self, src: BaseSource) -> None:
         # Stagger first runs to avoid thundering herd.
+        from plata.core.bus import get_redis
+        redis = get_redis()
+        key = f"scraper:source:{src.name}"
         await asyncio.sleep(2)
         while True:
             if self._halted.is_set():
+                await redis.hset(key, mapping={"status": "halted"})
                 await asyncio.sleep(5)
                 continue
+            now = datetime.now(timezone.utc).isoformat()
+            await redis.hset(key, mapping={
+                "status": "polling", "started_at": now, "interval_sec": src.poll_interval_sec,
+            })
             try:
                 signals = await src.poll()
                 for s in signals:
                     await self._process_one(s)
+                await redis.hset(key, mapping={
+                    "status": "idle", "last_poll_at": now,
+                    "last_fetched": len(signals), "last_error": "",
+                })
             except Exception as e:
                 await self.error_reporter.capture_exception(
                     e, agent=self.name, severity="ERROR",
                     context={"source": src.name},
                 )
+                await redis.hset(key, mapping={
+                    "status": "error", "last_poll_at": now,
+                    "last_error": f"{type(e).__name__}: {str(e)[:200]}",
+                })
             await asyncio.sleep(src.poll_interval_sec)
 
     async def _process_one(self, signal: RawSignal) -> None:

@@ -2,6 +2,16 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.010 — 2026-05-25
+- New **Workflow** page (`/workflow/`) — operational live board showing what the system is *doing*, not which signals are flowing. Five columns:
+  - **Polling** — one card per scraper source with status (RUNNING/IDLE/ERROR), last fetch time, items fetched, poll interval.
+  - **Analyzing** — graph_ingestion / strategist / reviewer / risk_manager — shows in-flight count, current verb, last summary.
+  - **Awaiting approval** — pending HITL proposals (clickable).
+  - **Executing** — open positions with mode/qty/entry/age.
+  - **Background** — orchestrator, executor, telegram_bot, scraper.
+- Page refreshes every 3 seconds via htmx.
+- Scraper now publishes per-source status to Redis (`scraper:source:<name>`).
+
 ## 2.24.009 — 2026-05-25
 - Voyage embeddings rate-limit no longer DLQs the signal: `embed()` retries with backoff (1s, 3s, 8s) and raises a typed `EmbeddingRateLimited` on persistent 429. `graph_ingestion` catches it, logs a WARN, and counts the drop as `dropped_embed_rate_limit` instead of crashing.
 - New `humanize()` in `error_reporter` turns noisy upstream errors (Voyage 429, Bedrock schema rejection, LLM budget breach) into short actionable messages in the dashboard.

@@ -23,6 +23,7 @@ from plata.dashboard.routes import (
     proposals,
     risk_config,
     trades,
+    workflow,
 )
 
 
@@ -175,6 +176,7 @@ def create_app() -> FastAPI:
     app.include_router(errors.router)
     app.include_router(agents.router)
     app.include_router(activity.router)
+    app.include_router(workflow.router)
     return app
 
 

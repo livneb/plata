@@ -1,0 +1,141 @@
+<div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+
+  <!-- Column 1: Polling sources -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm">📡 Polling</h2>
+      <span class="text-[10px] text-gray-400">{{ sources | length }}</span>
+    </div>
+    <div class="space-y-2">
+      {% for s in sources %}
+      <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-medium">{{ s.title }}</div>
+          {% if s.status == 'polling' %}
+          <span class="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded animate-pulse">RUNNING</span>
+          {% elif s.status == 'idle' %}
+          <span class="bg-gray-200 text-gray-700 text-[10px] px-1.5 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">IDLE</span>
+          {% elif s.status == 'halted' %}
+          <span class="bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded">HALTED</span>
+          {% elif s.status == 'error' %}
+          <span class="bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded">ERROR</span>
+          {% else %}
+          <span class="bg-gray-200 text-gray-700 text-[10px] px-1.5 py-0.5 rounded">{{ s.status }}</span>
+          {% endif %}
+        </div>
+        <div class="text-[11px] text-gray-500 mt-1">
+          Last poll: {{ s.last_poll_at | time_ago }} · fetched {{ s.last_fetched }} · every {{ s.interval_sec }}s
+        </div>
+        {% if s.last_error %}
+        <div class="text-[11px] text-red-500 mt-1 truncate" title="{{ s.last_error }}">{{ s.last_error }}</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="text-xs text-gray-400 italic">No sources reporting yet.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Column 2: Analyzing -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm">🧠 Analyzing</h2>
+      <span class="text-[10px] text-gray-400">{{ agents | selectattr('in_flight', 'gt', 0) | list | length }} in flight</span>
+    </div>
+    <div class="space-y-2">
+      {% for a in agents %}
+      {% if a.name in ['graph_ingestion','strategist','reviewer','risk_manager'] %}
+      <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+        <div class="flex items-center justify-between">
+          <div class="font-mono text-xs font-semibold">{{ a.name }}</div>
+          {% if a.halted %}
+          <span class="bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded">HALTED</span>
+          {% elif a.in_flight > 0 %}
+          <span class="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded animate-pulse">×{{ a.in_flight }}</span>
+          {% else %}
+          <span class="bg-gray-200 text-gray-700 text-[10px] px-1.5 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">IDLE</span>
+          {% endif %}
+        </div>
+        <div class="text-[11px] text-gray-500 mt-1">{{ a.verb }}</div>
+        {% if a.last_summary %}
+        <div class="text-[11px] mt-1 truncate" title="{{ a.last_summary }}">↳ {{ a.last_summary }}</div>
+        {% endif %}
+        <div class="text-[10px] text-gray-400 mt-1">heartbeat {{ a.last_heartbeat | time_ago }}</div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Column 3: Awaiting humans -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm">👤 Awaiting approval</h2>
+      <span class="text-[10px] text-gray-400">{{ hitl | length }}</span>
+    </div>
+    <div class="space-y-2">
+      {% for h in hitl %}
+      <a href="/proposals/" class="block border border-gray-200 dark:border-gray-700 rounded-lg p-2 hover:bg-gray-50 dark:hover:bg-gray-700">
+        <div class="flex items-center justify-between">
+          <div class="font-mono text-xs font-semibold">{{ h.symbol }} {{ h.side|upper }}</div>
+          <span class="text-[10px] text-gray-400">{{ h.created_at | time_ago }}</span>
+        </div>
+        <div class="text-[11px] text-gray-500 truncate">{{ h.reason }}</div>
+      </a>
+      {% else %}
+      <div class="text-xs text-gray-400 italic">No proposals waiting on humans.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Column 4: Executing / open positions -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm">💱 Executing</h2>
+      <span class="text-[10px] text-gray-400">{{ open_trades | length }} open</span>
+    </div>
+    <div class="space-y-2">
+      {% for t in open_trades %}
+      <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+        <div class="flex items-center justify-between">
+          <div class="font-mono text-xs font-semibold">{{ t.symbol }} {{ t.side|upper }}</div>
+          {% if t.mode == 'paper' %}
+          <span class="bg-yellow-100 text-yellow-800 text-[10px] px-1.5 py-0.5 rounded">PAPER</span>
+          {% else %}
+          <span class="bg-green-100 text-green-800 text-[10px] px-1.5 py-0.5 rounded">LIVE</span>
+          {% endif %}
+        </div>
+        <div class="text-[11px] text-gray-500 mt-1">{{ t.qty }} @ {{ t.entry }}</div>
+        <div class="text-[10px] text-gray-400 mt-1">opened {{ t.opened_at | time_ago }}</div>
+      </div>
+      {% else %}
+      <div class="text-xs text-gray-400 italic">No open positions.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Column 5: Background watchers -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm">⚙️ Background</h2>
+    </div>
+    <div class="space-y-2">
+      {% for a in agents %}
+      {% if a.name in ['orchestrator','executor','telegram_bot','scraper'] %}
+      <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+        <div class="flex items-center justify-between">
+          <div class="font-mono text-xs font-semibold">{{ a.name }}</div>
+          {% if a.halted %}
+          <span class="bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded">HALTED</span>
+          {% else %}
+          <span class="bg-green-100 text-green-800 text-[10px] px-1.5 py-0.5 rounded">RUNNING</span>
+          {% endif %}
+        </div>
+        <div class="text-[11px] text-gray-500 mt-1">{{ a.verb }}</div>
+        <div class="text-[10px] text-gray-400 mt-1">heartbeat {{ a.last_heartbeat | time_ago }}</div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+</div>
