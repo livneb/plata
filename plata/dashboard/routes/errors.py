@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
-from sqlalchemy import desc, select
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import delete, desc, select
 
 from plata.core.db import ErrorLog, session_scope
 from plata.dashboard import templates
@@ -21,3 +21,10 @@ async def index(request: Request):
     return templates.TemplateResponse(
         request, "pages/errors.html", {"errors": rows, "active": "errors"}
     )
+
+
+@router.post("/clear")
+async def clear():
+    async with session_scope() as session:
+        await session.execute(delete(ErrorLog))
+    return RedirectResponse(url="/errors/", status_code=303)

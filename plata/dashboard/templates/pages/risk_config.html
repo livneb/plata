@@ -35,7 +35,8 @@
                     data-modal-target="edit-{{ loop.index }}" data-modal-toggle="edit-{{ loop.index }}"
                     class="text-blue-500 hover:underline mr-3">Edit</button>
             <form method="post" action="/risk_config/{{ row.key }}/delete" class="inline"
-                  onsubmit="return confirm('Delete {{ row.key }}?')">
+                  data-confirm="Delete config key '{{ row.key }}'? This is logged."
+                  data-confirm-title="Delete key" data-confirm-label="Delete" data-confirm-danger>
               <button type="submit" class="text-red-500 hover:underline">Delete</button>
             </form>
           </td>

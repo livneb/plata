@@ -69,10 +69,16 @@ class Settings(BaseSettings):
     ] = 8080
     dashboard_admin_email: str | None = None
     dashboard_admin_password: SecretStr | None = None
-    app_version: Annotated[
-        str,
-        Field(validation_alias=AliasChoices("APP_VERSION", "RAILWAY_GIT_COMMIT_SHA")),
-    ] = "dev"
+    app_version: Annotated[str, Field(validation_alias=AliasChoices("APP_VERSION"))] = "dev"
+
+    def model_post_init(self, __context) -> None:  # noqa: D401
+        # If APP_VERSION wasn't set explicitly, fall back to ./VERSION file shipped in the repo.
+        if self.app_version in ("dev", "", None):
+            from pathlib import Path
+            for candidate in (Path("VERSION"), Path(__file__).resolve().parents[2] / "VERSION"):
+                if candidate.is_file():
+                    object.__setattr__(self, "app_version", candidate.read_text().strip())
+                    break
 
     # --- Bootstrap defaults (used only if risk_config has no row yet) ---
     default_paper_trading_mode: bool = True

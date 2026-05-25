@@ -1,10 +1,20 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Plata{% endblock %}</title>
   <meta name="app-version" content="{{ app_version_global() }}" />
+  <!-- Theme bootstrap (run before paint to avoid flash) -->
+  <script>
+    (function () {
+      const stored = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (stored === 'dark' || (!stored && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js" defer></script>
@@ -12,7 +22,7 @@
   <script src="https://unpkg.com/htmx.org@2.0.2"></script>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-  <!-- Version banner (hidden until JS detects a newer version) -->
+  <!-- Version banner -->
   <div id="version-banner" tabindex="-1"
        class="hidden fixed top-0 inset-x-0 z-[60] flex items-center justify-between p-3 bg-blue-600 text-white">
     <span class="text-sm">A new version of Plata is available.</span>
@@ -31,13 +41,20 @@
         </button>
         <a href="/" class="flex items-center ml-2">
           <span class="self-center text-xl font-semibold whitespace-nowrap">Plata</span>
-          <span class="ml-2 text-[10px] text-gray-400 font-mono">{{ app_version_global()[:7] }}</span>
         </a>
+        <button id="version-btn" type="button"
+                class="ml-2 text-[10px] text-gray-400 font-mono hover:text-gray-200"
+                title="Show changelog">v{{ app_version_global() }}</button>
       </div>
       <div class="flex items-center gap-3">
-        <span id="mode-badge" class="bg-yellow-100 text-yellow-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">
+        <span id="mode-badge" class="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">
           PAPER
         </span>
+        <button id="theme-toggle" type="button" aria-label="Toggle theme"
+                class="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          <svg id="theme-icon-light" class="w-5 h-5 hidden dark:inline" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+          <svg id="theme-icon-dark" class="w-5 h-5 dark:hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/></svg>
+        </button>
         {% if current_user %}
         <span class="text-xs text-gray-400 hidden sm:inline">{{ current_user }}</span>
         <form method="post" action="/logout" class="inline">
@@ -88,19 +105,176 @@
     {% block content %}{% endblock %}
   </div>
 
+  <!-- Reusable confirm modal -->
+  <div id="plata-confirm-modal" tabindex="-1"
+       class="hidden fixed inset-0 z-[70] w-full h-full bg-black/50 flex items-center justify-center">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-full max-w-md p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold" data-plata-title>Confirm</h3>
+        <button type="button" data-plata-cancel class="text-gray-400 hover:text-gray-200">✕</button>
+      </div>
+      <p class="text-sm text-gray-600 dark:text-gray-300 mb-4 whitespace-pre-line" data-plata-message></p>
+      <div class="flex justify-end gap-2">
+        <button type="button" data-plata-cancel
+                class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600">Cancel</button>
+        <button type="button" data-plata-confirm-btn
+                class="px-3 py-1.5 text-sm rounded-lg text-white bg-blue-700 hover:bg-blue-800">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Changelog carousel modal -->
+  <div id="changelog-modal" tabindex="-1"
+       class="hidden fixed inset-0 z-[70] w-full h-full bg-black/50 flex items-center justify-center">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-full max-w-2xl p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Changelog</h3>
+        <button type="button" data-changelog-close class="text-gray-400 hover:text-gray-200">✕</button>
+      </div>
+      <div id="changelog-carousel" class="relative w-full">
+        <div id="changelog-slide" class="min-h-[200px]">
+          <div class="text-xs uppercase text-gray-500 mb-1" data-clog-pos></div>
+          <h4 class="text-lg font-semibold mb-3" data-clog-header></h4>
+          <pre class="text-sm whitespace-pre-wrap font-sans text-gray-700 dark:text-gray-300" data-clog-body></pre>
+        </div>
+        <div class="flex justify-between items-center mt-4">
+          <button type="button" data-clog-prev
+                  class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">← Older</button>
+          <span class="text-xs text-gray-400" data-clog-counter></span>
+          <button type="button" data-clog-next
+                  class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">Newer →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="plata-toasts" class="fixed bottom-4 right-4 z-[80] flex flex-col gap-2"></div>
+
   <script>
+    // ---------- Reusable confirm + toast ----------
+    function plataConfirm(opts) {
+      const modal = document.getElementById('plata-confirm-modal');
+      modal.querySelector('[data-plata-title]').textContent = opts.title || 'Confirm';
+      modal.querySelector('[data-plata-message]').textContent = opts.message || '';
+      const btn = modal.querySelector('[data-plata-confirm-btn]');
+      btn.textContent = opts.confirmLabel || 'Confirm';
+      btn.className = 'px-3 py-1.5 text-sm rounded-lg text-white ' +
+        (opts.danger ? 'bg-red-700 hover:bg-red-800' : 'bg-blue-700 hover:bg-blue-800');
+      modal.classList.remove('hidden');
+      return new Promise(resolve => {
+        const cancels = modal.querySelectorAll('[data-plata-cancel]');
+        const close = (result) => {
+          modal.classList.add('hidden');
+          btn.removeEventListener('click', onYes);
+          cancels.forEach(c => c.removeEventListener('click', onNo));
+          resolve(result);
+        };
+        const onYes = () => close(true);
+        const onNo = () => close(false);
+        btn.addEventListener('click', onYes);
+        cancels.forEach(c => c.addEventListener('click', onNo));
+      });
+    }
+
+    function plataToast(message, kind) {
+      const wrap = document.getElementById('plata-toasts');
+      const t = document.createElement('div');
+      const bg = kind === 'error' ? 'bg-red-700' : (kind === 'success' ? 'bg-green-700' : 'bg-gray-800');
+      t.className = `p-3 rounded-lg shadow text-sm text-white ${bg}`;
+      t.textContent = message;
+      wrap.appendChild(t);
+      setTimeout(() => t.remove(), 3000);
+    }
+
+    // Wire forms with data-confirm to use plataConfirm before submitting
+    document.addEventListener('submit', async (ev) => {
+      const form = ev.target;
+      const msg = form.getAttribute && form.getAttribute('data-confirm');
+      if (!msg) return;
+      if (form.dataset.confirmed === 'true') return; // re-submit after confirm
+      ev.preventDefault();
+      const ok = await plataConfirm({
+        title: form.getAttribute('data-confirm-title') || 'Confirm',
+        message: msg,
+        confirmLabel: form.getAttribute('data-confirm-label') || 'Confirm',
+        danger: form.hasAttribute('data-confirm-danger'),
+      });
+      if (ok) {
+        form.dataset.confirmed = 'true';
+        form.submit();
+      }
+    }, true);
+
+    // ---------- Kill / Resume ----------
     document.getElementById('killswitch')?.addEventListener('click', async () => {
-      if (!confirm('Trigger KILL SWITCH? All agents will halt and open orders will be cancelled.')) return;
-      await fetch('/api/kill', { method: 'POST' });
-      alert('Halt requested.');
-    });
-    document.getElementById('resume')?.addEventListener('click', async () => {
-      if (!confirm('Resume all agents?')) return;
-      await fetch('/api/resume', { method: 'POST' });
-      alert('Resume requested.');
+      const ok = await plataConfirm({
+        title: 'Kill switch',
+        message: 'Halt all agents and cancel open orders?',
+        confirmLabel: 'Halt',
+        danger: true,
+      });
+      if (!ok) return;
+      const r = await fetch('/api/kill', { method: 'POST' });
+      plataToast(r.ok ? 'Halt requested.' : 'Halt failed.', r.ok ? 'success' : 'error');
     });
 
-    // Version-change banner: poll /api/version every 30s, compare to page version meta.
+    document.getElementById('resume')?.addEventListener('click', async () => {
+      const ok = await plataConfirm({
+        title: 'Resume agents',
+        message: 'Resume all agents from HALTED state?',
+        confirmLabel: 'Resume',
+      });
+      if (!ok) return;
+      const r = await fetch('/api/resume', { method: 'POST' });
+      plataToast(r.ok ? 'Resume requested.' : 'Resume failed.', r.ok ? 'success' : 'error');
+    });
+
+    // ---------- Theme toggle ----------
+    document.getElementById('theme-toggle')?.addEventListener('click', () => {
+      const html = document.documentElement;
+      const dark = html.classList.toggle('dark');
+      localStorage.setItem('theme', dark ? 'dark' : 'light');
+    });
+
+    // ---------- Changelog carousel ----------
+    (function () {
+      const btn = document.getElementById('version-btn');
+      const modal = document.getElementById('changelog-modal');
+      if (!btn || !modal) return;
+      let entries = []; let idx = 0;
+      const headerEl = modal.querySelector('[data-clog-header]');
+      const bodyEl = modal.querySelector('[data-clog-body]');
+      const posEl = modal.querySelector('[data-clog-pos]');
+      const counterEl = modal.querySelector('[data-clog-counter]');
+      function render() {
+        if (!entries.length) {
+          headerEl.textContent = 'No changelog'; bodyEl.textContent = ''; posEl.textContent = ''; counterEl.textContent = '';
+          return;
+        }
+        const e = entries[idx];
+        headerEl.textContent = e.header || '';
+        bodyEl.textContent = (e.body || '').trim();
+        posEl.textContent = idx === 0 ? 'CURRENT VERSION' : 'PREVIOUS VERSION';
+        counterEl.textContent = `${idx + 1} / ${entries.length}`;
+      }
+      btn.addEventListener('click', async () => {
+        if (!entries.length) {
+          try {
+            const r = await fetch('/api/changelog');
+            const j = await r.json();
+            entries = j.entries || [];
+          } catch { entries = []; }
+        }
+        idx = 0; render();
+        modal.classList.remove('hidden');
+      });
+      modal.querySelectorAll('[data-changelog-close]').forEach(b => b.addEventListener('click', () => modal.classList.add('hidden')));
+      modal.querySelector('[data-clog-prev]').addEventListener('click', () => { if (idx < entries.length - 1) { idx++; render(); } });
+      modal.querySelector('[data-clog-next]').addEventListener('click', () => { if (idx > 0) { idx--; render(); } });
+    })();
+
+    // ---------- Version banner ----------
     (function() {
       const pageVersion = document.querySelector('meta[name="app-version"]')?.content;
       if (!pageVersion) return;

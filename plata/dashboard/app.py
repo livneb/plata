@@ -37,6 +37,23 @@ def _current_user_or_none(request: Request) -> str | None:
         return None
 
 
+def _parse_changelog(text: str) -> list[dict]:
+    """Split CHANGELOG.md by `## <version>` headings into entries."""
+    entries: list[dict] = []
+    current: dict | None = None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if current is not None:
+                entries.append(current)
+            header = line[3:].strip()
+            current = {"header": header, "body": ""}
+        elif current is not None:
+            current["body"] += line + "\n"
+    if current is not None:
+        entries.append(current)
+    return entries
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     try:
@@ -62,6 +79,14 @@ def create_app() -> FastAPI:
     @app.get("/api/version")
     async def api_version():
         return {"version": get_settings().app_version}
+
+    @app.get("/api/changelog")
+    async def api_changelog():
+        from pathlib import Path
+        for candidate in (Path("CHANGELOG.md"), BASE_DIR.parents[1] / "CHANGELOG.md"):
+            if candidate.is_file():
+                return {"raw": candidate.read_text(), "entries": _parse_changelog(candidate.read_text())}
+        return {"raw": "", "entries": []}
 
     @app.post("/api/kill")
     async def api_kill():

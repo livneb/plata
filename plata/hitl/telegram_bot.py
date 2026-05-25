@@ -24,12 +24,28 @@ class TelegramBot(BaseAgent):
             await super().run()
             return
 
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+        from telegram import (
+            InlineKeyboardButton,
+            InlineKeyboardMarkup,
+            KeyboardButton,
+            ReplyKeyboardMarkup,
+            Update,
+        )
         from telegram.ext import (
             ApplicationBuilder,
             CallbackQueryHandler,
             CommandHandler,
             ContextTypes,
+        )
+
+        MENU = ReplyKeyboardMarkup(
+            [
+                [KeyboardButton("/status"), KeyboardButton("/positions")],
+                [KeyboardButton("/halt"), KeyboardButton("/resume")],
+                [KeyboardButton("/paper on"), KeyboardButton("/paper off")],
+                [KeyboardButton("/help")],
+            ],
+            resize_keyboard=True,
         )
 
         token = settings.telegram_bot_token.get_secret_value()
@@ -62,12 +78,13 @@ class TelegramBot(BaseAgent):
         async def cmd_start(update, _):
             uid = update.effective_user.id if update.effective_user else "?"
             await update.message.reply_text(
-                f"Hi! Your Telegram user ID is {uid}.\n\n" + HELP_TEXT
+                f"Hi! Your Telegram user ID is {uid}.\n\n" + HELP_TEXT,
+                reply_markup=MENU,
             )
 
         @_gated
         async def cmd_help(update, _):
-            await update.message.reply_text(HELP_TEXT)
+            await update.message.reply_text(HELP_TEXT, reply_markup=MENU)
 
         @_gated
         async def cmd_status(update, _):
