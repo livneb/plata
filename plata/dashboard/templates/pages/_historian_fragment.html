@@ -20,13 +20,10 @@
 
   {% if state in ['stale', 'failed', 'done'] %}
   <div class="flex justify-end">
-    <form method="post" action="/historian/reset"
-          data-confirm="Clear the historian status so a new run can start?"
-          data-confirm-title="Reset historian" data-confirm-label="Reset">
-      <button type="submit" class="text-xs px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
-        Reset status
-      </button>
-    </form>
+    <button type="button" data-historian-reset
+            class="text-xs px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+      Reset status
+    </button>
   </div>
   {% endif %}
 

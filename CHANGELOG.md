@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.036 — 2026-05-25
+- Fix historian **Reset status** button: previously it lived inside an htmx fragment that swaps every 3s, so the form's confirm-then-submit handler was racing the swap and silently no-op'ing. Now it's a plain button bound once at the page level via event delegation; it calls `POST /historian/reset` directly through `fetch` and reloads the page.
+
 ## 2.24.035 — 2026-05-25
 - Graph: "Back" (Esc / ← button) **restores the saved unfocused view** instead of re-fetching + re-running the layout. Node positions and zoom/pan are remembered exactly. Cache invalidates when the event-count selector changes.
 - Graph: **loading indicator** shows "Loading graph…" on first load and "Loading focused view…" when drilling in.

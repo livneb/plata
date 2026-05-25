@@ -71,4 +71,30 @@
     </section>
   </div>
 </div>
+
+<script>
+  // Reset-button handler bound once at the page level via event delegation,
+  // so it survives the htmx 3-second swap of the status fragment.
+  document.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('[data-historian-reset]');
+    if (!btn) return;
+    const ok = await plataConfirm({
+      title: 'Reset historian',
+      message: 'Clear the historian status so a new run can start?',
+      confirmLabel: 'Reset',
+    });
+    if (!ok) return;
+    try {
+      const r = await fetch('/historian/reset', { method: 'POST' });
+      if (r.ok || r.redirected || r.status === 303) {
+        plataToast('Historian status cleared.', 'success');
+        location.reload();
+      } else {
+        plataToast('Reset failed: HTTP ' + r.status, 'error');
+      }
+    } catch (e) {
+      plataToast('Reset failed: ' + e.message, 'error');
+    }
+  });
+</script>
 {% endblock %}
