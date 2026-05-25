@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+
+from sqlalchemy import desc, select
 
 from plata.agents.base import BaseAgent
 from plata.config.settings import get_settings
 from plata.core.bus import Channels, Streams, get_redis, publish, subscribe
+from plata.core.db import TradeLedger, session_scope
 from plata.core.schemas import RiskDecision, Side, TradeProposal
 from plata.execution.bybit_client import BybitClient
 from plata.execution.universe import get_symbol
@@ -23,6 +27,12 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     "max_correlated_positions": "2",
     "max_daily_loss_pct": "5.0",
     "auto_approve_threshold_usd": "1000",
+    # Layer-1 guards (configurable; defaults are safe-but-permissive)
+    "guard_block_opposing_side": "true",
+    "guard_symbol_cooldown_min": "15",
+    "guard_dedup_event_ulid": "true",
+    "guard_min_conviction": "0.6",
+    "guard_max_per_category_day": "3",
 }
 
 
@@ -71,9 +81,80 @@ class RiskManager(BaseAgent):
             await self._reject(proposal, "symbol_not_in_universe")
             return
 
-        # Hard rules
+        # ---- Layer-1 guards (config-driven, fail-closed where reasonable) ----
+        # Conviction floor.
+        try:
+            min_conviction = float(self._config.get("guard_min_conviction", "0.6"))
+        except (TypeError, ValueError):
+            min_conviction = 0.6
+        if float(proposal.conviction or 0) < min_conviction:
+            await self._reject(proposal, f"conviction_below_floor:{min_conviction}")
+            return
+
+        # Open-trades guard set: needed for netting, cooldown, dedup, exposure.
+        open_trades = await self._fetch_open_trades_local()
+
+        # Dedupe by triggering_event_ulid.
+        if self._cfg_bool("guard_dedup_event_ulid", True):
+            if any((t.get("proposal_event_ulid") or "") == proposal.triggering_event_ulid
+                   for t in open_trades):
+                await self._reject(proposal, "event_already_traded")
+                return
+
+        # Opposing-side block.
+        if self._cfg_bool("guard_block_opposing_side", True):
+            same_sym = [t for t in open_trades if (t.get("symbol") or "").upper() == proposal.symbol.upper()]
+            if any((t.get("side") or "").lower() != proposal.side.value.lower() for t in same_sym):
+                await self._reject(proposal, "opposing_side_open_on_symbol")
+                return
+
+        # Per-symbol cooldown.
+        try:
+            cooldown_min = int(self._config.get("guard_symbol_cooldown_min", "15"))
+        except (TypeError, ValueError):
+            cooldown_min = 15
+        if cooldown_min > 0:
+            now = datetime.now(timezone.utc)
+            same_sym = [t for t in open_trades if (t.get("symbol") or "").upper() == proposal.symbol.upper()]
+            for t in same_sym:
+                opened = t.get("opened_at")
+                if opened and (now - opened) < timedelta(minutes=cooldown_min):
+                    await self._reject(
+                        proposal,
+                        f"symbol_cooldown:{cooldown_min}min (last opened {int((now-opened).total_seconds())}s ago)",
+                    )
+                    return
+
+        # Per-category daily cap.
+        try:
+            max_per_cat = int(self._config.get("guard_max_per_category_day", "3"))
+        except (TypeError, ValueError):
+            max_per_cat = 3
+        if max_per_cat > 0:
+            # Need the event's category — look up from Redis graph if possible.
+            try:
+                from plata.core.graph import get_event
+                event_doc = await get_event(proposal.triggering_event_ulid)
+                cat = (event_doc or {}).get("category")
+            except Exception:  # noqa: BLE001
+                cat = None
+            if cat:
+                today = datetime.now(timezone.utc).date()
+                count_today = sum(
+                    1 for t in open_trades
+                    if t.get("opened_at") and t["opened_at"].date() == today
+                    and (t.get("category") or "") == cat
+                )
+                if count_today >= max_per_cat:
+                    await self._reject(proposal, f"category_cap:{cat}:{count_today}/{max_per_cat}")
+                    return
+
+        # ---- Existing portfolio caps ----
         positions = await self._fetch_positions()
-        if len(positions) >= int(self._config.get("max_open_positions", 3)):
+        # Use the larger of Bybit positions or local-ledger open count.
+        local_open = len(open_trades)
+        effective_open = max(len(positions), local_open)
+        if effective_open >= int(self._config.get("max_open_positions", 3)):
             await self._reject(proposal, "max_open_positions_reached")
             return
 
@@ -189,6 +270,35 @@ class RiskManager(BaseAgent):
             return await self._bybit.fetch_positions()
         except Exception:
             return []
+
+    async def _fetch_open_trades_local(self) -> list[dict[str, Any]]:
+        """Open trades from the local Postgres ledger — works in paper mode too."""
+        out: list[dict[str, Any]] = []
+        try:
+            async with session_scope() as session:
+                rows = (await session.execute(
+                    select(TradeLedger).where(TradeLedger.exit_price.is_(None))
+                    .order_by(desc(TradeLedger.opened_at))
+                )).scalars().all()
+            for r in rows:
+                out.append({
+                    "trade_ulid": r.trade_ulid,
+                    "proposal_id": r.proposal_id,
+                    "proposal_event_ulid": (r.raw_bybit_response or {}).get("triggering_event_ulid"),
+                    "symbol": r.symbol,
+                    "side": r.side,
+                    "qty": float(r.qty or 0),
+                    "entry_price": float(r.entry_price or 0),
+                    "opened_at": r.opened_at,
+                    "category": (r.raw_bybit_response or {}).get("category"),
+                })
+        except Exception as exc:  # noqa: BLE001
+            self.log.warning("local_open_trades_fetch_failed", error=str(exc)[:160])
+        return out
+
+    def _cfg_bool(self, key: str, default: bool) -> bool:
+        raw = str(self._config.get(key, str(default))).strip().lower()
+        return raw in ("1", "true", "yes", "on")
 
     async def _fetch_price(self, symbol: str) -> float | None:
         if not self._bybit:

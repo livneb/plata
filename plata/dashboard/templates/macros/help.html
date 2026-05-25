@@ -42,6 +42,11 @@
   'max_daily_loss_pct': "If today's losses exceed this %, the system auto-halts.",
   'auto_approve_threshold_usd': "Trades smaller than this USD notional skip human approval.",
   'llm_daily_budget_usd_total': "Hard cap on combined LLM spend per day. If exceeded, the system auto-halts.",
+  'guard_block_opposing_side': "If true, refuses to open a SHORT on a symbol that already has a LONG open (and vice versa). Prevents paying margin on two opposing positions at once.",
+  'guard_symbol_cooldown_min': "Minimum minutes between opening trades on the same symbol. 0 disables the cooldown.",
+  'guard_dedup_event_ulid': "If true, a proposal triggered by an event whose still-open trade exists is rejected (no duplicate ideas from the same news headline).",
+  'guard_min_conviction': "Floor on the strategist's conviction (0..1). Proposals below this are auto-rejected before sizing.",
+  'guard_max_per_category_day': "Max trades opened per event category (macro / regulatory / etc.) per UTC day. Limits over-exposure to one narrative.",
 } %}
 
 {% macro help_icon(key='', text='') -%}

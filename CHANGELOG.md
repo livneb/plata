@@ -2,6 +2,16 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.052 — 2026-05-25
+- **Risk manager Layer-1 guards** — all config-driven via `/settings/?tab=risk`, no redeploy needed:
+  - `guard_min_conviction` (default 0.6) — reject proposals below this conviction.
+  - `guard_dedup_event_ulid` (default true) — reject a proposal whose triggering event already has an open trade.
+  - `guard_block_opposing_side` (default true) — reject SHORT on a symbol with an open LONG (and vice versa).
+  - `guard_symbol_cooldown_min` (default 15) — minimum minutes between trades on the same symbol.
+  - `guard_max_per_category_day` (default 3) — cap trades opened per event category per UTC day.
+- Risk manager also queries open trades from the local Postgres ledger (works in paper mode where Bybit returns no positions), in addition to Bybit's positions feed.
+- Tooltips for each new key in the central help glossary.
+
 ## 2.24.051 — 2026-05-25
 - `trade_sampler` only logs to /workflow/ Done when it actually sampled at least one trade. Tick-only "Sampled 3 open trade(s)" rows every 5 s no longer drown the lane.
 - `trade_sampler` excluded from Done aggregation (it's a watcher, like orchestrator/telegram_bot) — instead it shows up in the Active lane with its own heartbeat hash (`agent_status:trade_sampler`).
