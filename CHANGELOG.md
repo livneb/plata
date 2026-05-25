@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.022 — 2026-05-25
+- New **History** page (`/history/`). Unified timeline merging `signal_archive`, `audit_log` (HITL decisions), `trade_ledger`, and `error_log`. Filter by kind (signal / decision / trade / error) and window (1h / 6h / 24h / 72h / 7d). Times render in your local timezone.
+
 ## 2.24.021 — 2026-05-25
 - Source cards no longer hard-code "Polling X" in the title — they're just "GDELT", "Reddit", etc. The card moves between lanes based on current state:
   - `polling` (mid-fetch) → **Doing**

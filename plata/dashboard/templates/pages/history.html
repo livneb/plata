@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}History · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">History</h1>
+    <div class="flex items-center gap-2 text-xs">
+      <span class="text-gray-500">window:</span>
+      {% for h in [1, 6, 24, 72, 168] %}
+      <a href="/history/?hours={{ h }}{% if kind %}&kind={{ kind }}{% endif %}"
+         class="px-2 py-1 rounded {% if hours == h %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+        {{ h }}h
+      </a>
+      {% endfor %}
+      <span class="text-gray-500 ml-3">filter:</span>
+      <a href="/history/?hours={{ hours }}"
+         class="px-2 py-1 rounded {% if not kind %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">all</a>
+      {% for k, (icon, _) in kinds.items() %}
+      <a href="/history/?hours={{ hours }}&kind={{ k }}"
+         class="px-2 py-1 rounded {% if kind == k %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+        {{ icon }} {{ k }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+        <tr>
+          <th class="px-3 py-2">When</th>
+          <th class="px-3 py-2">Kind</th>
+          <th class="px-3 py-2">Actor</th>
+          <th class="px-3 py-2">Title</th>
+          <th class="px-3 py-2">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in events %}
+        <tr class="border-t border-gray-100 dark:border-gray-700">
+          <td class="px-3 py-2 whitespace-nowrap text-gray-500" title="{{ e.ts.isoformat() }}">
+            <time data-utc="{{ e.ts.isoformat() }}">{{ e.ts.strftime('%H:%M:%S') }}</time>
+          </td>
+          <td class="px-3 py-2">
+            {% set icon, cat = kinds.get(e.kind, ('·', 'ops')) %}
+            <span class="text-xs">{{ icon }} {{ e.kind }}</span>
+          </td>
+          <td class="px-3 py-2 font-mono text-xs">{{ e.actor }}</td>
+          <td class="px-3 py-2">
+            {% if e.url %}
+            <a href="{{ e.url }}" target="_blank" rel="noopener" class="hover:underline">{{ e.title }}</a>
+            {% else %}
+            {{ e.title }}
+            {% endif %}
+          </td>
+          <td class="px-3 py-2 text-xs text-gray-500">{{ e.subtitle }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="px-3 py-12 text-center text-gray-400">No events in this window.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="text-xs text-gray-500">
+    Pulls from <span class="font-mono">signal_archive</span>, <span class="font-mono">audit_log</span>,
+    <span class="font-mono">trade_ledger</span>, and <span class="font-mono">error_log</span>. Up to 200 of each per window.
+  </p>
+</div>
+{% endblock %}
