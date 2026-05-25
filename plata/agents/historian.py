@@ -100,6 +100,9 @@ async def seed(
     steering_block = "\n\n".join(steering) + ("\n\n" if steering else "")
 
     for i in range(batches):
+        # Heartbeat at the start of every batch so dashboards can tell apart
+        # "actively working" from "process died mid-flight".
+        await redis.hset(status_key, "last_progress_at", datetime.utcnow().isoformat())
         prompt = (
             f"{steering_block}"
             f"Generate batch #{i+1} of {batches}. {batch_size} unique events not in any prior batch.\n"
@@ -161,6 +164,7 @@ async def seed(
                 "written": written,
                 "last_event_date": ev.get("date") or "",
                 "last_event_category": ev.get("category") or "",
+                "last_progress_at": datetime.utcnow().isoformat(),
             })
         _log.info("historian_batch_done", batch=i, written=written)
     await redis.hset(status_key, mapping={

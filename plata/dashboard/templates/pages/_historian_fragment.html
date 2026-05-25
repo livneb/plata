@@ -11,10 +11,24 @@
     <span class="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded">DONE</span>
     {% elif state == 'never_run' %}
     <span class="bg-gray-200 text-gray-700 text-[10px] px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">NEVER RUN</span>
+    {% elif state == 'stale' %}
+    <span class="bg-amber-100 text-amber-700 text-[10px] px-2 py-0.5 rounded">STALE (no progress for {{ status.stale_age_s }}s)</span>
     {% else %}
     <span class="bg-gray-200 text-gray-700 text-[10px] px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">{{ state | upper }}</span>
     {% endif %}
   </div>
+
+  {% if state in ['stale', 'failed', 'done'] %}
+  <div class="flex justify-end">
+    <form method="post" action="/historian/reset"
+          data-confirm="Clear the historian status so a new run can start?"
+          data-confirm-title="Reset historian" data-confirm-label="Reset">
+      <button type="submit" class="text-xs px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+        Reset status
+      </button>
+    </form>
+  </div>
+  {% endif %}
 
   {% if state == 'never_run' %}
   <p class="text-sm text-gray-500 italic">No seed has been run yet. Start one from the panel on the right.</p>

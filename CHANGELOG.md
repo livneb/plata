@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.030 — 2026-05-25
+- Historian seed now writes a `last_progress_at` heartbeat at every batch + every event. If no progress for >3 minutes, the dashboard auto-flags the run as **STALE** (instead of misleading "running"). A stale run is also surfaced as an error card on the Workflow Kanban.
+- New **Reset status** button on the Historian page (and a `POST /historian/reset` endpoint) to clear a stale/failed/done run so a fresh seed can start. The /start endpoint now ignores a stale "running" flag.
+
 ## 2.24.029 — 2026-05-25
 - Sidebar reorganised into collapsible groups: **Dashboard**, **Operations** (Workflow / Activity / Agent Health), **Knowledge** (History / Graph / Historian), **Trading** (Pending Proposals / Trades), **Diagnostics** (Errors / Dead Letters), **Settings**. Groups auto-expand when one of their children is the active page.
 - Kill switch removed from the topbar. Moved to a new **Settings** page with **Flowbite tabs**: Controls (kill switch / resume), Risk Config (CRUD table), Account (signed-in user / logout), Environment (app version + state).

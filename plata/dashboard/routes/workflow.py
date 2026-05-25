@@ -109,6 +109,27 @@ async def _historian_card() -> dict[str, Any] | None:
     pct = (written * 100 // target) if target > 0 else 0
     brief = (data.get("brief") or "").strip()
     last = data.get("last_event_date") or ""
+    # Promote stale "running" rows to a visible failure so users notice + reset.
+    if state == "running":
+        last_raw = data.get("last_progress_at") or data.get("started_at") or ""
+        try:
+            last_dt = datetime.fromisoformat(last_raw)
+            age = (datetime.utcnow() - last_dt).total_seconds()
+            if age > 180:
+                state = "stale"
+        except Exception:  # noqa: BLE001
+            pass
+    if state == "stale":
+        return {
+            "lane": "active",
+            "category": "intelligence",
+            "agent": "historian",
+            "title": f"Stale seed: {written}/{target} written",
+            "subtitle": "No progress in 3+ min — process likely died. Reset on /historian/.",
+            "status": "error",
+            "ts": data.get("last_progress_at") or data.get("started_at"),
+            "extra": "",
+        }
     if state == "running":
         return {
             "lane": "doing",

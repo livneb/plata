@@ -23,6 +23,18 @@ async def _status() -> dict[str, Any]:
     data = await redis.hgetall(STATUS_KEY)
     if not data:
         return {"state": "never_run"}
+    # Mark as stale if claimed "running" but no progress in 3 minutes.
+    if data.get("state") == "running":
+        from datetime import datetime
+        last_raw = data.get("last_progress_at") or data.get("started_at") or ""
+        try:
+            last_dt = datetime.fromisoformat(last_raw)
+            age = (datetime.utcnow() - last_dt).total_seconds()
+            if age > 180:
+                data["state"] = "stale"
+                data["stale_age_s"] = int(age)
+        except Exception:  # noqa: BLE001
+            pass
     return data
 
 
@@ -42,6 +54,14 @@ async def fragment(request: Request):
     )
 
 
+@router.post("/reset")
+async def reset():
+    """Clear the historian status hash. Used to dismiss stale/zombie runs."""
+    redis = get_redis()
+    await redis.delete(STATUS_KEY)
+    return RedirectResponse(url="/historian/", status_code=303)
+
+
 @router.post("/start")
 async def start(
     total: int = Form(100),
@@ -55,9 +75,9 @@ async def start(
     batch_size = max(1, min(int(batch_size), 25))
     if start_date > end_date:
         start_date, end_date = end_date, start_date
-    redis = get_redis()
-    current = await redis.hget(STATUS_KEY, "state")
-    if current == "running":
+    # Honor a "running" guard only if it's not actually stale.
+    status = await _status()
+    if status.get("state") == "running":
         return RedirectResponse(url="/historian/", status_code=303)
     from plata.agents.historian import seed
     asyncio.create_task(
