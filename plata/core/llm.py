@@ -155,11 +155,14 @@ class LLMClient:
     ) -> ChatCompletion:
         """Run a chat completion. Records cost and enforces budget caps."""
         trace = None
-        if self._langfuse:
-            trace = self._langfuse.trace(
-                name=f"{self.agent}.complete",
-                metadata={"agent": self.agent, "model": self.model, **(metadata or {})},
-            )
+        if self._langfuse and hasattr(self._langfuse, "trace"):
+            try:
+                trace = self._langfuse.trace(
+                    name=f"{self.agent}.complete",
+                    metadata={"agent": self.agent, "model": self.model, **(metadata or {})},
+                )
+            except Exception:  # noqa: BLE001 — never let observability break the pipeline
+                trace = None
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -183,11 +186,14 @@ class LLMClient:
         if usage:
             cost = _estimate_cost_usd(self.model, usage.prompt_tokens, usage.completion_tokens)
             await _record_and_check(self.agent, cost)
-            if trace:
-                trace.update(
-                    metadata={"cost_usd": cost, "prompt_tokens": usage.prompt_tokens,
-                              "completion_tokens": usage.completion_tokens}
-                )
+            if trace is not None:
+                try:
+                    trace.update(
+                        metadata={"cost_usd": cost, "prompt_tokens": usage.prompt_tokens,
+                                  "completion_tokens": usage.completion_tokens}
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
         return response
 

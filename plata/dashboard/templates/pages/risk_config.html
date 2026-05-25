@@ -1,37 +1,102 @@
 {% extends "base.html" %}
-{% block title %}Risk Config – Plata{% endblock %}
+{% block title %}Risk Config · Plata{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">Risk Configuration</h1>
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Risk Configuration</h1>
+    <button data-modal-target="create-modal" data-modal-toggle="create-modal" type="button"
+            class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2">
+      + New
+    </button>
+  </div>
 
-<div class="grid gap-6 md:grid-cols-2">
-  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-    <h2 class="text-lg font-semibold mb-3">Current values</h2>
-    <table class="w-full text-sm">
-      <tbody>
-        {% for key, value in config.items() %}
-        <tr class="border-b dark:border-gray-700">
-          <td class="py-2 font-mono">{{ key }}</td>
-          <td class="py-2">{{ value }}</td>
+  <p class="text-xs text-gray-500">Common keys: <span class="font-mono">paper_trading_mode</span>, <span class="font-mono">risk_per_trade_pct</span>, <span class="font-mono">max_open_positions</span>, <span class="font-mono">max_daily_loss_pct</span>, <span class="font-mono">auto_approve_threshold_usd</span>, <span class="font-mono">llm.daily_budget_usd_total</span>.</p>
+
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+        <tr>
+          <th class="px-4 py-3">Key</th>
+          <th class="px-4 py-3">Value</th>
+          <th class="px-4 py-3">Version</th>
+          <th class="px-4 py-3">Updated</th>
+          <th class="px-4 py-3 text-right">Actions</th>
         </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="border-t border-gray-100 dark:border-gray-700">
+          <td class="px-4 py-3 font-mono">{{ row.key }}</td>
+          <td class="px-4 py-3 font-mono break-all">{{ row.value }}</td>
+          <td class="px-4 py-3">{{ row.version }}</td>
+          <td class="px-4 py-3 text-gray-500" title="{{ row.updated_at or '' }}">{{ row.updated_at | time_ago }}</td>
+          <td class="px-4 py-3 text-right whitespace-nowrap">
+            <button type="button"
+                    data-modal-target="edit-{{ loop.index }}" data-modal-toggle="edit-{{ loop.index }}"
+                    class="text-blue-500 hover:underline mr-3">Edit</button>
+            <form method="post" action="/risk_config/{{ row.key }}/delete" class="inline"
+                  onsubmit="return confirm('Delete {{ row.key }}?')">
+              <button type="submit" class="text-red-500 hover:underline">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <tr><td colspan="5" class="p-0">
+          <div id="edit-{{ loop.index }}" tabindex="-1"
+               class="hidden fixed top-0 left-0 right-0 z-50 w-full h-full bg-black/50 flex items-center justify-center">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-full max-w-md p-5">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">Edit <span class="font-mono">{{ row.key }}</span></h3>
+                <button type="button" data-modal-hide="edit-{{ loop.index }}" class="text-gray-400 hover:text-gray-200">✕</button>
+              </div>
+              <form method="post" action="/risk_config/{{ row.key }}/update" class="space-y-3">
+                <div>
+                  <label class="block text-sm font-medium mb-1">Value (JSON or plain text)</label>
+                  <input name="value" value="{{ row.value }}" required
+                         class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                </div>
+                <div class="flex justify-end gap-2">
+                  <button type="button" data-modal-hide="edit-{{ loop.index }}"
+                          class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600">Cancel</button>
+                  <button type="submit"
+                          class="px-3 py-1.5 text-sm rounded-lg text-white bg-blue-700 hover:bg-blue-800">Save</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </td></tr>
+        {% else %}
+        <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No config keys yet — click "New" to add one.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+</div>
 
-  <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-    <h2 class="text-lg font-semibold mb-3">Edit</h2>
-    <form method="post" action="/risk_config/" class="space-y-3">
+<div id="create-modal" tabindex="-1"
+     class="hidden fixed top-0 left-0 right-0 z-50 w-full h-full bg-black/50 flex items-center justify-center">
+  <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-full max-w-md p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold">New config key</h3>
+      <button type="button" data-modal-hide="create-modal" class="text-gray-400 hover:text-gray-200">✕</button>
+    </div>
+    <form method="post" action="/risk_config/create" class="space-y-3">
       <div>
-        <label class="block mb-1 text-sm font-medium">Key</label>
-        <input name="key" required class="bg-gray-50 border border-gray-300 text-sm rounded-lg block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600" />
+        <label class="block text-sm font-medium mb-1">Key</label>
+        <input name="key" required placeholder="e.g. max_open_positions"
+               class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
       </div>
       <div>
-        <label class="block mb-1 text-sm font-medium">Value</label>
-        <input name="value" required class="bg-gray-50 border border-gray-300 text-sm rounded-lg block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600" />
+        <label class="block text-sm font-medium mb-1">Value (JSON or plain text)</label>
+        <input name="value" required placeholder='e.g. 3 or "paper" or {"x":1}'
+               class="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
       </div>
-      <button type="submit" class="text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-lg text-sm px-5 py-2.5">Update</button>
+      <div class="flex justify-end gap-2">
+        <button type="button" data-modal-hide="create-modal"
+                class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600">Cancel</button>
+        <button type="submit"
+                class="px-3 py-1.5 text-sm rounded-lg text-white bg-blue-700 hover:bg-blue-800">Create</button>
+      </div>
     </form>
-    <p class="mt-3 text-xs text-gray-500">Common keys: paper_trading_mode, risk_per_trade_pct, max_open_positions, max_daily_loss_pct, auto_approve_threshold_usd, llm.daily_budget_usd_total</p>
   </div>
 </div>
 {% endblock %}

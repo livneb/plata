@@ -1,0 +1,65 @@
+<div class="space-y-4">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="text-xs uppercase text-gray-500">Total signals archived</div>
+      <div class="text-2xl font-bold">{{ total_signals }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="text-xs uppercase text-gray-500">Signals last 24h</div>
+      <div class="text-2xl font-bold">{{ recent_24h }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 col-span-2">
+      <div class="text-xs uppercase text-gray-500 mb-1">By source (24h)</div>
+      {% if by_source %}
+      <div class="flex flex-wrap gap-2">
+        {% for src, count in by_source %}
+        <span class="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-blue-900 dark:text-blue-300">{{ src }}: {{ count }}</span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-sm text-gray-400">no signals yet</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    <div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
+      <h3 class="font-semibold">Recent signals</h3>
+      <span class="text-xs text-gray-400">{{ as_of }}</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left">
+        <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+          <tr>
+            <th class="px-3 py-2">Time</th>
+            <th class="px-3 py-2">Source</th>
+            <th class="px-3 py-2">Title</th>
+            <th class="px-3 py-2">Dup</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recent_rows %}
+          <tr class="border-t border-gray-100 dark:border-gray-700">
+            <td class="px-3 py-2 text-gray-500 whitespace-nowrap">{{ row.fetched_at.strftime('%H:%M:%S') if row.fetched_at else '-' }}</td>
+            <td class="px-3 py-2">{{ row.source }}</td>
+            <td class="px-3 py-2">
+              {% if row.url %}
+              <a href="{{ row.url }}" target="_blank" rel="noopener" class="hover:underline">{{ (row.title or row.body or '')[:140] }}</a>
+              {% else %}
+              {{ (row.title or row.body or '')[:140] }}
+              {% endif %}
+            </td>
+            <td class="px-3 py-2">
+              {% if row.is_duplicate %}
+              <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">dup</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="px-3 py-6 text-center text-gray-400">No signals archived yet. Once the scraper publishes, rows will appear here.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

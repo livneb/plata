@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Activity · Plata{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <div class="flex items-baseline justify-between">
+    <h1 class="text-2xl font-semibold">Activity</h1>
+    <span class="text-xs text-gray-400" id="as-of-top">refreshed {{ as_of }}</span>
+  </div>
+
+  <!-- Architecture diagram -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="text-lg font-semibold mb-3">System architecture</h2>
+    <div class="overflow-x-auto">
+      <pre class="mermaid text-xs">
+flowchart LR
+  subgraph SRC[External signal sources]
+    R[Reddit]; CP[CryptoPanic]; GD[GDELT]; NA[NewsAPI]; CN[CryptoNews]; LC[LunarCrush]; WA[WhaleAlert]
+  end
+  subgraph INF[Infra]
+    PG[(Postgres)]; RD[(Redis Streams)]
+  end
+  subgraph LLMS[LLM services]
+    OR[OpenRouter]; VY[Voyage embeddings]; LF[Langfuse traces]
+  end
+  SRC --> SCR[Scraper agent]
+  SCR --> |raw_signals| RD
+  SCR --> PG
+  RD --> GI[GraphIngestion agent]
+  GI --> OR & VY & LF
+  GI --> |enriched_events| RD
+  RD --> ST[Strategist agent]
+  ST --> OR & VY & LF
+  ST --> |trading_proposals| RD
+  RD --> RM[RiskManager agent]
+  RM --> TG[Telegram HITL]
+  TG --> RM
+  RM --> EX[Executor agent]
+  EX --> BY[Bybit exchange]
+  EX --> |trade_closures| RD
+  RD --> RV[Reviewer agent]
+  RV --> OR & LF & PG
+  ORC[Orchestrator agent] --> RD
+        </pre>
+    </div>
+  </section>
+
+  <!-- Pipeline depths -->
+  <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    {% for stage in pipeline %}
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <div class="text-xs uppercase text-gray-500">{{ stage.stage }}</div>
+      <div class="text-2xl font-bold mt-1">{{ stage.length }}</div>
+      <div class="text-xs text-gray-400">{{ stage.label }} in stream</div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <!-- API status -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="text-lg font-semibold mb-3">External API status</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {% for api in apis %}
+      <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+        <div class="flex items-center justify-between">
+          <span class="font-semibold">{{ api.name }}</span>
+          {% if api.configured %}
+          <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">CONFIGURED</span>
+          {% else %}
+          <span class="bg-gray-200 text-gray-700 text-xs font-medium px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">NOT SET</span>
+          {% endif %}
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ api.desc }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Signal counts + recent feed (auto-refreshing fragment) -->
+  <section id="live-pane"
+           hx-get="/activity/_fragment"
+           hx-trigger="load delay:5s, every 5s"
+           hx-swap="innerHTML">
+    {% include "pages/_activity_fragment.html" %}
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+{% endblock %}

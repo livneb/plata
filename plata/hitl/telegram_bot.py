@@ -46,6 +46,29 @@ class TelegramBot(BaseAgent):
                 await handler(update, ctx)
             return wrapper
 
+        HELP_TEXT = (
+            "Plata bot ready.\n\n"
+            "Commands:\n"
+            "/status — system state + pending approvals\n"
+            "/halt — emergency halt all agents\n"
+            "/resume — resume agents after halt\n"
+            "/paper on|off — toggle paper trading mode\n"
+            "/positions — last reported executor state\n"
+            "/help — this message\n\n"
+            "Trade proposals will arrive here with Approve/Reject buttons."
+        )
+
+        @_gated
+        async def cmd_start(update, _):
+            uid = update.effective_user.id if update.effective_user else "?"
+            await update.message.reply_text(
+                f"Hi! Your Telegram user ID is {uid}.\n\n" + HELP_TEXT
+            )
+
+        @_gated
+        async def cmd_help(update, _):
+            await update.message.reply_text(HELP_TEXT)
+
         @_gated
         async def cmd_status(update, _):
             redis = get_redis()
@@ -100,6 +123,8 @@ class TelegramBot(BaseAgent):
                 verdict += " (already decided)"
             await query.edit_message_text(text=f"{verdict}\nProposal: {proposal_ulid}")
 
+        app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("help", cmd_help))
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("halt", cmd_halt))
         app.add_handler(CommandHandler("resume", cmd_resume))

@@ -67,6 +67,12 @@ class Settings(BaseSettings):
         int,
         Field(ge=1, le=65535, validation_alias=AliasChoices("DASHBOARD_PORT", "PORT")),
     ] = 8080
+    dashboard_admin_email: str | None = None
+    dashboard_admin_password: SecretStr | None = None
+    app_version: Annotated[
+        str,
+        Field(validation_alias=AliasChoices("APP_VERSION", "RAILWAY_GIT_COMMIT_SHA")),
+    ] = "dev"
 
     # --- Bootstrap defaults (used only if risk_config has no row yet) ---
     default_paper_trading_mode: bool = True

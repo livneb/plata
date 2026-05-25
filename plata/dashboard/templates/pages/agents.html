@@ -7,7 +7,7 @@
   <div class="p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
     <h3 class="text-lg font-semibold">{{ a.name }}</h3>
     <p class="text-xs text-gray-500">Container: {{ a.container or '—' }}</p>
-    <p class="text-xs">Last heartbeat: {{ a.last_heartbeat or '—' }}</p>
+    <p class="text-xs" title="{{ a.last_heartbeat or '' }}">Last heartbeat: {{ a.last_heartbeat | time_ago }}</p>
     <p class="text-xs">In-flight: {{ a.in_flight or '0' }}</p>
     <p>
       {% if a.halted == 'True' %}
