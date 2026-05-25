@@ -252,6 +252,26 @@
     // ---------- Kill / Resume ----------
     // Kill switch moved to /settings/?tab=controls.
 
+    // ---------- Esc closes any visible modal ----------
+    // Every modal in this app uses `fixed inset-0 z-[...] bg-black/50` and the
+    // `hidden` class to toggle visibility. Esc removes `hidden` from any matching
+    // overlay that is currently visible. Equivalent to clicking its × / Cancel.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const overlays = document.querySelectorAll('.fixed.inset-0');
+      let closedAny = false;
+      overlays.forEach(o => {
+        const visible = !o.classList.contains('hidden') && o.offsetParent !== null;
+        // Skip elements that aren't true modal overlays (e.g. theme-bootstrap script outputs).
+        const looksLikeModal = (o.className || '').includes('bg-black/50') || o.querySelector('[data-card-close], [data-plata-cancel], [data-modal-hide], [data-changelog-close]');
+        if (visible && looksLikeModal) {
+          o.classList.add('hidden');
+          closedAny = true;
+        }
+      });
+      if (closedAny) e.stopPropagation();
+    });
+
     // ---------- Help tooltips ----------
     // <span class="help-icon" data-help-text="..."> shows a small tooltip on hover/focus.
     (function () {

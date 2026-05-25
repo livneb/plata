@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.042 — 2026-05-25
+- Global **Esc closes any open modal** — confirm, settings tabs, card-detail, changelog carousel, risk-config create/edit, graph focus, anything matching the standard `fixed inset-0 bg-black/50` overlay pattern. Equivalent to clicking ✕ / Cancel.
+
 ## 2.24.041 — 2026-05-25
 - Strategist now outputs **milestones** along the expected trajectory (e.g. `+30% in 2 weeks`, `+56% in 3 weeks`). New `Milestone` model + `milestones: list[Milestone]` on `TradeProposal`. JSON schema asks for 2-5 milestones with `eta_minutes`, signed `expected_pct_move`, `confidence`, `rationale`. Bedrock-incompatible keywords still stripped by the LLM client.
 - Trade detail page renders the milestones as a table — ETA, expected move (green/red), confidence bar, rationale.
