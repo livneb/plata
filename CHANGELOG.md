@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.023 — 2026-05-25
+- New **Graph** page (`/graph/`). Interactive Cytoscape.js view of the live knowledge graph stored in Redis:
+  - Event nodes (circles), colored by category. Entity nodes (rounded rectangles), colored by entity type.
+  - Edges show the mention relations (`mentions`, etc.) with directional arrows.
+  - Drag nodes, scroll to zoom, click for the raw JSON doc in a side panel.
+  - Click an event node to **focus** on it — pulls its entities + one-hop neighborhood. "Clear focus" returns to the most-recent-N view.
+  - Selector to load 20 / 40 / 80 / 150 events.
+- Pulls only event + entity + edge keys from Redis (`event:*`, `entity:*`, `edge:*`). Embeddings are stripped before sending to the browser.
+
 ## 2.24.022 — 2026-05-25
 - New **History** page (`/history/`). Unified timeline merging `signal_archive`, `audit_log` (HITL decisions), `trade_ledger`, and `error_log`. Filter by kind (signal / decision / trade / error) and window (1h / 6h / 24h / 72h / 7d). Times render in your local timezone.
 

@@ -21,6 +21,7 @@ from plata.dashboard.routes import (
     auth,
     dlq,
     errors,
+    graph,
     history,
     proposals,
     risk_config,
@@ -180,6 +181,7 @@ def create_app() -> FastAPI:
     app.include_router(activity.router)
     app.include_router(workflow.router)
     app.include_router(history.router)
+    app.include_router(graph.router)
     app.include_router(dlq.router)
     return app
 
