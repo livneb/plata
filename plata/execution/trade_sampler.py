@@ -131,18 +131,31 @@ async def _sample_one(trade: TradeLedger) -> None:
 
 
 async def run_sampler_loop() -> None:
-    """Forever loop. Picks open trades from Postgres, samples each at its own cadence."""
+    """Forever loop. Picks open trades from Postgres, samples each at its own cadence.
+
+    Logging policy: only emit a Kanban activity entry when we actually sampled
+    at least one trade. This prevents the Done lane from being drowned by tick-only
+    "Sampled 0" rows when no trade is due for a fresh price.
+    """
     _log.info("trade_sampler_starting")
-    # Per-trade last-sample timestamp so we honor per-trade cadence in one global loop.
     last_sample: dict[str, float] = {}
-    cadences: dict[str, int] = {}  # per-trade cadence in seconds
+    cadences: dict[str, int] = {}
+    redis = get_redis()
     while True:
         try:
             async with session_scope() as session:
                 rows = (await session.execute(
                     select(TradeLedger).where(TradeLedger.exit_price.is_(None))
                 )).scalars().all()
+            # Heartbeat for the Active lane on /workflow/.
+            await redis.hset("agent_status:trade_sampler", mapping={
+                "container": "execution_vault",
+                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+                "in_flight": len(rows),
+                "halted": "False",
+            })
             now = time.monotonic()
+            sampled_now: list[str] = []
             for trade in rows:
                 if trade.trade_ulid not in cadences:
                     longest = await _longest_milestone_eta(trade.proposal_id)
@@ -154,9 +167,15 @@ async def run_sampler_loop() -> None:
                 try:
                     await _sample_one(trade)
                     last_sample[trade.trade_ulid] = now
+                    sampled_now.append(trade.symbol)
                 except Exception as exc:  # noqa: BLE001
                     _log.warning("sample_failed", trade=trade.trade_ulid, error=str(exc)[:160])
-            await log_action("trade_sampler", f"Sampled {len(rows)} open trade(s)")
+            # Only log to /workflow/ Done when there's something worth showing.
+            if sampled_now:
+                await log_action(
+                    "trade_sampler",
+                    f"Sampled {len(sampled_now)} of {len(rows)} open trade(s): {', '.join(sampled_now[:5])}",
+                )
         except Exception as exc:  # noqa: BLE001
             _log.exception("sampler_loop_error", error=str(exc))
         await asyncio.sleep(5)  # base tick; per-trade cadence is enforced above

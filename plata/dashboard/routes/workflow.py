@@ -47,6 +47,7 @@ AGENT_VERB = {
     "executor": "Submitting orders to Bybit",
     "orchestrator": "Watching heartbeats + DLQ",
     "telegram_bot": "Awaiting Telegram commands",
+    "trade_sampler": "Sampling live prices for open trades",
 }
 
 CATEGORY = {
@@ -58,6 +59,7 @@ CATEGORY = {
     "executor": "execution",
     "orchestrator": "ops",
     "telegram_bot": "hitl",
+    "trade_sampler": "execution",
 }
 
 
@@ -202,10 +204,10 @@ async def _historian_card() -> dict[str, Any] | None:
 
 
 async def _active_cards() -> list[dict[str, Any]]:
-    """Event-driven observers — orchestrator, telegram bot."""
+    """Event-driven observers — orchestrator, telegram bot, trade sampler."""
     redis = get_redis()
     cards: list[dict[str, Any]] = []
-    for name in ("orchestrator", "telegram_bot"):
+    for name in ("orchestrator", "telegram_bot", "trade_sampler"):
         data = await redis.hgetall(f"agent_status:{name}")
         if not data:
             continue
@@ -340,7 +342,9 @@ async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
     showing the latest summary and a (N) count.
     """
     redis = get_redis()
-    skip = {"orchestrator", "telegram_bot", "scraper"}
+    # Watchers / always-on background loops don't belong in Done — their card
+    # already shows the last action in its subtitle.
+    skip = {"orchestrator", "telegram_bot", "scraper", "trade_sampler"}
     entries: list[tuple[str, str, str]] = []
     async for k in redis.scan_iter(match="agent_activity:*", count=100):
         agent = k.split(":")[-1]

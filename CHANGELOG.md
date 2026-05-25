@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.051 — 2026-05-25
+- `trade_sampler` only logs to /workflow/ Done when it actually sampled at least one trade. Tick-only "Sampled 3 open trade(s)" rows every 5 s no longer drown the lane.
+- `trade_sampler` excluded from Done aggregation (it's a watcher, like orchestrator/telegram_bot) — instead it shows up in the Active lane with its own heartbeat hash (`agent_status:trade_sampler`).
+- New AGENT_VERB entry: "Sampling live prices for open trades".
+
 ## 2.24.050 — 2026-05-25
 - **Graph loads near-instantly on reload.** localStorage cache + delta fetch:
   - On open we render the cached nodes/edges immediately, then fetch only events created since `lastSyncEpoch` and merge in.
