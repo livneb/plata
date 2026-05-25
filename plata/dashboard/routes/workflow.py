@@ -131,6 +131,36 @@ async def _historian_batch_cards() -> list[dict[str, Any]]:
         })
     # Newest batches first
     out.sort(key=lambda c: c.get("ts") or "", reverse=True)
+    # Also surface up to 8 most-recent individual seeded events as ephemeral sub-cards.
+    try:
+        raw_events = await redis.lrange("historian:events_live", 0, 7)
+        from datetime import timezone as _tz
+        now = datetime.now(_tz.utc)
+        for raw in raw_events:
+            try:
+                ev = __import__("json").loads(raw)
+            except Exception:  # noqa: BLE001
+                continue
+            try:
+                ts_dt = datetime.fromisoformat(ev["ts"])
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=_tz.utc)
+                age_s = (now - ts_dt).total_seconds()
+            except Exception:  # noqa: BLE001
+                age_s = 0
+            lane = "doing" if age_s < 30 else "done"
+            out.append({
+                "lane": lane,
+                "category": "intelligence",
+                "agent": "historian",
+                "title": ev.get("summary") or "(no summary)",
+                "subtitle": f"event · batch {int(ev.get('batch_i', 0)) + 1} · {ev.get('date') or ''}",
+                "status": "running" if lane == "doing" else "ok",
+                "ts": ev.get("ts"),
+                "extra": "",
+            })
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 

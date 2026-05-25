@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any
 
@@ -210,6 +211,21 @@ async def seed(
             })
             await redis.hincrby(batch_key, "events_in_batch", 1)
             await redis.hset(batch_key, "last_event_date", ev.get("date") or "")
+            # Surface this event as a transient sub-card on the workflow Kanban.
+            try:
+                live_entry = json.dumps({
+                    "ulid": event_ulid,
+                    "summary": (ev.get("narrative") or "")[:120],
+                    "category": ev.get("category"),
+                    "date": ev.get("date"),
+                    "batch_i": i,
+                    "ts": datetime.utcnow().isoformat(),
+                })
+                await redis.lpush("historian:events_live", live_entry)
+                await redis.ltrim("historian:events_live", 0, 29)
+                await redis.expire("historian:events_live", 90)
+            except Exception:  # noqa: BLE001
+                pass
         await redis.hset(batch_key, mapping={
             "state": "done",
             "finished_at": datetime.utcnow().isoformat(),

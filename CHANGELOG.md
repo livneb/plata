@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.064 — 2026-05-25
+- **Per-event sub-cards on the Workflow Kanban.** Each event the historian writes is pushed to a capped Redis list (`historian:events_live`, last 30, 90 s TTL); the workflow renderer surfaces up to 8 of them as cards. Within 30 s they appear in Doing as `running`, then age into Done as `ok`. Live view of the seeder filling the graph in real time.
+
 ## 2.24.063 — 2026-05-25
 - **Cancel ✕ on every actionable Kanban card.** Click → confirm modal → POST. New endpoints:
   - `POST /workflow/cancel/source/<name>` — halts one scraper source's poll loop. The poll loop now reads the Redis status hash each tick and sleeps when set to `halted`.
