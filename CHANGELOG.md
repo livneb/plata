@@ -2,6 +2,16 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.018 — 2026-05-25
+- Done-lane cards now describe what each agent *did* instead of dumping the raw payload ULID. Per-agent summaries:
+  - `Enriched [gdelt] <title>` — graph_ingestion
+  - `Analyzed [<category>] <summary>` — strategist
+  - `Risk-checked <symbol> <side>` — risk_manager
+  - `Executed <symbol> <side>` — executor
+  - `Reviewed trade <symbol>` — reviewer
+  - `Saw heartbeat from <agent>` — orchestrator
+- Card subtitle dropped (was redundant with the verb in the title).
+
 ## 2.24.017 — 2026-05-25
 - Collapsed `WATCHING` / `LISTENING` into a single `ACTIVE` status — both meant the same thing operationally.
 - **Background cards now show the last concrete action** each watcher performed:

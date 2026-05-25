@@ -195,8 +195,9 @@ async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
             "lane": "done",
             "category": CATEGORY.get(agent, "intelligence"),
             "agent": agent,
-            "title": summary[:140] if summary else "(no summary)",
-            "subtitle": AGENT_VERB.get(agent, agent),
+            # The summary already follows the "<verb> <object>" pattern (e.g. "Enriched [gdelt] ...").
+            "title": summary or AGENT_VERB.get(agent, agent),
+            "subtitle": "",
             "status": "ok",
             "ts": ts,
             "extra": "",

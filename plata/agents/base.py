@@ -9,6 +9,49 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+def _payload_summary(agent: str, payload: dict, stream: str) -> str:
+    """Render a human-friendly one-liner of what an agent just processed.
+
+    Falls back to ULID/stream only if no semantic field is present.
+    """
+    title = payload.get("title")
+    summary = payload.get("summary")
+    category = payload.get("category")
+    symbol = payload.get("symbol") or payload.get("asset")
+    side = payload.get("side")
+    source = payload.get("source")
+    ulid = payload.get("ulid") or payload.get("proposal_ulid") or payload.get("trade_ulid")
+    src_agent = payload.get("agent")
+
+    if agent == "graph_ingestion":
+        # Receives RawSignal — best to show source + title.
+        base = title or summary or "(no title)"
+        return f"Enriched [{source or '?'}] {base}"
+    if agent == "strategist":
+        # Receives EnrichedEvent — has summary + category.
+        base = summary or title or ulid or "(no summary)"
+        if category:
+            return f"Analyzed [{category}] {base}"
+        return f"Analyzed {base}"
+    if agent == "risk_manager":
+        return f"Risk-checked {symbol or ''} {side or ''}".strip() or f"Proposal {ulid}"
+    if agent == "executor":
+        return f"Executed {symbol or ''} {side or ''}".strip() or f"Order {ulid}"
+    if agent == "reviewer":
+        return f"Reviewed trade {symbol or ulid or ''}".strip()
+    if agent == "orchestrator":
+        # Heartbeat stream — payload is AgentHeartbeat
+        return f"Saw heartbeat from {src_agent or '?'}"
+    # Generic fallback
+    if title:
+        return title
+    if summary:
+        return summary
+    if symbol:
+        return f"{symbol} {side or ''}".strip()
+    return f"{stream} · {ulid or '?'}"
+
+
 async def log_action(agent: str, summary: str, *, kind: str = "ok") -> None:
     """Push an action entry onto `agent_activity:<agent>` (capped at 50 newest).
 
@@ -120,11 +163,8 @@ class BaseAgent(ABC):
                 await redis.hincrby(f"agent_stats:{self.name}", "processed_total", 1)
                 # Live activity tail: keep last 50 entries per agent (newest first).
                 try:
-                    summary = (msg.payload.get("title")
-                               or msg.payload.get("symbol")
-                               or msg.payload.get("ulid")
-                               or msg.stream)
-                    entry = f"{datetime.now(timezone.utc).isoformat()}|ok|{str(summary)[:120]}"
+                    summary = _payload_summary(self.name, msg.payload, msg.stream)
+                    entry = f"{datetime.now(timezone.utc).isoformat()}|ok|{summary[:140]}"
                     await redis.lpush(activity_key, entry)
                     await redis.ltrim(activity_key, 0, 49)
                 except Exception:  # noqa: BLE001
