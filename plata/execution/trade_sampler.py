@@ -41,16 +41,17 @@ PROPOSAL_CACHE_TTL_SEC = 600          # remember the longest-milestone lookup pe
 
 
 def _cadence_seconds(longest_eta_minutes: int) -> int:
-    """Map the longest milestone ETA to a sampling cadence."""
+    """Map the longest milestone ETA to a sampling cadence.
+    Floor at 60s so the topbar 'Open · unrealized' KPI is always fresh."""
     if longest_eta_minutes <= 15:
         return 5
     if longest_eta_minutes <= 4 * 60:
         return 60
     if longest_eta_minutes <= 24 * 60:
-        return 300
+        return 60     # was 300 — keep unrealized PnL within a minute
     if longest_eta_minutes <= 7 * 24 * 60:
-        return 1800
-    return 6 * 60 * 60
+        return 60     # was 1800
+    return 60         # was 6h — same floor, otherwise the UI looks frozen
 
 
 async def _longest_milestone_eta(proposal_ulid: str | None) -> int:

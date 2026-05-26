@@ -53,17 +53,28 @@ def _payload_summary(agent: str, payload: dict, stream: str) -> str:
 
 
 async def log_action(agent: str, summary: str, *, kind: str = "ok") -> None:
-    """Push an action entry onto `agent_activity:<agent>` (capped at 50 newest).
+    """Record an action — written to BOTH:
+      • Redis list `agent_activity:<agent>` (ring-buffer, last 50 entries,
+        used ONLY by the live Done lane on /workflow/ — fast, ephemeral)
+      • Postgres `agent_activity_log` (durable, queryable, swept after 30d,
+        used by /activity/history)
 
-    Use this in watchers / event-driven agents that don't go through `_consume_loop`
-    so their actions still show up on the dashboard activity tail.
+    Use this in watchers / event-driven agents that don't go through
+    `_consume_loop` so their actions still show up on the dashboard.
     """
+    summary = (summary or "")[:512]
     try:
         from plata.core.bus import get_redis  # local import to avoid cycle at module load
         redis = get_redis()
         entry = f"{datetime.now(timezone.utc).isoformat()}|{kind}|{summary[:160]}"
         await redis.lpush(f"agent_activity:{agent}", entry)
         await redis.ltrim(f"agent_activity:{agent}", 0, 49)
+    except Exception:  # noqa: BLE001 — never break the caller
+        pass
+    try:
+        from plata.core.db import AgentActivityLog, session_scope
+        async with session_scope() as session:
+            session.add(AgentActivityLog(agent=agent[:64], kind=kind[:16], summary=summary))
     except Exception:  # noqa: BLE001 — never break the caller
         pass
 
@@ -161,12 +172,21 @@ class BaseAgent(ABC):
                 await self.handle(msg.payload)
                 self._last_processed_ulid = msg.payload.get("ulid")
                 await redis.hincrby(f"agent_stats:{self.name}", "processed_total", 1)
-                # Live activity tail: keep last 50 entries per agent (newest first).
+                # Live activity tail (Redis ring + Postgres durable log).
+                summary = ""
                 try:
                     summary = _payload_summary(self.name, msg.payload, msg.stream)
                     entry = f"{datetime.now(timezone.utc).isoformat()}|ok|{summary[:140]}"
                     await redis.lpush(activity_key, entry)
                     await redis.ltrim(activity_key, 0, 49)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from plata.core.db import AgentActivityLog, session_scope
+                    async with session_scope() as session:
+                        session.add(AgentActivityLog(
+                            agent=self.name[:64], kind="ok", summary=(summary or "")[:512],
+                        ))
                 except Exception:  # noqa: BLE001
                     pass
             except Exception as e:
@@ -193,6 +213,15 @@ class BaseAgent(ABC):
                     entry = f"{datetime.now(timezone.utc).isoformat()}|err|{type(e).__name__}: {str(e)[:120]}"
                     await redis.lpush(activity_key, entry)
                     await redis.ltrim(activity_key, 0, 49)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from plata.core.db import AgentActivityLog, session_scope
+                    async with session_scope() as session:
+                        session.add(AgentActivityLog(
+                            agent=self.name[:64], kind="err",
+                            summary=f"{type(e).__name__}: {str(e)[:480]}",
+                        ))
                 except Exception:  # noqa: BLE001
                     pass
             finally:

@@ -215,3 +215,49 @@ async def fragment(request: Request):
     return templates.TemplateResponse(
         request, "pages/_activity_fragment.html", await _gather()
     )
+
+
+@router.get("/history", response_class=HTMLResponse)
+async def history(
+    request: Request,
+    agent: str | None = None,
+    kind: str | None = None,
+    q: str | None = None,
+    limit: int = 200,
+):
+    """Durable history of agent actions. Reads from Postgres agent_activity_log
+    (Redis Done lane only keeps the last 200 per agent)."""
+    from sqlalchemy import desc, distinct, select
+    from plata.core.db import AgentActivityLog, session_scope
+
+    rows: list = []
+    agents: list[str] = []
+    try:
+        async with session_scope() as session:
+            agents = sorted([r for (r,) in (await session.execute(
+                select(distinct(AgentActivityLog.agent))
+            )).all() if r])
+            stmt = select(AgentActivityLog).order_by(desc(AgentActivityLog.ts)).limit(min(int(limit), 1000))
+            if agent:
+                stmt = stmt.where(AgentActivityLog.agent == agent)
+            if kind:
+                stmt = stmt.where(AgentActivityLog.kind == kind)
+            if q:
+                stmt = stmt.where(AgentActivityLog.summary.ilike(f"%{q}%"))
+            rows = (await session.execute(stmt)).scalars().all()
+    except Exception:  # noqa: BLE001
+        pass
+
+    return templates.TemplateResponse(
+        request,
+        "pages/activity_history.html",
+        {
+            "active": "activity",
+            "rows": rows,
+            "agents": agents,
+            "filter_agent": agent or "",
+            "filter_kind": kind or "",
+            "filter_q": q or "",
+            "limit": limit,
+        },
+    )

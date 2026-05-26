@@ -275,6 +275,24 @@ class ApiCredential(Base):
     updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
+class AgentActivityLog(Base):
+    """Durable history of agent actions. Mirrors the Redis ring-buffer
+    used by the Done lane on /workflow/, but kept forever and queryable."""
+    __tablename__ = "agent_activity_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    agent: Mapped[str] = mapped_column(String(64), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="ok", index=True)
+    summary: Mapped[str] = mapped_column(String(512))
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True,
+    )
+
+    __table_args__ = (
+        Index("ix_agent_activity_agent_ts", "agent", "ts"),
+    )
+
+
 class Proposal(Base):
     """Every trade proposal the strategist ever published — including ones
     that got rejected by risk, dropped at HITL, or successfully executed.

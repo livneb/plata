@@ -1,5 +1,6 @@
 from plata.core.db.engine import get_engine, get_sessionmaker, session_scope
 from plata.core.db.models import (
+    AgentActivityLog,
     AuditLog,
     BacktestRun,
     BacktestTrade,
@@ -24,6 +25,7 @@ __all__ = [
     "ErrorLog",
     "BacktestRun",
     "BacktestTrade",
+    "AgentActivityLog",
     "Proposal",
     "get_engine",
     "get_sessionmaker",

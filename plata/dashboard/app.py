@@ -81,14 +81,15 @@ async def _lifespan(_app: FastAPI):
     try:
         from plata.config import credentials as _creds
         await _creds.ensure_table()
-        # Proposals table (replaces the Redis-only persistence)
+        # Proposals + agent activity log tables (auto-create — no Alembic).
         try:
-            from plata.core.db import Proposal, get_engine
+            from plata.core.db import AgentActivityLog, Proposal, get_engine
             engine = get_engine()
             async with engine.begin() as conn:
                 await conn.run_sync(lambda c: Proposal.__table__.create(c, checkfirst=True))
+                await conn.run_sync(lambda c: AgentActivityLog.__table__.create(c, checkfirst=True))
         except Exception as exc:  # noqa: BLE001
-            _log.warning("proposals_table_create_failed", error=str(exc)[:160])
+            _log.warning("aux_tables_create_failed", error=str(exc)[:160])
         for p in ("openrouter", "voyage", "bybit_key", "bybit_secret",
                    "alpaca_key", "alpaca_secret", "telegram",
                    "langfuse_public", "langfuse_secret"):
@@ -96,7 +97,27 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("dashboard").warning("credentials_warmup_skipped: %s", exc)
+    # Periodic sweeper: delete agent_activity_log rows older than 30 days.
+    import asyncio as _asyncio
+    async def _activity_sweeper() -> None:
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        from sqlalchemy import delete as _delete
+        from plata.core.db import AgentActivityLog, session_scope
+        while True:
+            try:
+                cutoff = _dt.now(_tz.utc) - _td(days=30)
+                async with session_scope() as session:
+                    await session.execute(
+                        _delete(AgentActivityLog).where(AgentActivityLog.ts < cutoff)
+                    )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("activity_sweep_failed", error=str(exc)[:160])
+            await _asyncio.sleep(6 * 60 * 60)  # every 6h
+    _sweeper_task = _asyncio.create_task(_activity_sweeper(), name="activity-sweeper")
+    # Keep a strong reference so the task isn't GC'd (otherwise asyncio drops it).
+    _app.state._activity_sweeper = _sweeper_task
     yield
+    _sweeper_task.cancel()
 
 
 def create_app() -> FastAPI:

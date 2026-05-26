@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.083 — 2026-05-26
+- **Agent activity now durable in Postgres.** Previously the Done lane (`/workflow/`) was the only place agent actions lived, and it was a 50-entry Redis ring buffer per agent — chatty agents like `graph_ingestion` would overwrite their tail within an hour. Now every action is mirrored into a new `agent_activity_log` Postgres table.
+  - **Redis stays small and ephemeral** (50 entries per agent) — fast for the live Done lane, no memory bloat.
+  - **Postgres holds the durable history** with a **30-day TTL**: a background sweeper in the dashboard process deletes rows older than 30 days every 6h.
+  - New **`/activity/history`** page with filters: agent, kind (ok/err/warn), free-text search across summaries, limit (100 / 200 / 500 / 1000). Linked from the sidebar as "Activity history" (🗄️) and from the live activity page.
+- **Sampler cadence floored at 60 s.** Trades whose longest milestone is > 4 h were being sampled only every 5 min – 6 h, which made the topbar `Open · unrealized` PnL look frozen. Now every open trade gets a fresh price at least every 60 s — fully live from Bybit / Alpaca, no waiting for the trade to close.
+- **What to test:** open `/activity/history` after a few agent ticks → durable table with filters. Open any trade detail with a long milestone → actual-price line updates within 60 s now. Topbar `Open · unrealized` ticks up/down at most a minute late.
+
 ## 2.24.082 — 2026-05-26
 - **Topbar KPI labels clarified + added "Total today".** The previous `PnL today` showed only *realized* PnL from closed trades, so with 3 open trades and nothing closed yet it sat at `$0.00` — looked stuck. Now:
   - `Realized today` — closed trades only, since 00:00 UTC.
