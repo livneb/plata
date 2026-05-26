@@ -112,10 +112,105 @@ async def _lifespan(_app: FastAPI):
                 _log.warning("activity_sweep_failed", error=str(exc)[:160])
             await _asyncio.sleep(6 * 60 * 60)  # every 6h
     _sweeper_task = _asyncio.create_task(_activity_sweeper(), name="activity-sweeper")
-    # Keep a strong reference so the task isn't GC'd (otherwise asyncio drops it).
     _app.state._activity_sweeper = _sweeper_task
+
+    # Health watchdog: detect "silently stuck" major functions and surface
+    # them as WARN entries in error_log so they show up on /errors/.
+    # Goes after agent-style failures (no exception raised, just a function
+    # that should be running and isn't):
+    #   • System is RUNNING but every scraper source is halted → "no signals
+    #     can enter the pipeline".
+    #   • A critical agent's heartbeat is stale > 3 min while system RUNNING.
+    # Each condition fires at most once per cooldown window (10 min) to keep
+    # the errors page readable.
+    async def _health_watchdog() -> None:
+        from datetime import datetime as _dt, timezone as _tz
+        from plata.core.bus import get_redis
+        from plata.core.error_reporter import get_error_reporter
+        redis = get_redis()
+        reporter = get_error_reporter()
+        cooldown_key = "health_watchdog:last_warned"
+        cooldown_sec = 10 * 60
+        CRITICAL_AGENTS = ("enricher", "strategist", "executor", "risk_manager")
+        while True:
+            try:
+                state = await redis.get("system:state") or "RUNNING"
+                now_utc = _dt.now(_tz.utc)
+                async def _maybe_warn(code: str, error_type: str, msg: str, ctx: dict) -> None:
+                    last = await redis.hget(cooldown_key, code)
+                    if last:
+                        try:
+                            if (now_utc - _dt.fromisoformat(last)).total_seconds() < cooldown_sec:
+                                return
+                        except Exception:  # noqa: BLE001
+                            pass
+                    await reporter.capture(
+                        agent="health_watchdog", severity="WARN",
+                        error_type=error_type, message=msg, context=ctx,
+                    )
+                    await redis.hset(cooldown_key, code, now_utc.isoformat())
+
+                # 1. Scrapers all halted while system says RUNNING.
+                if state == "RUNNING":
+                    seen_any = False
+                    active_count = 0
+                    halted_names: list[str] = []
+                    async for k in redis.scan_iter(match="scraper:source:*", count=100):
+                        seen_any = True
+                        data = await redis.hgetall(k)
+                        name = k.rsplit(":", 1)[-1]
+                        if (data.get("status") or "").lower() == "halted":
+                            halted_names.append(name)
+                        else:
+                            active_count += 1
+                    if seen_any and active_count == 0:
+                        await _maybe_warn(
+                            "all_scrapers_halted",
+                            "AllScrapersHalted",
+                            f"System is RUNNING but every scraper source is halted "
+                            f"({len(halted_names)} sources). No new signals will reach "
+                            f"the pipeline until at least one source is resumed. "
+                            f"Resume from /workflow/.",
+                            {"halted_sources": ",".join(halted_names[:10])},
+                        )
+
+                # 2. Critical agents with stale heartbeats while RUNNING.
+                if state == "RUNNING":
+                    for agent_name in CRITICAL_AGENTS:
+                        hb = await redis.hgetall(f"agent_status:{agent_name}")
+                        if not hb:
+                            await _maybe_warn(
+                                f"no_heartbeat:{agent_name}",
+                                "AgentMissing",
+                                f"No heartbeat ever recorded for `{agent_name}` — "
+                                f"the service may not have booted at all.",
+                                {"agent": agent_name},
+                            )
+                            continue
+                        last_hb = hb.get("last_heartbeat")
+                        if not last_hb:
+                            continue
+                        try:
+                            age = (now_utc - _dt.fromisoformat(last_hb)).total_seconds()
+                        except Exception:  # noqa: BLE001
+                            continue
+                        if age > 180 and (hb.get("halted") or "").lower() != "true":
+                            await _maybe_warn(
+                                f"stale_heartbeat:{agent_name}",
+                                "AgentStaleHeartbeat",
+                                f"`{agent_name}` heartbeat is {int(age)}s old "
+                                f"(threshold 180s) but not flagged halted. "
+                                f"Service may be wedged.",
+                                {"agent": agent_name, "age_sec": str(int(age))},
+                            )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("health_watchdog_failed", error=str(exc)[:160])
+            await _asyncio.sleep(60)
+    _watchdog_task = _asyncio.create_task(_health_watchdog(), name="health-watchdog")
+    _app.state._health_watchdog = _watchdog_task
     yield
     _sweeper_task.cancel()
+    _watchdog_task.cancel()
 
 
 def create_app() -> FastAPI:
@@ -215,9 +310,26 @@ def create_app() -> FastAPI:
     async def api_resume():
         from plata.core.bus import Channels, get_redis, publish_channel
         await publish_channel(Channels.SYSTEM_RESUME, {"reason": "manual_resume"})
-        await get_redis().set("system:state", "RUNNING")
+        redis = get_redis()
+        await redis.set("system:state", "RUNNING")
+        # Sticky-halt cleanup: scrapers set status=halted on every source while
+        # the system is halted (runner.py:47); the per-source flags don't get
+        # cleared on resume by themselves. Clear any source whose `halted_by`
+        # is "system" so the scraper loop picks it back up on its next tick.
+        # User-cancelled sources keep their flag (they have halted_by=user).
+        cleared: list[str] = []
+        try:
+            async for k in redis.scan_iter(match="scraper:source:*", count=100):
+                data = await redis.hgetall(k)
+                if (data.get("status") or "").lower() != "halted":
+                    continue
+                if (data.get("halted_by") or "system") == "system":
+                    await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
+                    cleared.append(k.rsplit(":", 1)[-1])
+        except Exception:  # noqa: BLE001
+            pass
         await publish_channel("dashboard:events", {"kind": "system_state", "state": "RUNNING"})
-        return {"ok": True, "state": "RUNNING"}
+        return {"ok": True, "state": "RUNNING", "sources_cleared": cleared}
 
     @app.post("/api/agents/{name}/resume")
     async def api_agent_resume(name: str):

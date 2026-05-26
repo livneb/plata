@@ -2,6 +2,16 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.092 — 2026-05-26
+- **🐛 Root cause of "Next poll: all halted".** When the system is HALTED (kill-switch, daily-loss guard, LLM-budget cap), the scraper writes `status=halted` to every source's Redis hash on every tick. **Resume only flipped `system:state` back to `RUNNING` — it did not clear the per-source halted flags.** So sources stayed halted forever (silently) even though the dashboard banner says RUNNING. Fixed two ways:
+  - Sources now carry `halted_by=system|user`. The `/api/resume` endpoint auto-clears any source with `halted_by=system`. User-cancelled sources stay sticky (intentional).
+  - **Health watchdog (new):** a 60-second background loop in the dashboard checks for *silently broken core functions* and writes WARN entries to `error_log` (visible on `/errors/`) — *because not every problem is an exception*. Conditions detected today:
+    - `AllScrapersHalted`: System is RUNNING but every source is halted → "no new signals can reach the pipeline."
+    - `AgentStaleHeartbeat`: critical agent (`enricher`, `strategist`, `executor`, `risk_manager`) hasn't heartbeated for > 180 s while system is RUNNING and not flagged halted.
+    - `AgentMissing`: no heartbeat ever recorded for a critical agent — its service may not have booted.
+  - Each condition has a 10-min cooldown so the errors page doesn't fill up with the same warning every minute.
+- **What to test:** hit Resume → "all halted" chip should flip to a real countdown within ~5 s as scrapers' next ticks see the cleared status. Halt the system again → within ~60 s, `AllScrapersHalted` appears on `/errors/`. Resume → it stays in history but the chip recovers.
+
 ## 2.24.091 — 2026-05-26
 - **Rejected proposals aren't errors** — reworded the diagnostic banner on `/proposals/`. Dropped the "check logs" link and the alarming "Strategist saw events but persisted zero rows" framing. The banner now reads as a normal pipeline summary: `Strategist: seen 1105 · below threshold 682 · …`. If actual persistence is failing, a small amber sub-line shows the exact database error inline (not "go look in logs") with the failure count.
 - **Self-healing `record_drop()` / `record_published()`.** If the proposals table doesn't exist on the first insert (because the strategist's service booted before the table was created in another service), we now call `ensure_aux_tables()` and retry the insert once. Most of the time the user never sees a failure at all.

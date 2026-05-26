@@ -499,7 +499,7 @@ async def cancel_source(name: str):
     on every tick and skips polling until you re-enable it."""
     from fastapi.responses import JSONResponse
     redis = get_redis()
-    await redis.hset(f"scraper:source:{name}", "status", "halted")
+    await redis.hset(f"scraper:source:{name}", mapping={"status": "halted", "halted_by": "user"})
     return JSONResponse({"ok": True, "source": name, "status": "halted"})
 
 

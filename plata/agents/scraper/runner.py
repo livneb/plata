@@ -44,7 +44,9 @@ class Scraper(BaseAgent):
         await asyncio.sleep(2)
         while True:
             if self._halted.is_set():
-                await redis.hset(key, mapping={"status": "halted"})
+                # Mark this halt as "system" so the resume action can clear it
+                # automatically (vs a user-clicked cancel which stays sticky).
+                await redis.hset(key, mapping={"status": "halted", "halted_by": "system"})
                 await asyncio.sleep(5)
                 continue
             # Per-source manual cancel from the Kanban: if the status was set to
