@@ -153,6 +153,29 @@ class Strategist(BaseAgent):
         )
 
         if not decision.get("should_trade"):
+            # Persist the dropped consideration so the user can see *why* the
+            # strategist looked at this event and said no — and that the loop
+            # IS running, just being selective.
+            try:
+                from plata.core.db import Proposal, session_scope
+                from sqlalchemy.dialects.postgresql import insert as _pg_insert
+                ulid = event.ulid + "-skip"
+                async with session_scope() as session:
+                    stmt = _pg_insert(Proposal).values(
+                        proposal_ulid=ulid[:26],
+                        triggering_event_ulid=event.ulid,
+                        symbol=(decision.get("symbol") or "—")[:32],
+                        side=(decision.get("side") or "long"),
+                        conviction=float(decision.get("conviction") or 0),
+                        reasoning=(decision.get("reasoning") or "")[:1500],
+                        state="dropped",
+                        state_reason=(decision.get("reasoning") or "should_trade=false")[:255],
+                        last_actor="strategist",
+                        analogs=[a.model_dump(mode="json") for a in analogs],
+                    ).on_conflict_do_nothing(index_elements=["proposal_ulid"])
+                    await session.execute(stmt)
+            except Exception:  # noqa: BLE001
+                pass
             return
 
         milestones: list[Milestone] = []

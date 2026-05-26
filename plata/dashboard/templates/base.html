@@ -87,6 +87,10 @@
             <span class="text-[9px] uppercase text-red-400">HITL</span>
             <span id="kpi-hitl" class="font-mono font-semibold text-red-400">0</span>
           </a>
+          <a href="/workflow/" id="kpi-next-poll-link" class="flex flex-col items-end leading-tight hover:opacity-80 hidden" title="Next scraper poll — the soonest deterministic moment a new signal could enter the pipeline and (eventually) become a proposal.">
+            <span class="text-[9px] uppercase text-gray-500">Next poll</span>
+            <span id="kpi-next-poll" class="font-mono text-gray-400">—</span>
+          </a>
           <a href="/activity/" id="kpi-budget-link" class="flex flex-col items-end leading-tight hover:opacity-80 hidden" title="LLM spend today vs daily budget cap">
             <span class="text-[9px] uppercase text-gray-500">LLM $</span>
             <span id="kpi-budget" class="font-mono text-gray-400">—</span>
@@ -638,6 +642,26 @@
       const $hitlLink = document.getElementById('kpi-hitl-link');
       const $budget = document.getElementById('kpi-budget');
       const $budgetLink = document.getElementById('kpi-budget-link');
+      const $nextPoll = document.getElementById('kpi-next-poll');
+      const $nextPollLink = document.getElementById('kpi-next-poll-link');
+      let lastNextPollEta = null;       // server-given remaining seconds
+      let lastNextPollLocalTs = null;   // ms timestamp when we got it
+      let lastNextPollSource = null;
+      function renderNextPoll() {
+        if (lastNextPollEta == null) { $nextPollLink.classList.add('hidden'); return; }
+        const elapsed = Math.floor((Date.now() - lastNextPollLocalTs) / 1000);
+        const remain = lastNextPollEta - elapsed;
+        $nextPollLink.classList.remove('hidden');
+        if (remain <= 0) {
+          $nextPoll.textContent = 'due';
+          $nextPoll.className = 'font-mono text-emerald-500 font-semibold';
+        } else {
+          $nextPoll.textContent = (remain >= 60 ? Math.floor(remain / 60) + 'm ' + (remain % 60) + 's' : remain + 's')
+            + ' · ' + (lastNextPollSource || '');
+          $nextPoll.className = 'font-mono text-gray-400';
+        }
+      }
+      setInterval(renderNextPoll, 1000);  // ticking countdown
       const $kpis = document.getElementById('header-kpis');
       function fmt(n, signed) {
         const v = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -675,6 +699,12 @@
             $budgetLink.classList.remove('hidden');
             $budget.textContent = fmt(s.llm_spend_today);
             $budget.className = 'font-mono text-gray-400';
+          }
+          if (typeof s.next_poll_eta_sec === 'number') {
+            lastNextPollEta = s.next_poll_eta_sec;
+            lastNextPollLocalTs = Date.now();
+            lastNextPollSource = s.next_poll_source || '';
+            renderNextPoll();
           }
         } catch (e) { /* ignore */ }
       }

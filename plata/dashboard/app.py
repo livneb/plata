@@ -309,6 +309,42 @@ def create_app() -> FastAPI:
                 stats["llm_budget"] = float(budget)
         except Exception:  # noqa: BLE001
             pass
+        # Next scraper poll — the soonest deterministic moment a new signal
+        # could enter the pipeline and (eventually) become a proposal.
+        try:
+            soonest: tuple[float, str] | None = None
+            now_ts = datetime.now(timezone.utc).timestamp()
+            async for k in redis.scan_iter(match="scraper:source:*", count=100):
+                data = await redis.hgetall(k)
+                if (data.get("status") or "").lower() == "halted":
+                    continue
+                interval = float(data.get("interval_sec") or 0)
+                last = data.get("last_poll_at")
+                if not last or interval <= 0:
+                    continue
+                try:
+                    last_ts = datetime.fromisoformat(last).timestamp()
+                except Exception:  # noqa: BLE001
+                    continue
+                eta = last_ts + interval
+                name = k.rsplit(":", 1)[-1]
+                if soonest is None or eta < soonest[0]:
+                    soonest = (eta, name)
+            if soonest:
+                stats["next_poll_eta_sec"] = max(0, int(soonest[0] - now_ts))
+                stats["next_poll_source"] = soonest[1]
+        except Exception:  # noqa: BLE001
+            pass
+        # Last strategist activity — gives the user a sense of whether the
+        # decision loop is alive even when no proposals are landing.
+        try:
+            hb = await redis.hgetall("agent_status:strategist")
+            last_hb = hb.get("last_heartbeat")
+            if last_hb:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_hb)).total_seconds()
+                stats["strategist_last_hb_sec"] = int(max(0, age))
+        except Exception:  # noqa: BLE001
+            pass
         return stats
 
     @app.get("/", response_class=HTMLResponse)

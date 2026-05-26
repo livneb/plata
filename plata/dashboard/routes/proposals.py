@@ -17,6 +17,7 @@ router = APIRouter(prefix="/proposals", tags=["proposals"])
 
 
 STATE_META: dict[str, dict[str, str]] = {
+    "dropped":          {"label": "Dropped",       "color": "bg-gray-200 text-gray-700",     "icon": "🚫"},
     "published":        {"label": "Published",     "color": "bg-blue-100 text-blue-800",     "icon": "📨"},
     "rejected":         {"label": "Rejected",      "color": "bg-red-100 text-red-800",       "icon": "🛡️"},
     "pending_hitl":     {"label": "Pending HITL",  "color": "bg-amber-100 text-amber-800",   "icon": "⏳"},

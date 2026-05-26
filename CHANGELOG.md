@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.086 — 2026-05-26
+- **Header: "Next poll" countdown.** New KPI chip in the topbar showing the soonest scraper poll (e.g. `4m 18s · reddit`). Each tick is computed locally from a server-given remaining-seconds anchor; the full server value is refreshed every 10 s. Clicking it jumps to `/workflow/`. This is the most concrete answer to *"when could a new proposal possibly land?"* — strategist itself is event-driven (no schedule), but a scraper poll is the deterministic upstream trigger.
+- **Strategist now persists "dropped" proposals.** When the LLM says `should_trade=false` for an event that passed the magnitude gate, a row is written to `proposals` with state `🚫 Dropped` and the LLM's reasoning. Answers the "we deployed proposal-saving and nothing showed up — make sense?" question: yes, because we were only saving *published* ones. Now you can see the strategist considering events and deciding against them, with the full reasoning visible in the expandable detail.
+- **What to test:** open the dashboard → topbar shows `Next poll Xs · <source>` ticking down each second. Once a few enriched events flow through, `/proposals/` should show a mix of `Published` and `Dropped` rows even on quiet trading days. Filter chip `🚫 Dropped` appears once there's at least one.
+
 ## 2.24.085 — 2026-05-26
 - **Breadcrumbs work for ANY URL now**, not just section roots. On a sub-page like `/trades/<ulid>` you get `Positions › <H1-text-or-fallback>`; on `/trades/watch` you get `Positions › Symbol watch`; on `/agents/strategist` (when those exist) `Agent Health › Agent: strategist`. The leaf label is derived from the page's `<h1>`, falling back to `<title>` (with the ` · Plata` suffix stripped), and finally a per-section synthesized label (e.g. `Trade 01ABCDEF…`).
 - The section crumb is now a real link when there's a leaf — clicking "Positions" from a trade detail page takes you back to the list.
