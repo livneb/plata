@@ -354,6 +354,10 @@
                 throw new Error(msg);
               }
               const j = await r.json();
+              if (j.skipped) {
+                plataToast('Language / audience is still "English / Technical" — set it on Settings → Account → Preferences first.', 'info');
+                return;
+              }
               if (j.text) {
                 el.textContent = j.text;
                 el.dataset.translated = '1';

@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.072 — 2026-05-25
+- Translate button: when the response is `{skipped: true}` (default English / Technical preference — no rewrite needed) the JS now shows an info toast pointing the user at **Settings → Account → Preferences** instead of looking like a silent no-op.
+
 ## 2.24.071 — 2026-05-25
 - **UI-managed API credentials, encrypted in Postgres.** New `🔑 API Keys` tab on `/settings/?tab=api` lets you paste / rotate / delete keys for every external provider (OpenRouter, Voyage, Bybit key+secret, Alpaca key+secret, Telegram, Langfuse) without touching Railway env-vars.
   - Encrypted with **Fernet (AES-128-CBC + HMAC-SHA256)**; encryption key is derived from `DASHBOARD_SESSION_SECRET` (no new env var needed — but rotating the session secret invalidates all stored credentials).
