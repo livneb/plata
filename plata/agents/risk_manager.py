@@ -33,6 +33,13 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     "guard_dedup_event_ulid": "true",
     "guard_min_conviction": "0.6",
     "guard_max_per_category_day": "3",
+    # Strategist-side threshold — events below this sentiment_magnitude are dropped
+    # before the strategist LLM is even called. 0.5 = "noticeable"; raise to 0.7
+    # for only-the-big-news; lower to 0.3 to consider more events (costs more LLM $).
+    "strategist_sentiment_threshold": "0.5",
+    # Number of historical analog events the strategist asks for via KNN. More
+    # = more context per LLM call (more tokens) but better-grounded reasoning.
+    "strategist_analog_k": "8",
 }
 
 
@@ -71,6 +78,12 @@ class RiskManager(BaseAgent):
         if not raw:
             await redis.hset("risk_config", mapping=DEFAULT_RISK_CONFIG)
             raw = DEFAULT_RISK_CONFIG
+        else:
+            # Backfill any new keys we've added since this hash was first seeded.
+            missing = {k: v for k, v in DEFAULT_RISK_CONFIG.items() if k not in raw}
+            if missing:
+                await redis.hset("risk_config", mapping=missing)
+                raw = {**raw, **missing}
         self._config = dict(raw)
 
     async def _config_watcher(self) -> None:

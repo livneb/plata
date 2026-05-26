@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.096 — 2026-05-26
+- **Proposals page: 🌐 translate icon** added to the strategist reasoning block and every analog summary in the expandable detail. Same `data-translate` pattern as `/trades/<ulid>`.
+- **Strategist thresholds are now live-editable from the UI** — moved from hardcoded module constants in `agents/strategist.py` to the `risk_config` Redis hash, alongside every other tunable. Two new keys appear on `/settings/?tab=risk` (and `/risk_config/`):
+  - `strategist_sentiment_threshold` (default 0.5) — events below this `sentiment_magnitude` are dropped before the strategist LLM runs. Raise to 0.7 for only-the-big-news; lower to 0.3 for more candidates (costs more LLM $).
+  - `strategist_analog_k` (default 8) — number of historical analog events fetched per event. More = more context per LLM call (more tokens) but better-grounded reasoning.
+  - Read fresh per event (no agent restart needed). Risk-manager backfills any new keys to existing deploys on its next config reload.
+- **Existing thresholds — quick map of where to change them all:** `/settings/?tab=risk` (the Risk Config table) holds **everything**: `guard_min_conviction`, `guard_block_opposing_side`, `guard_symbol_cooldown_min`, `guard_dedup_event_ulid`, `guard_max_per_category_day`, `max_open_positions`, `max_correlated_positions`, `max_gross_exposure_pct`, `max_net_exposure_pct`, `max_daily_loss_pct`, `risk_per_trade_pct`, `auto_approve_threshold_usd`, `paper_trading_mode`, and the two new strategist ones. Changes audit + version in Postgres; no redeploy needed.
+- **What to test:** open `/settings/?tab=risk` → see the two new rows at the bottom. Drop `strategist_sentiment_threshold` to 0.3 → the next batch of events will produce more rows on `/proposals/` (mostly `Dropped` with `llm_no_trade` reason, but at least the LLM was consulted).
+
 ## 2.24.095 — 2026-05-26
 - **Graph: named-entity pin chips (multi-select).** The "top 5 countries" abstract chip is replaced with **real entity names**, derived from the current dataset: heaviest countries (Israel 🇮🇱, USA 🇺🇸, Russia 🇷🇺, Ukraine 🇺🇦, …), heaviest people, heaviest companies, heaviest assets and orgs. Each chip shows the entity's name + a small degree number (e.g. `🇮🇱 Israel 42`). Click any to pin it; click multiple to pin several (OR mode). When any chip is pinned, the canvas renders only the pinned entities + their immediate neighbours. A "clear" button appears when one or more are selected.
 - Top-N per type today: 8 countries, 6 people, 6 companies, 4 assets, 3 orgs — picks the heaviest of each by edge count.

@@ -140,14 +140,14 @@
             <!-- Reasoning + analogs -->
             <div>
               <h3 class="text-[10px] uppercase text-gray-500 mb-1">Strategist reasoning</h3>
-              <p class="whitespace-pre-wrap leading-relaxed">{{ p.reasoning or '—' }}</p>
+              <p data-translate class="whitespace-pre-wrap leading-relaxed">{{ p.reasoning or '—' }}</p>
               {% if p.analogs %}
               <h3 class="text-[10px] uppercase text-gray-500 mt-3 mb-1">{{ p.analogs | length }} analog events (KNN)</h3>
               <ul class="space-y-1">
                 {% for a in p.analogs %}
                 <li class="flex items-start gap-2">
                   <span class="font-mono text-[10px] text-gray-400 mt-0.5">{{ '%.2f' % (a.similarity or 0) }}</span>
-                  <span class="flex-1">
+                  <span data-translate class="flex-1">
                     {{ a.summary or a.event_ulid or '—' }}
                     {% if a.price_impact %}<span class="text-[10px] text-gray-400 ml-1">· {{ a.price_impact | tojson }}</span>{% endif %}
                   </span>
