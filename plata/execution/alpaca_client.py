@@ -32,8 +32,13 @@ class AlpacaClient:
     def __init__(self, *, agent: str = "executor") -> None:
         self._agent = agent
         s = get_settings()
-        self._key = s.alpaca_api_key.get_secret_value() if s.alpaca_api_key else None
-        self._secret = s.alpaca_api_secret.get_secret_value() if s.alpaca_api_secret else None
+        from plata.config import credentials as _creds
+        self._key = _creds.get_sync("alpaca_key") or (
+            s.alpaca_api_key.get_secret_value() if s.alpaca_api_key else None
+        )
+        self._secret = _creds.get_sync("alpaca_secret") or (
+            s.alpaca_api_secret.get_secret_value() if s.alpaca_api_secret else None
+        )
         self._paper = bool(getattr(s, "alpaca_paper", True))
         self._base = PAPER_BASE if self._paper else LIVE_BASE
         self._headers = {

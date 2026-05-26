@@ -33,6 +33,12 @@
         </button>
       </li>
       <li class="me-2" role="presentation">
+        <button class="inline-block p-3 border-b-2 rounded-t-lg" id="api-tab"
+                data-tabs-target="#tab-api" type="button" role="tab" aria-controls="tab-api" aria-selected="false">
+          🔑 API Keys
+        </button>
+      </li>
+      <li class="me-2" role="presentation">
         <button class="inline-block p-3 border-b-2 rounded-t-lg" id="tuning-tab"
                 data-tabs-target="#tab-tuning" type="button" role="tab" aria-controls="tab-tuning" aria-selected="false">
           🎚️ Tuning
@@ -249,6 +255,61 @@
       </script>
     </div>
 
+    <!-- ===== API Keys ===== -->
+    <div class="hidden p-3" id="tab-api" role="tabpanel" aria-labelledby="api-tab">
+      <p class="text-xs text-gray-500 mb-3">
+        API keys saved here are stored <b>encrypted</b> in Postgres
+        (Fernet AES-128-CBC + HMAC-SHA256, key derived from <span class="font-mono">DASHBOARD_SESSION_SECRET</span>).
+        They take precedence over any matching env-var on the server, so you can rotate keys without redeploying.
+        Only the last 4 characters of the stored secret are ever shown back to the browser.
+      </p>
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+            <tr>
+              <th class="px-4 py-3">Provider</th>
+              <th class="px-4 py-3">Stored value</th>
+              <th class="px-4 py-3">Updated</th>
+              <th class="px-4 py-3">New value</th>
+              <th class="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in creds_view %}
+            <tr class="border-t border-gray-100 dark:border-gray-700">
+              <td class="px-4 py-3"><div class="font-semibold">{{ c.label }}</div>
+                <a href="{{ c.url }}" target="_blank" rel="noopener" class="text-[10px] text-blue-500 hover:underline">→ get / manage</a></td>
+              <td class="px-4 py-3 font-mono text-xs">
+                {% if c.tail %}…{{ c.tail }}{% else %}<span class="text-gray-400">— (env var fallback)</span>{% endif %}
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-500">
+                {% if c.updated_at %}<time data-utc="{{ c.updated_at.isoformat() }}">{{ c.updated_at.strftime('%Y-%m-%d %H:%M') }}</time>
+                {% else %}—{% endif %}
+              </td>
+              <td class="px-4 py-3">
+                <form method="post" action="/settings/credentials/{{ c.key }}/save" class="flex items-center gap-1">
+                  <input name="value" type="password" autocomplete="off" placeholder="paste new value"
+                         class="w-56 p-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                  <button type="submit" class="text-xs px-2 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Save</button>
+                </form>
+              </td>
+              <td class="px-4 py-3 text-right whitespace-nowrap">
+                {% if c.tail %}
+                <form method="post" action="/settings/credentials/{{ c.key }}/delete" class="inline"
+                      data-confirm="Delete the stored {{ c.label }} credential? (Env-var fallback will resume if any.)"
+                      data-confirm-title="Delete credential" data-confirm-label="Delete" data-confirm-danger>
+                  <button type="submit" class="text-red-500 hover:underline text-xs">Delete</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-3">⚠ If you rotate <span class="font-mono">DASHBOARD_SESSION_SECRET</span>, every stored credential becomes unreadable and must be re-entered.</p>
+    </div>
+
     <!-- ===== Tuning (reviewer proposals) ===== -->
     <div class="hidden p-3" id="tab-tuning" role="tabpanel" aria-labelledby="tuning-tab">
       <p class="text-xs text-gray-500 mb-3">The Reviewer agent watches closed trades and proposes small, conservative tweaks to the <span class="font-mono">guard_*</span> risk-config keys. Apply or reject each one here.</p>
@@ -331,7 +392,7 @@
 <script>
   // Initialise Flowbite tabs manually so deep-links (?tab=risk) work even before the autoinit fires.
   (function () {
-    const tabs = ['controls', 'risk', 'account', 'env', 'tuning'];
+    const tabs = ['controls', 'risk', 'account', 'env', 'api', 'tuning'];
     const params = new URLSearchParams(location.search);
     const want = (params.get('tab') || 'controls').toLowerCase();
     const active = tabs.includes(want) ? want : 'controls';

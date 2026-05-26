@@ -77,6 +77,17 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("dashboard").warning("historian_resume_skipped: %s", exc)
+    # Make sure the api_credentials table exists; warm up the credential cache.
+    try:
+        from plata.config import credentials as _creds
+        await _creds.ensure_table()
+        for p in ("openrouter", "voyage", "bybit_key", "bybit_secret",
+                   "alpaca_key", "alpaca_secret", "telegram",
+                   "langfuse_public", "langfuse_secret"):
+            await _creds.get(p)
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger("dashboard").warning("credentials_warmup_skipped: %s", exc)
     yield
 
 

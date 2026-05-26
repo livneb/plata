@@ -55,15 +55,25 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
 }
 
 
-@lru_cache
+_OPENAI_CLIENT_CACHE: dict[str, AsyncOpenAI] = {}
+
+
 def _client() -> AsyncOpenAI:
+    """Build (and cache) the OpenAI client. Prefers UI-set credentials over env."""
     settings = get_settings()
-    if not settings.openrouter_api_key:
-        raise RuntimeError("OPENROUTER_API_KEY not configured")
-    return AsyncOpenAI(
-        api_key=settings.openrouter_api_key.get_secret_value(),
-        base_url=settings.openrouter_base_url,
+    from plata.config import credentials as _creds
+    api_key = _creds.get_sync("openrouter") or (
+        settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else None
     )
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY not configured")
+    cached = _OPENAI_CLIENT_CACHE.get(api_key)
+    if cached is not None:
+        return cached
+    cli = AsyncOpenAI(api_key=api_key, base_url=settings.openrouter_base_url)
+    _OPENAI_CLIENT_CACHE.clear()  # only keep the current key around
+    _OPENAI_CLIENT_CACHE[api_key] = cli
+    return cli
 
 
 _BEDROCK_INCOMPATIBLE_KEYS = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",

@@ -255,3 +255,21 @@ class BacktestTrade(Base):
     close_reason: Mapped[str] = mapped_column(String(16))
 
     run: Mapped[BacktestRun] = relationship(back_populates="trades")
+
+
+# ---------------------------------------------------------------------------
+# UI-managed API credentials (encrypted at rest with Fernet).
+# ---------------------------------------------------------------------------
+
+class ApiCredential(Base):
+    __tablename__ = "api_credentials"
+
+    provider: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Fernet-encrypted secret value (urlsafe base64 token).
+    value_encrypted: Mapped[str] = mapped_column(String(2048))
+    # Optional non-secret metadata JSON (e.g. {"paper": true}).
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+    )
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)

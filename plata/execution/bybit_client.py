@@ -18,9 +18,14 @@ _log = get_logger("bybit")
 def _build_client(agent: str) -> ccxt_async.bybit:
     """Build a Bybit ccxt client, secret-scoped to the calling agent."""
     settings = get_settings()
-    secrets = ScopedSecrets(agent=agent, _settings=settings)
-    api_key = secrets.reveal("bybit_api_key")
-    api_secret = secrets.reveal("bybit_api_secret")
+    # Prefer UI-managed credentials (encrypted in Postgres); fall back to env-scoped secrets.
+    from plata.config import credentials as _creds
+    api_key = _creds.get_sync("bybit_key")
+    api_secret = _creds.get_sync("bybit_secret")
+    if not api_key or not api_secret:
+        secrets = ScopedSecrets(agent=agent, _settings=settings)
+        api_key = api_key or secrets.reveal("bybit_api_key")
+        api_secret = api_secret or secrets.reveal("bybit_api_secret")
     client = ccxt_async.bybit({
         "apiKey": api_key,
         "secret": api_secret,

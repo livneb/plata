@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.071 — 2026-05-25
+- **UI-managed API credentials, encrypted in Postgres.** New `🔑 API Keys` tab on `/settings/?tab=api` lets you paste / rotate / delete keys for every external provider (OpenRouter, Voyage, Bybit key+secret, Alpaca key+secret, Telegram, Langfuse) without touching Railway env-vars.
+  - Encrypted with **Fernet (AES-128-CBC + HMAC-SHA256)**; encryption key is derived from `DASHBOARD_SESSION_SECRET` (no new env var needed — but rotating the session secret invalidates all stored credentials).
+  - Storage: new `api_credentials` table (auto-created on dashboard startup; no Alembic step). Only the last 4 chars of the secret are ever shown back to the browser.
+  - Lookup order at runtime: in-process 60-second cache → Postgres → env-var fallback. So existing deploys keep working; new keys saved in the UI override the env-var.
+  - Clients updated: `LLMClient` (OpenRouter), `embeddings._client` (Voyage), `BybitClient`, `AlpacaClient` all consult credentials first.
+- New dependency: `cryptography>=42.0` (already transitively present via other libs).
+
 ## 2.24.070 — 2026-05-25
 - **Country alias dedup is now aggressive.** Previously the canonicalizer only fired when the LLM already classified a node as `country`, so misclassifications (IL as `asset`, USA as `org`, ILS as `ticker`) slipped through and created duplicates. Now `canonicalize_entity()` returns `(new_type, new_id, new_name)` — if the id OR name matches a known country alias we **force `type=country`** regardless of the LLM's guess. The graph_ingestion agent uses the corrected type at write time.
 - **Stricter LLM extractor prompt**: explicit rules listing the right typing for each entity class, with examples for the most common misclassifications. Currency codes (ILS/USD) must NOT become country nodes; ISO country codes (US/IL/USA/GB/EU) must NOT become asset/ticker.

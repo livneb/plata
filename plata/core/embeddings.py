@@ -38,13 +38,25 @@ class EmbeddingCache:
             self._cache.popitem(last=False)
 
 
-@lru_cache
+_VOYAGE_CLIENT: dict[str, AsyncClient] = {}
+
+
 def _client() -> AsyncClient:
     settings = get_settings()
-    if not settings.voyage_api_key:
+    from plata.config import credentials as _creds
+    key = _creds.get_sync("voyage") or (
+        settings.voyage_api_key.get_secret_value() if settings.voyage_api_key else None
+    )
+    if not key:
         raise RuntimeError("VOYAGE_API_KEY not configured")
-    voyageai.api_key = settings.voyage_api_key.get_secret_value()
-    return AsyncClient()
+    cached = _VOYAGE_CLIENT.get(key)
+    if cached is not None:
+        return cached
+    voyageai.api_key = key
+    cli = AsyncClient()
+    _VOYAGE_CLIENT.clear()
+    _VOYAGE_CLIENT[key] = cli
+    return cli
 
 
 _cache = EmbeddingCache()
