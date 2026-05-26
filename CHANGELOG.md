@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.076 — 2026-05-26
+- **🐛 Fix saving API keys from Settings → API Keys.** The upsert was crashing with `column "metadata_" of relation "api_credentials" does not exist`. The `ApiCredential` ORM model renames the Python attribute to `metadata_` (because `metadata` collides with SQLAlchemy's `Base.metadata`) but the actual Postgres column is still `metadata`. The `INSERT ... ON CONFLICT DO UPDATE SET` block was using the Python attribute name in its `set_` dict — `set_` takes raw column names. Now uses `"metadata"`.
+- **What to test:** Settings → API Keys → paste a new value into any row → Save → row updates with new last-4 suffix, no 500.
+
 ## 2.24.075 — 2026-05-26
 - **🐛 Real fix for the empty actual-price line.** The sampler was calling `fetch_ohlcv_bybit(symbol, start_ts=now, end_ts=now)` — a zero-width window — so Bybit returned **zero bars every tick** and `_latest_price` returned `None` forever. **No trade ever got a sample.** Now queries the last 5 minutes and takes the latest bar's close. The same diagnostic endpoint added in `v2.24.074` would have told us this immediately (`probe_price: null` for a crypto symbol with no auth needed).
 - **What to test:** wait ~1 minute after deploy → open any open crypto trade's detail page → banner above the chart should flip to `📈 N live price sample(s) recorded for this trade.` and the orange **Actual** line should draw alongside the predicted dashed line.

@@ -130,7 +130,11 @@ async def set_(provider: str, value: str, *, by: str | None = None,
             index_elements=["provider"],
             set_={
                 "value_encrypted": enc,
-                "metadata_": metadata or {},
+                # NB: actual Postgres column is "metadata"; the Python
+                # attribute is "metadata_" (renamed to avoid clashing with
+                # SQLAlchemy's reserved Base.metadata). `set_` takes raw
+                # column names, not attribute names.
+                "metadata": metadata or {},
                 "updated_by": by,
             },
         )
