@@ -309,13 +309,19 @@ def create_app() -> FastAPI:
             pass
         # Next scraper poll — the soonest deterministic moment a new signal
         # could enter the pipeline and (eventually) become a proposal.
+        # Always returns SOMETHING so the topbar chip can render an informative
+        # state instead of silently hiding.
         try:
             soonest: tuple[float, str] | None = None
+            seen_any = False
+            all_halted = True
             now_ts = datetime.now(timezone.utc).timestamp()
             async for k in redis.scan_iter(match="scraper:source:*", count=100):
+                seen_any = True
                 data = await redis.hgetall(k)
                 if (data.get("status") or "").lower() == "halted":
                     continue
+                all_halted = False
                 interval = float(data.get("interval_sec") or 0)
                 # `last_poll_at` is only set AFTER the first poll completes;
                 # on a fresh deploy fall back to `started_at` so the user sees
@@ -334,8 +340,15 @@ def create_app() -> FastAPI:
             if soonest:
                 stats["next_poll_eta_sec"] = max(0, int(soonest[0] - now_ts))
                 stats["next_poll_source"] = soonest[1]
+                stats["next_poll_state"] = "ok"
+            elif not seen_any:
+                stats["next_poll_state"] = "no_sources"
+            elif all_halted:
+                stats["next_poll_state"] = "all_halted"
+            else:
+                stats["next_poll_state"] = "warming_up"
         except Exception:  # noqa: BLE001
-            pass
+            stats["next_poll_state"] = "unknown"
         # Last strategist activity — gives the user a sense of whether the
         # decision loop is alive even when no proposals are landing.
         try:

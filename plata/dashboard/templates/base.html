@@ -648,13 +648,22 @@
       let lastNextPollEta = null;       // server-given remaining seconds
       let lastNextPollLocalTs = null;   // ms timestamp when we got it
       let lastNextPollSource = null;
+      let lastNextPollState = null;
       function renderNextPoll() {
-        if (lastNextPollEta == null) { $nextPollLink.classList.add('hidden'); return; }
+        // Always visible — shows real countdown when available, otherwise an
+        // informative status so the user can tell it's just quiet (not broken).
+        $nextPollLink.classList.remove('hidden');
+        if (lastNextPollEta == null) {
+          if (lastNextPollState === 'all_halted')      { $nextPoll.textContent = 'all halted'; $nextPoll.className = 'font-mono text-red-500'; }
+          else if (lastNextPollState === 'no_sources') { $nextPoll.textContent = 'no sources'; $nextPoll.className = 'font-mono text-gray-400'; }
+          else if (lastNextPollState === 'warming_up') { $nextPoll.textContent = 'warming up'; $nextPoll.className = 'font-mono text-yellow-500'; }
+          else                                          { $nextPoll.textContent = '—';           $nextPoll.className = 'font-mono text-gray-400'; }
+          return;
+        }
         const elapsed = Math.floor((Date.now() - lastNextPollLocalTs) / 1000);
         const remain = lastNextPollEta - elapsed;
-        $nextPollLink.classList.remove('hidden');
         if (remain <= 0) {
-          $nextPoll.textContent = 'due';
+          $nextPoll.textContent = 'due · ' + (lastNextPollSource || '');
           $nextPoll.className = 'font-mono text-emerald-500 font-semibold';
         } else {
           $nextPoll.textContent = (remain >= 60 ? Math.floor(remain / 60) + 'm ' + (remain % 60) + 's' : remain + 's')
@@ -723,12 +732,15 @@
           $budget.textContent = fmt(s.llm_spend_today);
           $budget.className = 'font-mono text-gray-400';
         }
+        lastNextPollState = s.next_poll_state || null;
         if (typeof s.next_poll_eta_sec === 'number') {
           lastNextPollEta = s.next_poll_eta_sec;
           lastNextPollLocalTs = Date.now();
           lastNextPollSource = s.next_poll_source || '';
-          renderNextPoll();
+        } else {
+          lastNextPollEta = null;
         }
+        renderNextPoll();
       }
       async function tick() {
         try {
@@ -927,14 +939,32 @@
       if (d.getFullYear() === now.getFullYear()) return `${PAD(d.getDate())} ${MON} ${HHMM}`;
       return `${PAD(d.getDate())} ${MON} ${d.getFullYear()}`;
     }
+    // Detects ISO 8601 / common datetime strings — used to scan plain text
+    // cells (no <time> wrapper) and auto-format them too.
+    const _ISO_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
     function plataFormatLocalTimes(root) {
-      (root || document).querySelectorAll('time[data-utc]').forEach(el => {
+      const scope = root || document;
+      // 1. Explicit <time data-utc="ISO"> elements.
+      scope.querySelectorAll('time[data-utc]').forEach(el => {
         const iso = el.getAttribute('data-utc');
         if (!iso) return;
         try {
           const d = new Date(iso);
           if (isNaN(d.getTime())) return;
           el.textContent = plataFormatRelative(iso);
+          el.setAttribute('title', d.toLocaleString());
+        } catch {}
+      });
+      // 2. Any element opted-in with class "js-smart-date" — reads its own
+      //    textContent as the source. Safer than scanning everything.
+      scope.querySelectorAll('.js-smart-date').forEach(el => {
+        const iso = (el.dataset.iso || el.textContent || '').trim();
+        if (!_ISO_RE.test(iso)) return;
+        try {
+          const d = new Date(iso);
+          if (isNaN(d.getTime())) return;
+          if (!el.dataset.iso) el.dataset.iso = iso;
+          el.textContent = plataFormatRelative(el.dataset.iso);
           el.setAttribute('title', d.toLocaleString());
         } catch {}
       });

@@ -13,32 +13,38 @@
 </div>
 
 {% if pipeline %}
-<!-- Strategist pipeline diagnostic — surfaces upstream issues when rows below are empty -->
+<!-- Strategist pipeline summary -->
 <div class="mb-3 p-3 rounded-lg border text-xs
      {% if pipeline.halted %}border-red-300 bg-red-50 dark:bg-red-900/20
      {% elif pipeline.processed_total == 0 %}border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20
      {% else %}border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800{% endif %}">
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-    <span class="font-semibold">Strategist pipeline:</span>
+    <span class="font-semibold">Strategist:</span>
     {% if pipeline.halted %}
       <span class="text-red-600 font-semibold">⛔ HALTED</span>
     {% elif pipeline.processed_total == 0 %}
-      <span class="text-yellow-700 dark:text-yellow-400">⚠ No events processed yet — pipeline upstream may be quiet (scrapers / enricher).</span>
+      <span class="text-yellow-700 dark:text-yellow-400">quiet — no events processed yet</span>
     {% endif %}
-    <span>processed <b>{{ pipeline.processed_total or 0 }}</b></span>
-    <span>· below_threshold <b>{{ pipeline.dropped_below_threshold or 0 }}</b></span>
-    <span>· missing_event <b>{{ pipeline.dropped_missing_event or 0 }}</b></span>
-    <span>· no_embedding <b>{{ pipeline.dropped_no_embedding or 0 }}</b></span>
+    <span>seen <b>{{ pipeline.processed_total or 0 }}</b></span>
+    <span>· below threshold <b>{{ pipeline.dropped_below_threshold or 0 }}</b></span>
+    <span>· missing event <b>{{ pipeline.dropped_missing_event or 0 }}</b></span>
+    <span>· no embedding <b>{{ pipeline.dropped_no_embedding or 0 }}</b></span>
     {% if pipeline.last_heartbeat %}
-    <span class="text-gray-500">last HB <time data-elapsed="{{ pipeline.last_heartbeat }}">…</time></span>
-    {% endif %}
-    {% if pipeline.processed_total and pipeline.processed_total > 0
-        and (counts.values() | sum) == 0 %}
-    <a href="/agents/?from=proposals#strategist" class="text-red-500 hover:underline">
-      ⚠ Strategist saw events but persisted zero rows — check logs for <span class="font-mono">record_drop_failed_first_time</span>.
-    </a>
+    <span class="text-gray-500">last HB <time data-utc="{{ pipeline.last_heartbeat }}">{{ pipeline.last_heartbeat }}</time></span>
     {% endif %}
   </div>
+  {% if pipeline.persist_error %}
+  <!-- Self-heal couldn't recover — show the real database error inline so the user has actionable info -->
+  <div class="mt-2 p-2 rounded bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700">
+    <div class="text-amber-800 dark:text-amber-300 text-[11px]">
+      <b>{{ pipeline.persist_failures_total or '?' }} attempts couldn't reach the proposals table.</b>
+      Last failure
+      {% if pipeline.persist_error.ts %}<time data-utc="{{ pipeline.persist_error.ts }}">{{ pipeline.persist_error.ts }}</time>{% endif %}:
+      <span class="font-mono">{{ pipeline.persist_error.error }}</span>
+      {% if pipeline.persist_error.code %} · code <span class="font-mono">{{ pipeline.persist_error.code }}</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 

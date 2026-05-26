@@ -31,35 +31,83 @@ _log = get_logger("proposals_store")
 # the table is missing); after that, downgrade to debug to avoid log spam.
 _warned_drop = False
 _warned_published = False
+_table_create_attempted = False  # avoid hammering ensure_aux_tables() on every failure
+
+
+async def _persist_failure_to_redis(error: str, context: dict) -> None:
+    """Write the last persistence error to Redis so the proposals page
+    diagnostic banner can surface it inline — instead of asking the user
+    to read logs."""
+    try:
+        from datetime import datetime, timezone
+        from plata.core.bus import get_redis
+        redis = get_redis()
+        payload = {
+            "error": error[:500],
+            "ts": datetime.now(timezone.utc).isoformat(),
+            **{k: str(v)[:200] for k, v in context.items() if v is not None},
+        }
+        await redis.hset("proposals:last_persist_error", mapping=payload)
+        await redis.expire("proposals:last_persist_error", 7 * 24 * 60 * 60)
+        # Bump a counter so the banner can show "47 drops failed to persist".
+        await redis.incr("proposals:persist_failures_total")
+    except Exception:  # noqa: BLE001 — never break the caller
+        pass
+
+
+async def _maybe_self_heal_tables(exc: Exception) -> bool:
+    """If the persistence error looks like "relation does not exist",
+    try to create the table ourselves and signal that a retry is worth it.
+    Idempotent — won't loop, since we only attempt once per process."""
+    global _table_create_attempted
+    msg = str(exc).lower()
+    looks_like_missing_table = "does not exist" in msg or "undefinedtable" in msg
+    if not looks_like_missing_table or _table_create_attempted:
+        return False
+    _table_create_attempted = True
+    try:
+        from plata.core.db import ensure_aux_tables
+        await ensure_aux_tables()
+        _log.warning("proposals_table_self_healed_after_first_insert_failure")
+        return True
+    except Exception as inner:  # noqa: BLE001
+        _log.error("proposals_table_self_heal_failed", error=str(inner)[:300])
+        return False
 
 
 async def record_published(proposal: Any) -> None:
-    """Called by the strategist immediately after publishing to Redis."""
-    try:
-        async with session_scope() as session:
-            stmt = insert(Proposal).values(
-                proposal_ulid=proposal.ulid,
-                triggering_event_ulid=getattr(proposal, "triggering_event_ulid", None),
-                symbol=proposal.symbol,
-                side=str(proposal.side),
-                conviction=float(proposal.conviction) if proposal.conviction is not None else None,
-                suggested_sl_pct=proposal.suggested_sl_pct,
-                suggested_tp_pct=proposal.suggested_tp_pct,
-                reasoning=proposal.reasoning,
-                milestones=[m.model_dump(mode="json") for m in (proposal.milestones or [])],
-                analogs=[a.model_dump(mode="json") for a in (proposal.similar_events or [])],
-                state="published",
-                last_actor="strategist",
-            ).on_conflict_do_nothing(index_elements=["proposal_ulid"])
-            await session.execute(stmt)
-    except Exception as exc:  # noqa: BLE001
-        global _warned_published
-        if not _warned_published:
-            _log.error("record_published_failed_first_time",
-                       ulid=getattr(proposal, "ulid", None), error=str(exc)[:400])
-            _warned_published = True
-        else:
-            _log.debug("record_published_failed", ulid=getattr(proposal, "ulid", None), error=str(exc)[:160])
+    """Called by the strategist immediately after publishing to Redis.
+    Self-heals the table on the first failure."""
+    values = {
+        "proposal_ulid": proposal.ulid,
+        "triggering_event_ulid": getattr(proposal, "triggering_event_ulid", None),
+        "symbol": proposal.symbol,
+        "side": str(proposal.side),
+        "conviction": float(proposal.conviction) if proposal.conviction is not None else None,
+        "suggested_sl_pct": proposal.suggested_sl_pct,
+        "suggested_tp_pct": proposal.suggested_tp_pct,
+        "reasoning": proposal.reasoning,
+        "milestones": [m.model_dump(mode="json") for m in (proposal.milestones or [])],
+        "analogs": [a.model_dump(mode="json") for a in (proposal.similar_events or [])],
+        "state": "published",
+        "last_actor": "strategist",
+    }
+    err = await _record_drop_attempt(values)
+    if err is None:
+        return
+    if await _maybe_self_heal_tables(err):
+        err = await _record_drop_attempt(values)
+        if err is None:
+            _log.warning("record_published_succeeded_after_self_heal", ulid=proposal.ulid)
+            return
+    await _persist_failure_to_redis(str(err), {
+        "ulid": getattr(proposal, "ulid", None), "fn": "record_published",
+    })
+    global _warned_published
+    if not _warned_published:
+        _log.error("record_published_first_failure",
+                   ulid=getattr(proposal, "ulid", None), error=str(err)[:400])
+        _warned_published = True
 
 
 async def update_state(
@@ -117,6 +165,19 @@ async def list_recent(
         return []
 
 
+async def _record_drop_attempt(values: dict) -> Exception | None:
+    """Single insert attempt. Returns the exception on failure, None on success."""
+    try:
+        async with session_scope() as session:
+            stmt = insert(Proposal).values(**values).on_conflict_do_nothing(
+                index_elements=["proposal_ulid"]
+            )
+            await session.execute(stmt)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        return exc
+
+
 async def record_drop(
     *,
     event_ulid: str,
@@ -130,37 +191,45 @@ async def record_drop(
     extras: dict | None = None,
 ) -> None:
     """Persist a 'dropped' Proposal row capturing why the strategist
-    didn't publish a real proposal for this event. Idempotent per event_ulid
-    (the row's PK is derived from event_ulid, so re-deliveries don't create
-    duplicates)."""
+    rejected this event. These rows are normal lifecycle entries — every
+    event that doesn't become a published trade becomes a `dropped` row
+    with the reason. Self-heals the table on the first failure (in case a
+    fresh service started before tables were created)."""
     if not event_ulid:
         return
-    try:
-        async with session_scope() as session:
-            stmt = insert(Proposal).values(
-                # Use event_ulid as the PK so each event has at most one drop row.
-                # Real published proposals get their own random ULID, so no clash.
-                proposal_ulid=event_ulid[:26],
-                triggering_event_ulid=event_ulid,
-                symbol=(symbol or "—")[:32],
-                side=(side or "long")[:8],
-                conviction=conviction,
-                reasoning=(reasoning or reason_human)[:1500],
-                state="dropped",
-                state_reason=f"{reason_code}: {reason_human}"[:255],
-                last_actor="strategist",
-                analogs=analogs or [],
-                extras=extras or {"drop_reason_code": reason_code},
-            ).on_conflict_do_nothing(index_elements=["proposal_ulid"])
-            await session.execute(stmt)
-    except Exception as exc:  # noqa: BLE001
-        global _warned_drop
-        if not _warned_drop:
-            _log.error("record_drop_failed_first_time", event=event_ulid,
-                       code=reason_code, error=str(exc)[:400])
-            _warned_drop = True
-        else:
-            _log.debug("record_drop_failed", event=event_ulid, code=reason_code, error=str(exc)[:160])
+    values = {
+        # Use event_ulid as the PK so each event has at most one drop row.
+        # Real published proposals get their own random ULID, so no clash.
+        "proposal_ulid": event_ulid[:26],
+        "triggering_event_ulid": event_ulid,
+        "symbol": (symbol or "—")[:32],
+        "side": (side or "long")[:8],
+        "conviction": conviction,
+        "reasoning": (reasoning or reason_human)[:1500],
+        "state": "dropped",
+        "state_reason": f"{reason_code}: {reason_human}"[:255],
+        "last_actor": "strategist",
+        "analogs": analogs or [],
+        "extras": extras or {"drop_reason_code": reason_code},
+    }
+    err = await _record_drop_attempt(values)
+    if err is None:
+        return
+    # Self-heal: if the table is missing, create it then retry once.
+    if await _maybe_self_heal_tables(err):
+        err = await _record_drop_attempt(values)
+        if err is None:
+            _log.warning("record_drop_succeeded_after_self_heal", event=event_ulid)
+            return
+    # Still failing — record the cause for the UI banner; logs stay quiet.
+    await _persist_failure_to_redis(str(err), {
+        "event_ulid": event_ulid, "code": reason_code, "fn": "record_drop",
+    })
+    global _warned_drop
+    if not _warned_drop:
+        _log.error("record_drop_first_failure", event=event_ulid,
+                   code=reason_code, error=str(err)[:400])
+        _warned_drop = True
 
 
 async def get(proposal_ulid: str) -> Proposal | None:

@@ -2,6 +2,18 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.091 — 2026-05-26
+- **Rejected proposals aren't errors** — reworded the diagnostic banner on `/proposals/`. Dropped the "check logs" link and the alarming "Strategist saw events but persisted zero rows" framing. The banner now reads as a normal pipeline summary: `Strategist: seen 1105 · below threshold 682 · …`. If actual persistence is failing, a small amber sub-line shows the exact database error inline (not "go look in logs") with the failure count.
+- **Self-healing `record_drop()` / `record_published()`.** If the proposals table doesn't exist on the first insert (because the strategist's service booted before the table was created in another service), we now call `ensure_aux_tables()` and retry the insert once. Most of the time the user never sees a failure at all.
+- **"Next poll" chip is always visible.** Previously hidden when no source had `last_poll_at` yet (fresh deploys, 15-min GDELT cycles). Now renders an informative state:
+  - `5m 42s · reddit` — real countdown
+  - `due · gdelt` — the cycle should fire imminently
+  - `warming up` — sources exist but none have completed a poll yet
+  - `all halted` — every source has been manually halted (red)
+  - `no sources` — no scrapers registered at all
+- **Smart dates everywhere.** Added `.js-smart-date` class hook so any future element with a plain ISO string in its text gets auto-formatted to the relative-or-absolute format the same way `<time data-utc>` does. Plus wrapped the last unwrapped date (`event_doc.ts` on trade detail).
+- **What to test:** open `/proposals/` — banner shows a clean summary, no scary red text unless something is actually broken. Topbar `Next poll` chip is visible with one of the four states. After this deploy, the strategist's next event will land as a `dropped` row (visible on the page) thanks to the self-heal — no need to bounce the service.
+
 ## 2.24.090 — 2026-05-26
 - **Universal smart timestamps.** Every `<time data-utc="ISO">` element across the dashboard now renders relative for today, absolute for older — and silently re-ticks every 30 s so a 3m-ago label becomes 4m-ago without a page reload.
   - same-day: `just now` (< 45s) / `Xm ago` (< 60m) / `Xh ago` (≥ 60m)

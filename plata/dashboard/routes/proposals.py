@@ -71,7 +71,8 @@ DROP_REASON_META: dict[str, dict[str, str]] = {
 
 async def _strategist_pipeline_stats() -> dict[str, Any]:
     """Snapshot of what the strategist has seen vs done — surfaces upstream
-    pipeline issues (no events arriving, enricher dead, etc.)."""
+    pipeline issues (no events arriving, enricher dead, etc.) and any
+    persistence failure so the user sees the real cause inline."""
     from plata.core.bus import get_redis
     redis = get_redis()
     out: dict[str, Any] = {}
@@ -87,6 +88,16 @@ async def _strategist_pipeline_stats() -> dict[str, Any]:
         hb = await redis.hgetall("agent_status:strategist")
         out["last_heartbeat"] = hb.get("last_heartbeat")
         out["halted"] = (hb.get("halted") or "").lower() == "true"
+    except Exception:  # noqa: BLE001
+        pass
+    # Persistence error — if record_drop / record_published kept failing.
+    try:
+        err = await redis.hgetall("proposals:last_persist_error")
+        if err:
+            out["persist_error"] = err
+            out["persist_failures_total"] = int(
+                (await redis.get("proposals:persist_failures_total")) or 0
+            )
     except Exception:  # noqa: BLE001
         pass
     return out
