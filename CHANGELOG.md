@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.073 — 2026-05-26
+- **Trade detail chart: diagnostic banner above the milestone chart.** When no live samples have been recorded yet, the chart now shows `⏳ No live price samples yet.` with an explanation (the sampler in `execution_vault` records one every 5s–6h depending on the longest milestone ETA; needs Bybit credentials for crypto, Alpaca for stocks) and a `View raw samples →` link to `/trades/<ulid>/samples`. Once samples arrive, the banner flips to `📈 N live price sample(s) recorded for this trade.` and stays in sync with the 15-second auto-refresh.
+- **Why your actual-price line was empty:** if the trade pre-dates the sampler, or `execution_vault` is missing the venue credential for that symbol, no samples land in `trade:samples:<ulid>` and the actual-price series stays empty. The banner makes that obvious instead of looking like a chart bug.
+- **What to test:** open `/trades/<ulid>` for an open crypto trade → banner should show a sample count >0 after a minute. Open a trade for a symbol whose venue is unconfigured → banner should explain why nothing is being plotted.
+
 ## 2.24.072 — 2026-05-25
 - Translate button: when the response is `{skipped: true}` (default English / Technical preference — no rewrite needed) the JS now shows an info toast pointing the user at **Settings → Account → Preferences** instead of looking like a silent no-op.
 

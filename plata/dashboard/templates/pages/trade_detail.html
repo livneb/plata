@@ -206,6 +206,22 @@
     if (msData.length && window.ApexCharts) {
       const el = document.getElementById('milestone-chart');
       const initial = await loadActualSeries();
+      // Tiny diagnostic above the chart so it's obvious when actual data is missing.
+      const diag = document.createElement('div');
+      diag.className = 'text-[11px] text-gray-500 -mb-2';
+      function setDiag(n) {
+        if (n > 0) {
+          diag.innerHTML = `📈 <b>${n}</b> live price sample(s) recorded for this trade.`;
+        } else {
+          diag.innerHTML = '⏳ <b>No live price samples yet.</b> ' +
+            'The sampler in <span class="font-mono">execution_vault</span> records one every ' +
+            '5s–6h depending on the longest milestone ETA. ' +
+            'For stocks the Alpaca key must be set; for crypto, Bybit. ' +
+            '<a href="/trades/{{ trade.trade_ulid }}/samples" target="_blank" class="text-blue-500 hover:underline">View raw samples →</a>';
+        }
+      }
+      setDiag(initial.length);
+      el.parentNode.insertBefore(diag, el);
       // Flowbite-style "Area" chart for the predicted-vs-actual overlay (gradient fill + curved actual).
       chart = new ApexCharts(el, {
         chart: { type: 'area', height: 280, toolbar: { show: false }, foreColor: axisColor, background: 'transparent', animations: { enabled: false }, fontFamily: 'Inter, sans-serif', dropShadow: { enabled: false } },
@@ -246,6 +262,7 @@
           { name: 'Predicted % move', type: 'line', data: msData.map(p => ({ x: p.x, y: p.y })) },
           { name: 'Actual price (live)', type: 'line', data: fresh },
         ], false);
+        setDiag(fresh.length);
       }, 15000);
       {% endif %}
     }
