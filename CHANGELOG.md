@@ -2,6 +2,20 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.099 — 2026-05-26
+- **Graph node weight is no longer just "edge count".** Per-node weight is now a composite:
+  ```
+  weight = Σ edges × (0.2 + 0.8 · event.sentiment_magnitude) × 0.5^(age_days / 7)
+  ```
+  Three factors blended **per edge**, summed per node:
+  1. **Connection** — base 1.0 per edge.
+  2. **Sentiment** — multiplied by `0.2 + 0.8 · sentiment_magnitude` of the event end of the edge. A connection to a dull event ≈ 0.2; to an "explosive" event ≈ 1.0. Baseline 0.2 keeps even dull events counting a bit.
+  3. **Recency** — exponential decay with a **7-day half-life**. Yesterday's event ≈ 0.9; week-old ≈ 0.5; month-old ≈ 0.12; year-old ≈ ~10⁻¹⁶ (effectively zero).
+- **Translation:** *one explosive event yesterday* outscores *five dull events from a month ago* — which matches your intuition for "is this country/person/company currently impactful".
+- **Drives:** node size, layout repulsion, the "min weight" slider (was "min connections"; now 0–10 step 0.5), and the heaviest-entity chip ranking. Chip tooltips show `weight X.X (N edges)` so you can sanity-check.
+- **`sentiment_magnitude` now exposed in `/graph/data`** per event node so the client can do this math without a second fetch.
+- **What to test:** open `/graph/` → the chip strip should reorder vs before — countries with heavy *recent* coverage rise; ones with stale connections fall. Hover any chip → tooltip shows both `weight` and raw edge count. Min-weight slider takes fractional values now.
+
 ## 2.24.098 — 2026-05-26
 - **🐛 Re-submit (clone-and-edit) actually executes now.** Two bugs were preventing the manual-override path from reaching the trade ledger:
   1. The bypass-risk branch synthesized a `RiskDecision` with `final_qty=Decimal("0")` — so even when it reached the executor, paper-mode rows landed with quantity 0 and live-mode orders were rejected by the venue for min-qty.

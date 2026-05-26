@@ -28,9 +28,9 @@
         <option value="grid">Grid</option>
         <option value="circle">Circle</option>
       </select>
-      <label class="text-gray-500 ml-2">min connections:</label>
-      <input id="min-degree" type="range" min="1" max="6" value="2" class="w-20 align-middle" />
-      <span id="min-degree-val" class="text-gray-400 font-mono">2</span>
+      <label class="text-gray-500 ml-2" title="Hides nodes with composite weight below this threshold. Weight blends connection count × event sentiment × recency.">min weight:</label>
+      <input id="min-degree" type="range" min="0" max="10" step="0.5" value="0.5" class="w-20 align-middle" />
+      <span id="min-degree-val" class="text-gray-400 font-mono">0.5</span>
       <button id="reload-btn" class="px-3 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Reload</button>
       <button id="normalize-btn" title="Merge duplicate entity nodes (US/USA, IL/ISR, …)"
               class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">🧹 Dedup</button>
@@ -67,7 +67,8 @@
     <span class="text-gray-500">pin:</span>
     <span id="entity-chips-list" class="flex flex-wrap gap-1"></span>
     <button id="entity-chips-clear" type="button" class="hidden px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">clear</button>
-    <span class="text-gray-400 text-[10px] ml-2" title="Chips are derived from the loaded graph: heaviest N entities by edge count, shown as their actual names (with flag for countries).">heaviest entities · multi-select</span>
+    <span class="text-gray-400 text-[10px] ml-2"
+          title="Weight per node = Σ edges × (0.2 + 0.8·event sentiment_magnitude) × 0.5^(age_days / 7)&#10;&#10;Translation: a node connected to one explosive event yesterday outscores a node connected to five dull events from a month ago.">heaviest entities · multi-select · weight = edges × sentiment × recency ⓘ</span>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
@@ -143,7 +144,7 @@
     function getFilters() {
       const types = new Set([...document.querySelectorAll('.filter-type:checked')].map(x => x.getAttribute('data-type')));
       const cats  = new Set([...document.querySelectorAll('.filter-cat:checked')].map(x => x.getAttribute('data-cat')));
-      const minDeg = parseInt(minDegreeInput.value, 10) || 1;
+      const minDeg = parseFloat(minDegreeInput.value) || 0;
       return { types, cats, minDeg, pinnedIds };
     }
     const clearFocusBtn = document.getElementById('clear-focus');
@@ -383,12 +384,55 @@
                   + `<text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="${Math.round(size * 0.7)}">${emoji}</text></svg>`;
         return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
       }
-      // First pass: compute degree on the full graph (used for size + filtering).
-      const fullDegree = {};
+      // Composite node weight — replaces "edge count" with something that
+      // actually reflects importance. Three factors blended per edge:
+      //
+      //   1. CONNECTION (base)        — the edge itself contributes 1.0.
+      //   2. SENTIMENT  (impact)      — multiplied by event.sentiment_magnitude
+      //                                 (0..1). A connection to a dull event
+      //                                 counts ~0.2; to an "explosive" event ~1.0.
+      //   3. RECENCY    (freshness)   — exponential decay: half-life = 7 days
+      //                                 from the event's ts_epoch. Week-old =
+      //                                 0.5 weight; month-old = ~0.12.
+      //
+      // Final node weight = sum of weighted edges touching it.
+      // For entities (no ts/sentiment themselves) the edge weight is derived
+      // from the event on the OTHER end.
+      const NOW_SEC = Math.floor(Date.now() / 1000);
+      const HALF_LIFE_SEC = 7 * 24 * 60 * 60;
+      const nodeById = {};
+      (data.nodes || []).forEach(n => { nodeById[n.data.id] = n.data; });
+      function eventScore(n) {
+        if (!n || n.kind !== 'event') return null;
+        const mag = Math.max(0.0, Math.min(1.0, n.sentiment_magnitude || 0));
+        // Sentiment factor: 0.2 baseline so even dull events still count a bit.
+        const sentFactor = 0.2 + 0.8 * mag;
+        const ageSec = NOW_SEC - (n.ts_epoch || NOW_SEC);
+        // Exp decay with 7d half-life. Clamp ageSec ≥ 0 (future events keep 1.0).
+        const recencyFactor = ageSec > 0 ? Math.pow(0.5, ageSec / HALF_LIFE_SEC) : 1.0;
+        return sentFactor * recencyFactor;
+      }
+      const eventScoreCache = {};
+      function edgeWeight(sourceId, targetId) {
+        // Find the event end (if any) and weight from there.
+        const src = nodeById[sourceId];
+        const dst = nodeById[targetId];
+        const evt = (src && src.kind === 'event') ? src : (dst && dst.kind === 'event') ? dst : null;
+        if (!evt) return 1.0;  // entity↔entity edges (rare) keep flat weight
+        if (eventScoreCache[evt.id] == null) eventScoreCache[evt.id] = eventScore(evt) || 0.2;
+        return eventScoreCache[evt.id];
+      }
+      const fullDegree = {};         // weighted; kept name for back-compat
+      const rawDegree = {};          // raw edge count (used in chip tooltip)
       (data.edges || []).forEach(e => {
-        fullDegree[e.data.source] = (fullDegree[e.data.source] || 0) + 1;
-        fullDegree[e.data.target] = (fullDegree[e.data.target] || 0) + 1;
+        const w = edgeWeight(e.data.source, e.data.target);
+        fullDegree[e.data.source] = (fullDegree[e.data.source] || 0) + w;
+        fullDegree[e.data.target] = (fullDegree[e.data.target] || 0) + w;
+        rawDegree[e.data.source] = (rawDegree[e.data.source] || 0) + 1;
+        rawDegree[e.data.target] = (rawDegree[e.data.target] || 0) + 1;
       });
+      // Save on data so the chip-builder + detail panel can read it.
+      data._weightDebug = { halfLifeDays: 7, sentimentBaseline: 0.2 };
 
       // Apply user-driven filters: type whitelist + category whitelist + min-degree.
       const f = getFilters();
@@ -774,20 +818,45 @@
       const list = document.getElementById('entity-chips-list');
       const clearBtn = document.getElementById('entity-chips-clear');
       if (!bar || !list) return;
-      // Recompute degree against the FULL dataset.
-      const deg = {};
+      // Use the same composite weight render() computes (sentiment × recency × count).
+      // Fall back to raw degree if we haven't rendered yet.
+      const NOW = Math.floor(Date.now() / 1000);
+      const HL  = 7 * 24 * 60 * 60;
+      const byId = {};
+      (data.nodes || []).forEach(n => { byId[n.data.id] = n.data; });
+      function _eventScore(n) {
+        if (!n || n.kind !== 'event') return null;
+        const mag = Math.max(0, Math.min(1, n.sentiment_magnitude || 0));
+        const sent = 0.2 + 0.8 * mag;
+        const age = NOW - (n.ts_epoch || NOW);
+        const rec = age > 0 ? Math.pow(0.5, age / HL) : 1.0;
+        return sent * rec;
+      }
+      function _edgeWeight(srcId, dstId) {
+        const s = byId[srcId], d = byId[dstId];
+        const e = (s && s.kind === 'event') ? s : (d && d.kind === 'event') ? d : null;
+        return e ? (_eventScore(e) || 0.2) : 1.0;
+      }
+      const deg = {};      // weighted
+      const cnt = {};      // raw
       (data.edges || []).forEach(e => {
-        deg[e.data.source] = (deg[e.data.source] || 0) + 1;
-        deg[e.data.target] = (deg[e.data.target] || 0) + 1;
+        const w = _edgeWeight(e.data.source, e.data.target);
+        deg[e.data.source] = (deg[e.data.source] || 0) + w;
+        deg[e.data.target] = (deg[e.data.target] || 0) + w;
+        cnt[e.data.source] = (cnt[e.data.source] || 0) + 1;
+        cnt[e.data.target] = (cnt[e.data.target] || 0) + 1;
       });
-      // Group entities by type → pick top N per type by degree.
+      // Group entities by type → pick top N per type by composite weight.
       const byType = {};
       (data.nodes || []).forEach(n => {
         const d = n.data || {};
         if (d.kind !== 'entity') return;
         const t = (d.etype || 'default').toLowerCase();
         if (!TOP_PER_TYPE[t]) return;
-        (byType[t] = byType[t] || []).push({ id: d.id, label: d.label || d.id, etype: t, deg: deg[d.id] || 0 });
+        (byType[t] = byType[t] || []).push({
+          id: d.id, label: d.label || d.id, etype: t,
+          deg: deg[d.id] || 0, cnt: cnt[d.id] || 0,
+        });
       });
       const picks = [];
       Object.entries(byType).forEach(([t, arr]) => {
@@ -844,8 +913,8 @@
           + (isPinned
             ? 'bg-blue-700 text-white border-blue-700'
             : 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700');
-        btn.title = `${p.label} · ${p.deg} connection(s) · ${p.etype}`;
-        btn.innerHTML = `${chipIcon(p)} ${escapeHtml(p.label)} <span class="text-[9px] opacity-60">${p.deg}</span>`;
+        btn.title = `${p.label} · weight ${p.deg.toFixed(1)} (${p.cnt} edge${p.cnt === 1 ? '' : 's'}) · ${p.etype}\n\nWeight = sum of edges × event sentiment magnitude × recency (7-day half-life). Higher = currently impactful.`;
+        btn.innerHTML = `${chipIcon(p)} ${escapeHtml(p.label)} <span class="text-[9px] opacity-60">${p.deg.toFixed(1)}</span>`;
         btn.addEventListener('click', () => {
           if (pinnedIds.has(p.id)) pinnedIds.delete(p.id);
           else pinnedIds.add(p.id);

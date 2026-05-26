@@ -114,6 +114,9 @@ async def graph_data(
                     "source": doc.get("source"),
                     "ts": doc.get("ts"),
                     "ts_epoch": int(doc.get("ts_epoch") or 0),
+                    # Sentiment magnitude (0..1) — how dramatic the event is.
+                    # Used by the client to compute weighted node importance.
+                    "sentiment_magnitude": float(doc.get("sentiment_magnitude") or 0),
                     "color": color,
                 },
             }
