@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.095 — 2026-05-26
+- **Graph: named-entity pin chips (multi-select).** The "top 5 countries" abstract chip is replaced with **real entity names**, derived from the current dataset: heaviest countries (Israel 🇮🇱, USA 🇺🇸, Russia 🇷🇺, Ukraine 🇺🇦, …), heaviest people, heaviest companies, heaviest assets and orgs. Each chip shows the entity's name + a small degree number (e.g. `🇮🇱 Israel 42`). Click any to pin it; click multiple to pin several (OR mode). When any chip is pinned, the canvas renders only the pinned entities + their immediate neighbours. A "clear" button appears when one or more are selected.
+- Top-N per type today: 8 countries, 6 people, 6 companies, 4 assets, 3 orgs — picks the heaviest of each by edge count.
+- Chips refresh on every dataset reload (so they reflect what's currently heavy, not a stale list).
+- **What to test:** open `/graph/` → strip of named chips with flags appears. Click `🇺🇦 Ukraine` and `🇷🇺 Russia` → canvas shows only those two countries + the events/people/orgs directly linked to them. Click again to unpin; "clear" wipes the whole selection.
+
 ## 2.24.094 — 2026-05-26
 - **Graph: "heaviest-N" focus chips.** New chip row beneath the show/category filters: `🌍 top 5 countries`, `👤 top 5 people`, `🏢 top 5 companies`, `📰 top 5 events`, `🏷️ top 5 / cat` (top 5 events per category), `⭐ top 10 overall`. Picks the highest-degree nodes of that type (plus their immediate neighbours so the seeds aren't isolated) and hides the rest. Click `off` to clear.
 - **How "weight" is computed today** (visible inline next to the chips): `weight = edge count` — same metric driving node size + layout repulsion + the min-connections slider. **Nothing else** feeds in yet (no sentiment, no recency, no centrality). Picked degree so the chips agree visually with the sizing.

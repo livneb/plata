@@ -59,19 +59,15 @@
     {% endfor %}
   </div>
 
-  <!-- Heaviest-N chips: focus the view on the top hubs by edge count.
-       When active, ONLY the top-N nodes (and their immediate neighbours) render.
-       Picks "weight" = node's edge degree (same metric used for size + repulsion). -->
-  <div class="flex flex-wrap items-center gap-2 text-xs px-1">
-    <span class="text-gray-500">heaviest:</span>
-    <button type="button" data-top="" class="top-chip px-2 py-0.5 rounded border border-blue-700 bg-blue-700 text-white" title="No top-N filter — show everything that passed the show: filters above.">off</button>
-    <button type="button" data-top="country:5"   class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 countries by edge count">🌍 top 5 countries</button>
-    <button type="button" data-top="person:5"    class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 people by edge count">👤 top 5 people</button>
-    <button type="button" data-top="company:5"   class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 companies by edge count">🏢 top 5 companies</button>
-    <button type="button" data-top="event:5"     class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 events by edge count (most-connected stories)">📰 top 5 events</button>
-    <button type="button" data-top="event:5:cat" class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 events PER category (war, macro, regulation, ...)">🏷️ top 5 / cat</button>
-    <button type="button" data-top="any:10"      class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 10 nodes overall regardless of type">⭐ top 10 overall</button>
-    <span class="text-gray-400 text-[10px] ml-2">weight = edge count today (more connections → heavier)</span>
+  <!-- Heavy-entity chips, populated by JS after data loads. Each chip is the
+       NAME of a high-degree entity (Israel, USA, Russia, Bitcoin, Elon Musk…).
+       Multi-select OR: clicking several shows everything connected to ANY of them.
+       Weight today = edge count (more connections → heavier → shown). -->
+  <div id="entity-chips-bar" class="hidden flex-wrap items-center gap-2 text-xs px-1">
+    <span class="text-gray-500">pin:</span>
+    <span id="entity-chips-list" class="flex flex-wrap gap-1"></span>
+    <button id="entity-chips-clear" type="button" class="hidden px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">clear</button>
+    <span class="text-gray-400 text-[10px] ml-2" title="Chips are derived from the loaded graph: heaviest N entities by edge count, shown as their actual names (with flag for countries).">heaviest entities · multi-select</span>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
@@ -141,12 +137,14 @@
     const minDegreeInput = document.getElementById('min-degree');
     const minDegreeVal = document.getElementById('min-degree-val');
     const reloadBtn = document.getElementById('reload-btn');
-    let topSpec = '';   // e.g. 'country:5', 'event:5:cat', 'any:10', '' = off
+    // Multi-select set of pinned entity IDs (e.g. 'entity:country:United_States').
+    // When non-empty, ONLY the pinned entities and their immediate neighbours render.
+    const pinnedIds = new Set();
     function getFilters() {
       const types = new Set([...document.querySelectorAll('.filter-type:checked')].map(x => x.getAttribute('data-type')));
       const cats  = new Set([...document.querySelectorAll('.filter-cat:checked')].map(x => x.getAttribute('data-cat')));
       const minDeg = parseInt(minDegreeInput.value, 10) || 1;
-      return { types, cats, minDeg, topSpec };
+      return { types, cats, minDeg, pinnedIds };
     }
     const clearFocusBtn = document.getElementById('clear-focus');
     const focusHint = document.getElementById('focus-hint');
@@ -294,6 +292,8 @@
 
     function render(data, opts) {
       opts = opts || {};
+      // Rebuild the heavy-entity chip strip from the full dataset (idempotent).
+      try { rebuildEntityChips(data); } catch (e) {}
       // Trim labels for readability. Full text is in the side panel on click.
       const ENTITY_ICONS = {
         person: '👤', company: '🏢', country: '🌍', asset: '💰',
@@ -403,52 +403,21 @@
         if ((fullDegree[d.id] || 0) < f.minDeg) return false;
         return true;
       }
-      // Heaviest-N: pre-pick the top-N highest-degree nodes matching the spec.
-      // Once we know the seed IDs, we also keep their immediate neighbours so
-      // the focused subgraph is actually useful (lone nodes aren't).
-      let topSeedIds = null;          // null = no top filter, Set = seeds + neighbours
-      if (f.topSpec) {
-        const parts = f.topSpec.split(':');
-        const kind = parts[0];        // 'country' / 'event' / 'any'
-        const n = parseInt(parts[1] || '5', 10);
-        const perCat = parts[2] === 'cat';
-        const candidates = data.nodes.filter(node => {
-          const d = node.data || {};
-          if (kind === 'any') return true;
-          if (kind === 'event') return d.kind === 'event';
-          if (d.kind !== 'entity') return false;
-          return (d.etype || '').toLowerCase() === kind;
-        });
-        let seeds = [];
-        if (perCat && kind === 'event') {
-          // Top-N per category: group then take top-N each.
-          const groups = {};
-          candidates.forEach(c => {
-            const cat = (c.data.category || 'other').toLowerCase();
-            (groups[cat] = groups[cat] || []).push(c);
-          });
-          Object.values(groups).forEach(arr => {
-            arr.sort((a, b) => (fullDegree[b.data.id] || 0) - (fullDegree[a.data.id] || 0));
-            seeds.push(...arr.slice(0, n));
-          });
-        } else {
-          candidates.sort((a, b) => (fullDegree[b.data.id] || 0) - (fullDegree[a.data.id] || 0));
-          seeds = candidates.slice(0, n);
-        }
-        topSeedIds = new Set(seeds.map(s => s.data.id));
-        // Expand to include immediate neighbours so each seed has its
-        // context visible (otherwise top-5 countries with zero events around
-        // them is just five lonely flags).
+      // Pinned entities: when the user clicked one or more named chips, ONLY
+      // those entities + their immediate neighbours render. Multi-select OR.
+      let pinnedScope = null;   // null = no pin filter, Set = pinned + neighbours
+      if (f.pinnedIds && f.pinnedIds.size > 0) {
+        pinnedScope = new Set(f.pinnedIds);
         (data.edges || []).forEach(e => {
-          if (topSeedIds.has(e.data.source)) topSeedIds.add(e.data.target);
-          if (topSeedIds.has(e.data.target)) topSeedIds.add(e.data.source);
+          if (pinnedScope.has(e.data.source)) pinnedScope.add(e.data.target);
+          if (pinnedScope.has(e.data.target)) pinnedScope.add(e.data.source);
         });
       }
       const allowedIds = new Set();
       const visibleNodes = [];
       data.nodes.forEach(n => {
         if (!nodeAllowed(n)) return;
-        if (topSeedIds && !topSeedIds.has(n.data.id)) return;
+        if (pinnedScope && !pinnedScope.has(n.data.id)) return;
         allowedIds.add(n.data.id);
         visibleNodes.push(n);
       });
@@ -794,20 +763,106 @@
     document.querySelectorAll('.filter-type, .filter-cat').forEach(el => {
       el.addEventListener('change', rerenderFromCurrent);
     });
-    // Heaviest-N chips — toggle single-select.
-    document.querySelectorAll('.top-chip').forEach(btn => {
-      btn.addEventListener('click', () => {
-        topSpec = btn.getAttribute('data-top') || '';
-        document.querySelectorAll('.top-chip').forEach(b => {
-          const active = b.getAttribute('data-top') === topSpec;
-          b.classList.toggle('bg-blue-700', active);
-          b.classList.toggle('text-white', active);
-          b.classList.toggle('border-blue-700', active);
-          b.classList.toggle('border-gray-300', !active);
-          b.classList.toggle('dark:border-gray-600', !active);
-        });
-        rerenderFromCurrent();
+
+    // Entity-name chips: populated from the current dataset. Picks the
+    // heaviest (highest-degree) entities of each type and renders one chip
+    // per entity with its real name (Israel, USA, Russia, Bitcoin, …).
+    // Multi-select OR. Click a chip = pin; click again = unpin.
+    const TOP_PER_TYPE = { country: 8, person: 6, company: 6, asset: 4, org: 3 };
+    function rebuildEntityChips(data) {
+      const bar = document.getElementById('entity-chips-bar');
+      const list = document.getElementById('entity-chips-list');
+      const clearBtn = document.getElementById('entity-chips-clear');
+      if (!bar || !list) return;
+      // Recompute degree against the FULL dataset.
+      const deg = {};
+      (data.edges || []).forEach(e => {
+        deg[e.data.source] = (deg[e.data.source] || 0) + 1;
+        deg[e.data.target] = (deg[e.data.target] || 0) + 1;
       });
+      // Group entities by type → pick top N per type by degree.
+      const byType = {};
+      (data.nodes || []).forEach(n => {
+        const d = n.data || {};
+        if (d.kind !== 'entity') return;
+        const t = (d.etype || 'default').toLowerCase();
+        if (!TOP_PER_TYPE[t]) return;
+        (byType[t] = byType[t] || []).push({ id: d.id, label: d.label || d.id, etype: t, deg: deg[d.id] || 0 });
+      });
+      const picks = [];
+      Object.entries(byType).forEach(([t, arr]) => {
+        arr.sort((a, b) => b.deg - a.deg);
+        picks.push(...arr.slice(0, TOP_PER_TYPE[t]));
+      });
+      // Drop entities with zero edges — chip would be useless.
+      const usable = picks.filter(p => p.deg > 0);
+      if (!usable.length) { bar.classList.add('hidden'); bar.classList.remove('flex'); return; }
+      bar.classList.remove('hidden'); bar.classList.add('flex');
+      // Reuse the FLAG / ENTITY_ICONS lookups already defined in render().
+      // Re-derive a tiny icon-for-chip function inline so chip building doesn't depend on render() running first.
+      function chipIcon(p) {
+        if (p.etype === 'country') {
+          const key = String(p.label || '').toUpperCase().replace(/[\s-]+/g, '_');
+          const flag = ({USA:'🇺🇸',US:'🇺🇸',UNITED_STATES:'🇺🇸',AMERICA:'🇺🇸',
+            IRN:'🇮🇷',IR:'🇮🇷',IRAN:'🇮🇷',
+            ISR:'🇮🇱',IL:'🇮🇱',ISRAEL:'🇮🇱',
+            RUS:'🇷🇺',RU:'🇷🇺',RUSSIA:'🇷🇺',
+            CHN:'🇨🇳',CN:'🇨🇳',CHINA:'🇨🇳',
+            UKR:'🇺🇦',UA:'🇺🇦',UKRAINE:'🇺🇦',
+            GBR:'🇬🇧',UK:'🇬🇧',UNITED_KINGDOM:'🇬🇧',
+            EUR:'🇪🇺',EU:'🇪🇺',EUROPEAN_UNION:'🇪🇺',
+            DEU:'🇩🇪',DE:'🇩🇪',GERMANY:'🇩🇪',
+            FRA:'🇫🇷',FR:'🇫🇷',FRANCE:'🇫🇷',
+            JPN:'🇯🇵',JP:'🇯🇵',JAPAN:'🇯🇵',
+            IND:'🇮🇳',IN:'🇮🇳',INDIA:'🇮🇳',
+            KOR:'🇰🇷',KR:'🇰🇷',SOUTH_KOREA:'🇰🇷',
+            PRK:'🇰🇵',KP:'🇰🇵',NORTH_KOREA:'🇰🇵',
+            SAU:'🇸🇦',SA:'🇸🇦',SAUDI_ARABIA:'🇸🇦',
+            TUR:'🇹🇷',TR:'🇹🇷',TURKEY:'🇹🇷',
+            BRA:'🇧🇷',BR:'🇧🇷',BRAZIL:'🇧🇷',
+            CAN:'🇨🇦',CA:'🇨🇦',CANADA:'🇨🇦',
+            AUS:'🇦🇺',AU:'🇦🇺',AUSTRALIA:'🇦🇺',
+            TWN:'🇹🇼',TW:'🇹🇼',TAIWAN:'🇹🇼',
+            HKG:'🇭🇰',HK:'🇭🇰',HONG_KONG:'🇭🇰',
+            SGP:'🇸🇬',SG:'🇸🇬',SINGAPORE:'🇸🇬'})[key];
+          if (flag) return flag;
+          return '🌍';
+        }
+        if (p.etype === 'person')  return '👤';
+        if (p.etype === 'company') return '🏢';
+        if (p.etype === 'asset')   return '💰';
+        if (p.etype === 'org')     return '🏛️';
+        if (p.etype === 'ticker')  return '💹';
+        return '◾';
+      }
+      list.innerHTML = '';
+      usable.forEach(p => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const isPinned = pinnedIds.has(p.id);
+        btn.className = 'px-2 py-0.5 rounded border text-[11px] '
+          + (isPinned
+            ? 'bg-blue-700 text-white border-blue-700'
+            : 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700');
+        btn.title = `${p.label} · ${p.deg} connection(s) · ${p.etype}`;
+        btn.innerHTML = `${chipIcon(p)} ${escapeHtml(p.label)} <span class="text-[9px] opacity-60">${p.deg}</span>`;
+        btn.addEventListener('click', () => {
+          if (pinnedIds.has(p.id)) pinnedIds.delete(p.id);
+          else pinnedIds.add(p.id);
+          clearBtn.classList.toggle('hidden', pinnedIds.size === 0);
+          rebuildEntityChips(data);  // refresh the styling
+          rerenderFromCurrent();
+        });
+        list.appendChild(btn);
+      });
+      clearBtn.classList.toggle('hidden', pinnedIds.size === 0);
+    }
+    document.getElementById('entity-chips-clear').addEventListener('click', () => {
+      pinnedIds.clear();
+      // Re-style chips by rebuilding from the in-memory dataset.
+      const cur = unfocusedCache.data || loadPersisted(limitSel.value);
+      if (cur) rebuildEntityChips(cur);
+      rerenderFromCurrent();
     });
     clearFocusBtn.addEventListener('click', back);
 
