@@ -41,8 +41,8 @@
           {% if t.net_pnl and t.net_pnl > 0 %}text-green-500{% elif t.net_pnl and t.net_pnl < 0 %}text-red-500{% endif %}">
           {{ t.net_pnl or '—' }}
         </td>
-        <td class="px-6 py-3">{{ t.opened_at.strftime('%Y-%m-%d %H:%M') if t.opened_at }}</td>
-        <td class="px-6 py-3">{{ t.closed_at.strftime('%Y-%m-%d %H:%M') if t.closed_at else '—' }}</td>
+        <td class="px-6 py-3">{% if t.opened_at %}<time data-utc="{{ t.opened_at.isoformat() }}">{{ t.opened_at | time_ago }}</time>{% endif %}</td>
+        <td class="px-6 py-3">{% if t.closed_at %}<time data-utc="{{ t.closed_at.isoformat() }}">{{ t.closed_at | time_ago }}</time>{% else %}—{% endif %}</td>
       </tr>
       {% else %}
       <tr><td colspan="10" class="px-6 py-12 text-center text-gray-400">No trades yet.</td></tr>

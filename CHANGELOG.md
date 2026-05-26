@@ -2,6 +2,17 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.090 — 2026-05-26
+- **Universal smart timestamps.** Every `<time data-utc="ISO">` element across the dashboard now renders relative for today, absolute for older — and silently re-ticks every 30 s so a 3m-ago label becomes 4m-ago without a page reload.
+  - same-day: `just now` (< 45s) / `Xm ago` (< 60m) / `Xh ago` (≥ 60m)
+  - yesterday: `Yesterday HH:MM`
+  - this year: `DD MMM HH:MM`
+  - older: `DD MMM YYYY`
+  - tooltip on hover always shows the full local datetime.
+- **Server-side `time_ago` Jinja filter** updated to match — so the SSR first paint and the client-side post-load text agree (no flicker).
+- Stray raw `strftime` calls in `/trades/` and `/trades/<ulid>` (which weren't wrapped) now use the standard `<time data-utc>` envelope, so they participate in the auto-render.
+- **What to test:** open `/trades/` — Opened/Closed columns show e.g. `5m ago` / `Yesterday 14:32` / `13 May 2026`. Leave the tab open — labels increment from `5m` to `6m` after a minute. Hover any timestamp → full local datetime in tooltip.
+
 ## 2.24.089 — 2026-05-26
 - **🐛 Root cause: proposals table existed only in the dashboard service.** Strategist runs in `intelligence_sandbox` (a separate Railway service) and `Reviewer`/`Executor` in `execution_vault` — none of them created the `proposals` or `agent_activity_log` tables. When the dashboard hadn't booted yet (or had failed), every strategist `record_drop()` INSERT silently failed (`relation "proposals" does not exist`), and we were swallowing the exception. **Zero rows persisted, regardless of how many events the strategist processed.** Same root cause as why no `dropped` proposals appeared since v2.24.087.
   - New `plata.core.db.ensure_aux_tables()` called from `_bind_then_run()` in `entrypoints.py` — runs in **every** service's startup (ingestion_hub / intelligence_sandbox / execution_vault), idempotent (`checkfirst=True`).

@@ -30,7 +30,7 @@
       <div><div class="text-[10px] uppercase text-gray-500">SL{{ help_icon('sl') }} / TP{{ help_icon('tp') }}</div><div>{{ trade.sl_price or '—' }} / {{ trade.tp_price or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Exit</div><div>{{ trade.exit_price or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Net PnL{{ help_icon('net_pnl') }}</div><div>{{ trade.net_pnl or '—' }}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">Closed</div><div>{{ trade.closed_at.strftime('%Y-%m-%d %H:%M') if trade.closed_at else '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500">Closed</div><div>{% if trade.closed_at %}<time data-utc="{{ trade.closed_at.isoformat() }}">{{ trade.closed_at | time_ago }}</time>{% else %}—{% endif %}</div></div>
     </div>
   </section>
 

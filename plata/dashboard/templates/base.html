@@ -898,7 +898,35 @@
     document.body.addEventListener('htmx:afterSwap', e => plataTickElapsed(e.target));
 
     // ---------- Local-time formatter ----------
-    // Any <time data-utc="ISO"> element will render in the browser's locale + timezone.
+    // Any <time data-utc="ISO"> element renders smartly:
+    //   • < 60s         → "just now"
+    //   • < 60m         → "Xm ago"
+    //   • same calendar day → "Xh ago"
+    //   • yesterday     → "Yesterday HH:MM"
+    //   • this year     → "DD MMM HH:MM"
+    //   • older         → "DD MMM YYYY"
+    // The browser tooltip always shows the full local datetime.
+    function plataFormatRelative(iso) {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      const now = new Date();
+      const secs = Math.max(0, Math.floor((now.getTime() - d.getTime()) / 1000));
+      const sameDay = d.toDateString() === now.toDateString();
+      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+      const isYesterday = d.toDateString() === yesterday.toDateString();
+      const PAD = (n) => String(n).padStart(2, '0');
+      const HHMM = `${PAD(d.getHours())}:${PAD(d.getMinutes())}`;
+      const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+      if (sameDay) {
+        if (secs < 45)         return 'just now';
+        if (secs < 60 * 60)    return Math.floor(secs / 60) + 'm ago';
+        if (secs < 24 * 60 * 60) return Math.floor(secs / 3600) + 'h ago';
+        return HHMM;  // edge case (long-running tab past midnight)
+      }
+      if (isYesterday) return `Yesterday ${HHMM}`;
+      if (d.getFullYear() === now.getFullYear()) return `${PAD(d.getDate())} ${MON} ${HHMM}`;
+      return `${PAD(d.getDate())} ${MON} ${d.getFullYear()}`;
+    }
     function plataFormatLocalTimes(root) {
       (root || document).querySelectorAll('time[data-utc]').forEach(el => {
         const iso = el.getAttribute('data-utc');
@@ -906,13 +934,17 @@
         try {
           const d = new Date(iso);
           if (isNaN(d.getTime())) return;
-          el.textContent = d.toLocaleString();
-          el.setAttribute('title', d.toString());
+          el.textContent = plataFormatRelative(iso);
+          el.setAttribute('title', d.toLocaleString());
         } catch {}
       });
     }
     document.addEventListener('DOMContentLoaded', () => plataFormatLocalTimes());
     document.body.addEventListener('htmx:afterSwap', e => plataFormatLocalTimes(e.target));
+    // Re-tick same-day relative timestamps every 30s so "3m ago" becomes
+    // "4m ago" without a page reload (only matters for today's dates;
+    // absolute formats are unchanged).
+    setInterval(() => plataFormatLocalTimes(), 30000);
 
     // ---------- Theme toggle ----------
     document.getElementById('theme-toggle')?.addEventListener('click', () => {
