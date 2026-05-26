@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.101 — 2026-05-26
+- **Mobile header slimmed.** The KPI strip was pushing the hamburger menu out of reach on phones. New layout:
+  - **Mobile (< 640 px)**: only **`Today` = total PnL** (realized + unrealized, single chip) + PAPER badge + avatar dropdown (which now contains theme toggle + sign-out). Version chip + theme button + notification bell + 5 other KPIs all hidden.
+  - **Tablet (≥ 640 px)**: adds `Total today` (full label) + theme toggle + 🔔 + version chip.
+  - **Desktop (≥ 768 px)**: adds `Realized today` and `Open · unrealized`.
+  - **Large (≥ 1024 px)**: adds `Next poll` countdown and `LLM $`.
+- HITL chip still appears on all sizes when there's an actionable pending HITL (it's action-required, not size-dependent).
+- **What to test:** open the dashboard on a phone — header should fit on one line, ☰ menu reachable left, single `Today` chip + PAPER + avatar on the right. Rotate to landscape or open on tablet — the strip progressively expands.
+
 ## 2.24.100 — 2026-05-26
 - **Re-submit chain is now visible from both sides.** Previously: clone-and-edit created a new `manual_override` proposal row linking back to the original via `extras.source_proposal_ulid`, but the original `dropped`/`rejected` row had no idea its rescued version existed. So on the proposals page it looked abandoned.
   - Now: when you Re-submit a row, we also append the new ULID to the parent's `extras.children` list. So:

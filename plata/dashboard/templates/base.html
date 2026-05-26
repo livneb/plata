@@ -65,17 +65,24 @@
           <span class="self-center text-xl font-semibold whitespace-nowrap">Plata</span>
         </a>
         <button id="version-btn" type="button"
-                class="ml-2 text-[10px] text-gray-400 font-mono hover:text-gray-200"
+                class="ml-2 text-[10px] text-gray-400 font-mono hover:text-gray-200 hidden sm:inline"
                 title="Show changelog">v{{ app_version_global() }}</button>
       </div>
-      <div class="flex items-center gap-3">
-        <!-- KPI strip — populated by /api/header_stats every 10s -->
+      <div class="flex items-center gap-1.5 sm:gap-3">
+        <!-- MOBILE-only single KPI (Total today). The full strip below is
+             hidden under sm: to keep the header narrow + the hamburger
+             accessible on small screens. -->
+        <a href="/trades/" id="kpi-mobile" class="flex sm:hidden flex-col items-end leading-tight hover:opacity-80" title="Total today = realized + unrealized PnL.">
+          <span class="text-[8px] uppercase text-gray-500">Today</span>
+          <span id="kpi-total-mobile" class="font-mono font-semibold text-gray-400 text-xs">—</span>
+        </a>
+        <!-- DESKTOP KPI strip — populated by /api/header_stats every 60s -->
         <div id="header-kpis" class="hidden sm:flex items-center gap-3 text-[11px] mr-2">
-          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Realized PnL — closed trades only, since 00:00 UTC. Open positions' mark-to-market shows under OPEN.">
+          <a href="/trades/" class="flex-col items-end leading-tight hover:opacity-80 hidden md:flex" title="Realized PnL — closed trades only, since 00:00 UTC. Open positions' mark-to-market shows under OPEN.">
             <span class="text-[9px] uppercase text-gray-500">Realized today</span>
             <span id="kpi-pnl" class="font-mono font-semibold text-gray-400">—</span>
           </a>
-          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Open positions and their live unrealized PnL (mark-to-market vs entry).">
+          <a href="/trades/" class="flex-col items-end leading-tight hover:opacity-80 hidden md:flex" title="Open positions and their live unrealized PnL (mark-to-market vs entry).">
             <span class="text-[9px] uppercase text-gray-500">Open · unrealized</span>
             <span id="kpi-open" class="font-mono text-gray-400">—</span>
           </a>
@@ -87,20 +94,20 @@
             <span class="text-[9px] uppercase text-red-400">HITL</span>
             <span id="kpi-hitl" class="font-mono font-semibold text-red-400">0</span>
           </a>
-          <a href="/workflow/" id="kpi-next-poll-link" class="flex flex-col items-end leading-tight hover:opacity-80 hidden" title="Next scraper poll. If 'all halted' shows, no sources are polling and no new signals can enter the pipeline — click to go fix on /workflow/.">
+          <a href="/workflow/" id="kpi-next-poll-link" class="flex-col items-end leading-tight hover:opacity-80 hidden lg:flex" title="Next scraper poll. If 'all halted' shows, no sources are polling — click to fix on /workflow/.">
             <span class="text-[9px] uppercase text-gray-500">Next poll</span>
             <span id="kpi-next-poll" class="font-mono text-gray-400">—</span>
           </a>
-          <a href="/activity/" id="kpi-budget-link" class="flex flex-col items-end leading-tight hover:opacity-80 hidden" title="LLM spend today vs daily budget cap">
+          <a href="/activity/" id="kpi-budget-link" class="flex-col items-end leading-tight hover:opacity-80 hidden lg:flex" title="LLM spend today vs daily budget cap">
             <span class="text-[9px] uppercase text-gray-500">LLM $</span>
             <span id="kpi-budget" class="font-mono text-gray-400">—</span>
           </a>
         </div>
-        <span id="mode-badge" class="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">
+        <span id="mode-badge" class="bg-yellow-100 text-yellow-800 text-[10px] sm:text-xs font-medium px-2 sm:px-2.5 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">
           PAPER
         </span>
         <button id="theme-toggle" type="button" aria-label="Toggle theme"
-                class="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                class="hidden sm:inline-flex p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
           <svg id="theme-icon-light" class="w-5 h-5 hidden dark:inline" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
           <svg id="theme-icon-dark" class="w-5 h-5 dark:hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/></svg>
         </button>
@@ -704,6 +711,7 @@
           sessionStorage.setItem(CACHE_KEY, JSON.stringify({ stats, fetched_at: Date.now() }));
         } catch (e) { /* quota etc — ignore */ }
       }
+      const $totalMobile = document.getElementById('kpi-total-mobile');
       function render(s) {
         $kpis.classList.remove('hidden');
         $pnl.textContent = fmt(s.daily_pnl, true);
@@ -714,7 +722,12 @@
           : '');
         const total = (s.daily_pnl || 0) + unr;
         $total.textContent = fmt(total, true);
-        $total.className = 'font-mono font-semibold ' + (total > 0 ? 'text-green-500' : total < 0 ? 'text-red-500' : 'text-gray-400');
+        const totalCls = 'font-mono font-semibold ' + (total > 0 ? 'text-green-500' : total < 0 ? 'text-red-500' : 'text-gray-400');
+        $total.className = totalCls;
+        if ($totalMobile) {
+          $totalMobile.textContent = fmt(total, true);
+          $totalMobile.className = totalCls + ' text-xs';
+        }
         if (s.pending_hitl > 0) {
           $hitlLink.classList.remove('hidden');
           $hitl.textContent = s.pending_hitl;
