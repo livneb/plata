@@ -90,7 +90,7 @@ FIELDS: dict[str, dict] = {
         "group": "guards",
         "type": "fraction",
         "min": 0.0, "max": 1.0, "step": 0.05,
-        "help": "Reject proposals whose LLM-stated conviction is below this. 0.6 = "more confident than 50/50". Raise to be pickier.",
+        "help": 'Reject proposals whose LLM-stated conviction is below this. 0.6 = "more confident than 50/50". Raise to be pickier.',
     },
     "guard_block_opposing_side": {
         "label": "Block opposing side",
@@ -124,7 +124,7 @@ FIELDS: dict[str, dict] = {
         "group": "strategist",
         "type": "fraction",
         "min": 0.0, "max": 1.0, "step": 0.05,
-        "help": "Events with `sentiment_magnitude` below this are dropped BEFORE the strategist LLM runs (saves $). 0.5 = "noticeable"; raise to 0.7 for only-the-big-news; lower to 0.3 to consider more candidates.",
+        "help": 'Events with `sentiment_magnitude` below this are dropped BEFORE the strategist LLM runs (saves $). 0.5 = "noticeable"; raise to 0.7 for only-the-big-news; lower to 0.3 to consider more candidates.',
     },
     "strategist_analog_k": {
         "label": "Historical analogs (K)",

@@ -293,16 +293,14 @@ class RiskManager(BaseAgent):
             rejection_reason=reason,
         )
         await publish(Streams.RISK_DECISIONS, decision)
+        # NB: rejected proposals are NOT errors — they're a normal lifecycle
+        # state and already visible on /proposals/?state=rejected. They were
+        # being written to error_log as INFO entries that cluttered /errors/.
         try:
             from plata.core.proposals import update_state
             await update_state(proposal.ulid, state="rejected", reason=reason, actor=self.name)
         except Exception:  # noqa: BLE001
             pass
-        await self.error_reporter.capture(
-            agent=self.name, severity="INFO", error_type="ProposalRejected",
-            message=reason,
-            context={"proposal_ulid": proposal.ulid, "symbol": proposal.symbol},
-        )
 
     def _sector_count(self, positions: list[dict[str, Any]], sector: str) -> int:
         n = 0

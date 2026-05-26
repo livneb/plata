@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.102 — 2026-05-26
+- **🐛 Fix `/settings/` 500.** Two help strings in `risk_field_meta.py` used double-quote literals inside double-quoted Python strings (`"0.6 = "more confident than 50/50""`) — SyntaxError on import. Replaced outer quotes with single quotes on both rows. Confirms why the file passed local edits but exploded at import time on the server.
+- **Rejected proposals no longer write to `error_log`.** `risk_manager._reject()` was calling `error_reporter.capture(severity="INFO", error_type="ProposalRejected")` on every gate failure — a `max_open_positions_reached` rejection (which is the system *working as designed*) was filling `/errors/` with noise. Rejections live on `/proposals/?state=rejected` with full reasoning; that's the right place to investigate them. Removed the capture call.
+- **What to test:** load `/settings/` — page renders. Trigger a rejection (e.g. open enough trades to hit the cap, then watch a new proposal) — appears as a row on `/proposals/?state=rejected`, **not** on `/errors/`.
+
 ## 2.24.101 — 2026-05-26
 - **Mobile header slimmed.** The KPI strip was pushing the hamburger menu out of reach on phones. New layout:
   - **Mobile (< 640 px)**: only **`Today` = total PnL** (realized + unrealized, single chip) + PAPER badge + avatar dropdown (which now contains theme toggle + sign-out). Version chip + theme button + notification bell + 5 other KPIs all hidden.
