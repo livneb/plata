@@ -59,6 +59,21 @@
     {% endfor %}
   </div>
 
+  <!-- Heaviest-N chips: focus the view on the top hubs by edge count.
+       When active, ONLY the top-N nodes (and their immediate neighbours) render.
+       Picks "weight" = node's edge degree (same metric used for size + repulsion). -->
+  <div class="flex flex-wrap items-center gap-2 text-xs px-1">
+    <span class="text-gray-500">heaviest:</span>
+    <button type="button" data-top="" class="top-chip px-2 py-0.5 rounded border border-blue-700 bg-blue-700 text-white" title="No top-N filter — show everything that passed the show: filters above.">off</button>
+    <button type="button" data-top="country:5"   class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 countries by edge count">🌍 top 5 countries</button>
+    <button type="button" data-top="person:5"    class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 people by edge count">👤 top 5 people</button>
+    <button type="button" data-top="company:5"   class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 companies by edge count">🏢 top 5 companies</button>
+    <button type="button" data-top="event:5"     class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 events by edge count (most-connected stories)">📰 top 5 events</button>
+    <button type="button" data-top="event:5:cat" class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 5 events PER category (war, macro, regulation, ...)">🏷️ top 5 / cat</button>
+    <button type="button" data-top="any:10"      class="top-chip px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Top 10 nodes overall regardless of type">⭐ top 10 overall</button>
+    <span class="text-gray-400 text-[10px] ml-2">weight = edge count today (more connections → heavier)</span>
+  </div>
+
   <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
     <div class="lg:col-span-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-1 relative">
       <div id="cy" class="w-full" style="height: 70vh; min-height: 400px;"></div>
@@ -126,11 +141,12 @@
     const minDegreeInput = document.getElementById('min-degree');
     const minDegreeVal = document.getElementById('min-degree-val');
     const reloadBtn = document.getElementById('reload-btn');
+    let topSpec = '';   // e.g. 'country:5', 'event:5:cat', 'any:10', '' = off
     function getFilters() {
       const types = new Set([...document.querySelectorAll('.filter-type:checked')].map(x => x.getAttribute('data-type')));
       const cats  = new Set([...document.querySelectorAll('.filter-cat:checked')].map(x => x.getAttribute('data-cat')));
       const minDeg = parseInt(minDegreeInput.value, 10) || 1;
-      return { types, cats, minDeg };
+      return { types, cats, minDeg, topSpec };
     }
     const clearFocusBtn = document.getElementById('clear-focus');
     const focusHint = document.getElementById('focus-hint');
@@ -387,10 +403,52 @@
         if ((fullDegree[d.id] || 0) < f.minDeg) return false;
         return true;
       }
+      // Heaviest-N: pre-pick the top-N highest-degree nodes matching the spec.
+      // Once we know the seed IDs, we also keep their immediate neighbours so
+      // the focused subgraph is actually useful (lone nodes aren't).
+      let topSeedIds = null;          // null = no top filter, Set = seeds + neighbours
+      if (f.topSpec) {
+        const parts = f.topSpec.split(':');
+        const kind = parts[0];        // 'country' / 'event' / 'any'
+        const n = parseInt(parts[1] || '5', 10);
+        const perCat = parts[2] === 'cat';
+        const candidates = data.nodes.filter(node => {
+          const d = node.data || {};
+          if (kind === 'any') return true;
+          if (kind === 'event') return d.kind === 'event';
+          if (d.kind !== 'entity') return false;
+          return (d.etype || '').toLowerCase() === kind;
+        });
+        let seeds = [];
+        if (perCat && kind === 'event') {
+          // Top-N per category: group then take top-N each.
+          const groups = {};
+          candidates.forEach(c => {
+            const cat = (c.data.category || 'other').toLowerCase();
+            (groups[cat] = groups[cat] || []).push(c);
+          });
+          Object.values(groups).forEach(arr => {
+            arr.sort((a, b) => (fullDegree[b.data.id] || 0) - (fullDegree[a.data.id] || 0));
+            seeds.push(...arr.slice(0, n));
+          });
+        } else {
+          candidates.sort((a, b) => (fullDegree[b.data.id] || 0) - (fullDegree[a.data.id] || 0));
+          seeds = candidates.slice(0, n);
+        }
+        topSeedIds = new Set(seeds.map(s => s.data.id));
+        // Expand to include immediate neighbours so each seed has its
+        // context visible (otherwise top-5 countries with zero events around
+        // them is just five lonely flags).
+        (data.edges || []).forEach(e => {
+          if (topSeedIds.has(e.data.source)) topSeedIds.add(e.data.target);
+          if (topSeedIds.has(e.data.target)) topSeedIds.add(e.data.source);
+        });
+      }
       const allowedIds = new Set();
       const visibleNodes = [];
       data.nodes.forEach(n => {
         if (!nodeAllowed(n)) return;
+        if (topSeedIds && !topSeedIds.has(n.data.id)) return;
         allowedIds.add(n.data.id);
         visibleNodes.push(n);
       });
@@ -735,6 +793,21 @@
     minDegreeInput.addEventListener('change', rerenderFromCurrent);
     document.querySelectorAll('.filter-type, .filter-cat').forEach(el => {
       el.addEventListener('change', rerenderFromCurrent);
+    });
+    // Heaviest-N chips — toggle single-select.
+    document.querySelectorAll('.top-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        topSpec = btn.getAttribute('data-top') || '';
+        document.querySelectorAll('.top-chip').forEach(b => {
+          const active = b.getAttribute('data-top') === topSpec;
+          b.classList.toggle('bg-blue-700', active);
+          b.classList.toggle('text-white', active);
+          b.classList.toggle('border-blue-700', active);
+          b.classList.toggle('border-gray-300', !active);
+          b.classList.toggle('dark:border-gray-600', !active);
+        });
+        rerenderFromCurrent();
+      });
     });
     clearFocusBtn.addEventListener('click', back);
 

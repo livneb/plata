@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.094 — 2026-05-26
+- **Graph: "heaviest-N" focus chips.** New chip row beneath the show/category filters: `🌍 top 5 countries`, `👤 top 5 people`, `🏢 top 5 companies`, `📰 top 5 events`, `🏷️ top 5 / cat` (top 5 events per category), `⭐ top 10 overall`. Picks the highest-degree nodes of that type (plus their immediate neighbours so the seeds aren't isolated) and hides the rest. Click `off` to clear.
+- **How "weight" is computed today** (visible inline next to the chips): `weight = edge count` — same metric driving node size + layout repulsion + the min-connections slider. **Nothing else** feeds in yet (no sentiment, no recency, no centrality). Picked degree so the chips agree visually with the sizing.
+- **What to test:** open `/graph/` → click `🌍 top 5 countries` → only the 5 most-connected countries + their immediate events/people/entities render. Click `🏷️ top 5 / cat` → 5 most-connected events per category (so 7 categories × 5 = 35 events max) — useful for seeing the dominant narrative in each lane.
+
 ## 2.24.093 — 2026-05-26
 - **Three ways to restart halted scraper sources.**
   - **▶ on each card** — halted source cards in the Sleeping lane now show a green ▶ instead of ✕. One click resumes that source.
