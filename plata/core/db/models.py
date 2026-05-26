@@ -273,3 +273,41 @@ class ApiCredential(Base):
         DateTime(timezone=True), server_default=func.now(),
     )
     updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class Proposal(Base):
+    """Every trade proposal the strategist ever published — including ones
+    that got rejected by risk, dropped at HITL, or successfully executed.
+
+    State transitions:
+        published  → risk_manager picks it up
+                  → rejected | pending_hitl | approved
+        pending_hitl → hitl_approved | hitl_rejected | hitl_timeout
+        approved   → executed | failed_execution
+        manual_override → executed | failed_execution   (clone-and-edit path)
+    """
+    __tablename__ = "proposals"
+
+    proposal_ulid: Mapped[str] = mapped_column(String(26), primary_key=True)
+    triggering_event_ulid: Mapped[str | None] = mapped_column(String(26), nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))
+    conviction: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    suggested_sl_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 6), nullable=True)
+    suggested_tp_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 6), nullable=True)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    milestones: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    analogs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    state: Mapped[str] = mapped_column(String(32), index=True, default="published")
+    # Free-text reason filled in for every non-terminal transition.
+    state_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    trade_ulid: Mapped[str | None] = mapped_column(String(26), nullable=True, index=True)
+    # Who acted last on this proposal (system | user:<email> | hitl:<email> | risk_manager | strategist)
+    last_actor: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    extras: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )

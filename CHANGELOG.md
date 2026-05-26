@@ -2,6 +2,20 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.081 — 2026-05-26
+- **Proposals are now first-class Postgres rows** — every TradeProposal the strategist publishes is mirrored into a new `proposals` table (auto-created on dashboard startup) and its state evolves through the pipeline: `published → rejected | pending_hitl | hitl_(approved/rejected/timeout) | approved → executed | failed_execution | manual_override`. Survives Railway restarts (Redis streams are bounded; this isn't).
+- **Proposals page rebuilt** (`/proposals/`). Was: pending-HITL only. Now:
+  - **Filter chips** for every state, with live counts (`Published 12 · Rejected 8 · Executed 3 · …`) + `?symbol=NVDA` filter.
+  - **One row per proposal**: created-at, symbol, side, conviction, state badge with icon + reason ("`cooldown:BTCUSDT last 12m ago, min 30`", "`sized $1,250 (1% of $125k Bybit equity)`", link to the resulting trade…).
+  - **Expandable detail** per row: full strategist reasoning, the 8 KNN analogs with similarity scores + their historical price-impact, predicted milestones, risk snapshot JSON.
+  - **Clone &amp; edit form** on every row — pre-filled with the original values; tweak symbol / side / conviction / SL / TP / reasoning and **Re-submit**. Two modes: normal (back through risk_manager) or **bypass-risk** (publishes a sized order directly to the executor, audited as `manual_override`). The new proposal is itself recorded so you can see the chain (`source_proposal_ulid` in extras).
+- **Wired into agents:**
+  - Strategist: persists on publish.
+  - Risk manager: transitions to `rejected` (with reason), `pending_hitl`, `hitl_approved`/`hitl_rejected`, or `approved` (with sized notional + SL/TP in extras).
+  - Executor: marks `executed` and links the `trade_ulid` on success.
+- Sidebar entry renamed to **Proposals** (was Pending Proposals).
+- **What to test:** open `/proposals/` after a few new events have come in. Should see the full lifecycle visible per row. Click "Details ▾" on any row → see analog list + clone-edit form. Try a clone-edit re-submit on a rejected proposal with `bypass_risk` checked → a new row appears with state `Manual` and (within a few seconds) `Executed` linking to a new trade.
+
 ## 2.24.080 — 2026-05-26
 - **Header redesign — KPIs + account dropdown + breadcrumbs.**
   - **3 live KPIs** in the topbar (polled every 10s from new `/api/header_stats`):

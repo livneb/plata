@@ -193,5 +193,11 @@ class Strategist(BaseAgent):
         except Exception:  # noqa: BLE001
             pass
         await publish(Streams.TRADING_PROPOSALS, proposal)
+        # Persist to Postgres so the proposals page can show the full lifecycle.
+        try:
+            from plata.core.proposals import record_published
+            await record_published(proposal)
+        except Exception:  # noqa: BLE001
+            pass
         self.log.info("proposal_published", symbol=proposal.symbol, side=proposal.side,
                        milestones=len(milestones))

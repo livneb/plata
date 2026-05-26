@@ -77,10 +77,18 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("dashboard").warning("historian_resume_skipped: %s", exc)
-    # Make sure the api_credentials table exists; warm up the credential cache.
+    # Make sure all auto-created tables exist (api_credentials, proposals).
     try:
         from plata.config import credentials as _creds
         await _creds.ensure_table()
+        # Proposals table (replaces the Redis-only persistence)
+        try:
+            from plata.core.db import Proposal, get_engine
+            engine = get_engine()
+            async with engine.begin() as conn:
+                await conn.run_sync(lambda c: Proposal.__table__.create(c, checkfirst=True))
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("proposals_table_create_failed", error=str(exc)[:160])
         for p in ("openrouter", "voyage", "bybit_key", "bybit_secret",
                    "alpaca_key", "alpaca_secret", "telegram",
                    "langfuse_public", "langfuse_secret"):

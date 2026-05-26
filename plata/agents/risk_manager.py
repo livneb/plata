@@ -221,14 +221,46 @@ class RiskManager(BaseAgent):
                 proposal=proposal.model_dump(mode="json"),
                 reason=f"notional ${notional_usd:.2f} > auto_approve ${threshold}",
             )
+            try:
+                from plata.core.proposals import update_state
+                await update_state(
+                    proposal.ulid, state="pending_hitl",
+                    reason=f"notional ${notional_usd:.2f} > auto_approve ${threshold}",
+                    actor=self.name,
+                )
+            except Exception:  # noqa: BLE001
+                pass
             approved = await self._await_approval(proposal.ulid)
             decision = decision.model_copy(update={"approved": approved})
+            try:
+                from plata.core.proposals import update_state
+                await update_state(
+                    proposal.ulid,
+                    state="hitl_approved" if approved else "hitl_rejected",
+                    actor="hitl",
+                )
+            except Exception:  # noqa: BLE001
+                pass
             if not approved:
                 await publish(Streams.RISK_DECISIONS, decision)
                 return
 
         await publish(Streams.RISK_DECISIONS, decision)
         await publish(Streams.APPROVED_TRADES, decision)
+        try:
+            from plata.core.proposals import update_state
+            await update_state(
+                proposal.ulid, state="approved",
+                reason=f"sized ${notional_usd:.2f} ({qty} @ ${ticker})", actor=self.name,
+                extras={
+                    "final_qty": str(qty), "final_notional_usd": str(notional_usd),
+                    "final_sl_price": str(sl_price) if sl_price else None,
+                    "final_tp_price": str(tp_price) if tp_price else None,
+                    "equity": str(equity) if equity else None,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _await_approval(self, proposal_ulid: str, timeout_sec: int = 1800) -> bool:
         channel = Channels.approval(proposal_ulid)
@@ -248,6 +280,11 @@ class RiskManager(BaseAgent):
             rejection_reason=reason,
         )
         await publish(Streams.RISK_DECISIONS, decision)
+        try:
+            from plata.core.proposals import update_state
+            await update_state(proposal.ulid, state="rejected", reason=reason, actor=self.name)
+        except Exception:  # noqa: BLE001
+            pass
         await self.error_reporter.capture(
             agent=self.name, severity="INFO", error_type="ProposalRejected",
             message=reason,

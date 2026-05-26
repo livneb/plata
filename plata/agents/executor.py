@@ -134,6 +134,15 @@ class Executor(BaseAgent):
             ))
 
         await publish(Streams.EXECUTED_TRADES, executed)
+        try:
+            from plata.core.proposals import update_state
+            await update_state(
+                getattr(decision, "proposal_ulid", "") or "",
+                state="executed", trade_ulid=trade_ulid, actor=self.name,
+                reason=f"opened {symbol} {side} @ ${entry_price}",
+            )
+        except Exception:  # noqa: BLE001
+            pass
         self.log.info("trade_executed", trade_ulid=trade_ulid, mode=str(mode), symbol=symbol)
         # Push to the dashboard SSE pipe for real-time UI updates.
         try:

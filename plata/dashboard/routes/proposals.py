@@ -1,26 +1,167 @@
-"""HITL proposals — Flowbite Table + approve/reject Modal."""
+"""Proposals — full lifecycle list (published / pending HITL / rejected /
+approved / executed / dropped) with expandable detail and a
+clone-and-edit form that re-submits a manual-override proposal to the
+executor."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from typing import Any
 
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+
+from plata.core.proposals import get as proposal_get, list_recent
 from plata.dashboard import templates
 from plata.hitl.approval_store import list_pending, resolve
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
 
+STATE_META: dict[str, dict[str, str]] = {
+    "published":        {"label": "Published",     "color": "bg-blue-100 text-blue-800",     "icon": "📨"},
+    "rejected":         {"label": "Rejected",      "color": "bg-red-100 text-red-800",       "icon": "🛡️"},
+    "pending_hitl":     {"label": "Pending HITL",  "color": "bg-amber-100 text-amber-800",   "icon": "⏳"},
+    "hitl_approved":    {"label": "HITL approved", "color": "bg-emerald-100 text-emerald-800","icon": "👤"},
+    "hitl_rejected":    {"label": "HITL rejected", "color": "bg-red-100 text-red-800",       "icon": "👤"},
+    "hitl_timeout":     {"label": "HITL timeout",  "color": "bg-gray-200 text-gray-700",     "icon": "⌛"},
+    "approved":         {"label": "Approved",      "color": "bg-emerald-100 text-emerald-800","icon": "✅"},
+    "executed":         {"label": "Executed",      "color": "bg-green-100 text-green-800",   "icon": "📈"},
+    "failed_execution": {"label": "Exec failed",   "color": "bg-red-100 text-red-800",       "icon": "💥"},
+    "manual_override":  {"label": "Manual",        "color": "bg-purple-100 text-purple-800", "icon": "✋"},
+}
+
+
+def _row(p) -> dict[str, Any]:
+    meta = STATE_META.get(p.state, {"label": p.state, "color": "bg-gray-200 text-gray-700", "icon": "?"})
+    return {
+        "ulid": p.proposal_ulid,
+        "symbol": p.symbol,
+        "side": p.side,
+        "conviction": float(p.conviction) if p.conviction is not None else None,
+        "state": p.state,
+        "state_label": meta["label"],
+        "state_color": meta["color"],
+        "state_icon": meta["icon"],
+        "state_reason": p.state_reason,
+        "trade_ulid": p.trade_ulid,
+        "event_ulid": p.triggering_event_ulid,
+        "reasoning": p.reasoning or "",
+        "milestones": p.milestones or [],
+        "analogs": p.analogs or [],
+        "extras": p.extras or {},
+        "last_actor": p.last_actor,
+        "created_at": p.created_at,
+        "updated_at": p.updated_at,
+        "sl_pct": float(p.suggested_sl_pct) if p.suggested_sl_pct is not None else None,
+        "tp_pct": float(p.suggested_tp_pct) if p.suggested_tp_pct is not None else None,
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    pending = await list_pending()
+async def index(request: Request, state: str | None = None, symbol: str | None = None):
+    rows_db = await list_recent(state=state, symbol=symbol, limit=200)
+    rows = [_row(r) for r in rows_db]
+    # Counts per state for the filter chips.
+    all_rows = rows_db if (state or symbol) else rows_db
+    counts: dict[str, int] = {}
+    for r in (await list_recent(limit=500)):
+        counts[r.state] = counts.get(r.state, 0) + 1
+    # Legacy pending list (HITL only) — for back-compat banner if any rows
+    # exist that didn't get mirrored into Postgres yet.
+    legacy_pending = await list_pending()
     return templates.TemplateResponse(
-        request, "pages/proposals.html", {"pending": pending, "active": "proposals"}
+        request,
+        "pages/proposals.html",
+        {
+            "active": "proposals",
+            "rows": rows,
+            "counts": counts,
+            "state_meta": STATE_META,
+            "active_state": state,
+            "active_symbol": symbol,
+            "legacy_pending": legacy_pending,
+        },
     )
+
+
+@router.get("/{proposal_ulid}/json")
+async def proposal_json(proposal_ulid: str):
+    p = await proposal_get(proposal_ulid)
+    if not p:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    return JSONResponse(_row(p))
 
 
 @router.post("/{proposal_ulid}/decide")
 async def decide(proposal_ulid: str, action: str = Form(...)):
+    """HITL approve / reject (back-compat with the original endpoint)."""
     await resolve(
         proposal_ulid, approved=(action == "approve"), actor="dashboard"
     )
     return RedirectResponse(url="/proposals/", status_code=303)
+
+
+@router.post("/{proposal_ulid}/resubmit")
+async def resubmit(
+    request: Request,
+    proposal_ulid: str,
+    symbol: str = Form(...),
+    side: str = Form(...),
+    conviction: float = Form(...),
+    sl_pct: float | None = Form(None),
+    tp_pct: float | None = Form(None),
+    reasoning: str = Form(""),
+    bypass_risk: bool = Form(False),
+):
+    """Clone-and-edit: take the values the user typed and emit a NEW proposal.
+    If `bypass_risk` is set, the new proposal is published straight to the
+    approved-trades stream with a manual-override flag (no risk gates applied).
+    Otherwise it goes through the normal pipeline (risk → executor)."""
+    from plata.core.bus import Streams, publish
+    from plata.core.proposals import record_published, update_state
+    from plata.core.schemas import Side, TradeProposal
+    from plata.dashboard.auth import current_user_email
+
+    src = await proposal_get(proposal_ulid)
+    if not src:
+        return JSONResponse({"error": "source_not_found"}, status_code=404)
+
+    actor = current_user_email(request) or "manual"
+
+    cloned = TradeProposal(
+        triggering_event_ulid=src.triggering_event_ulid,
+        symbol=symbol.upper().strip(),
+        side=Side(side.lower().strip()),
+        conviction=max(0.0, min(1.0, float(conviction))),
+        reasoning=(reasoning or src.reasoning or "(manual override)")[:1500],
+        similar_events=[],
+        milestones=[],
+        suggested_sl_pct=sl_pct if sl_pct is not None else None,
+        suggested_tp_pct=tp_pct if tp_pct is not None else None,
+    )
+
+    if bypass_risk:
+        # Skip risk_manager — push straight to approved_trades for the executor.
+        # We synthesize a minimal RiskDecision so the executor can consume it.
+        from decimal import Decimal
+        from plata.core.schemas import RiskDecision
+        # Default 1% size with no SL/TP — user knows what they're doing if they bypass.
+        decision = RiskDecision(
+            proposal_ulid=cloned.ulid, approved=True, requires_hitl=False,
+            final_qty=Decimal("0"), final_notional_usd=Decimal("100"),
+            final_sl_price=None, final_tp_price=None,
+            risk_snapshot={"manual_override": True, "actor": actor},
+        )
+        await record_published(cloned)
+        await update_state(cloned.ulid, state="manual_override",
+                            reason=f"cloned from {proposal_ulid}", actor=f"user:{actor}",
+                            extras={"source_proposal_ulid": proposal_ulid})
+        await publish(Streams.APPROVED_TRADES, decision)
+    else:
+        await publish(Streams.TRADING_PROPOSALS, cloned)
+        await record_published(cloned)
+        await update_state(cloned.ulid, state="published",
+                            reason=f"manual re-submit of {proposal_ulid}",
+                            actor=f"user:{actor}",
+                            extras={"source_proposal_ulid": proposal_ulid})
+
+    return RedirectResponse(url=f"/proposals/?symbol={cloned.symbol}", status_code=303)

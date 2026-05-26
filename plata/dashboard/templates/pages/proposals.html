@@ -1,43 +1,189 @@
 {% extends "base.html" %}
-{% block title %}Pending Proposals – Plata{% endblock %}
+{% block title %}Proposals · Plata{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">Pending HITL Proposals</h1>
-<div class="relative overflow-x-auto shadow-md sm:rounded-lg">
-  <table class="w-full text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400">
+<div class="flex items-center justify-between mb-3">
+  <div>
+    <h1 class="text-2xl font-semibold">Proposals</h1>
+    <p class="text-xs text-gray-500 mt-1">
+      Every trade idea the strategist produced, with its drop reason / risk decision / execution status.
+      {% if active_state %}<span class="ml-2">Filter: <b>{{ state_meta.get(active_state, {}).get('label', active_state) }}</b> · <a href="/proposals/" class="text-blue-500 hover:underline">clear</a></span>{% endif %}
+      {% if active_symbol %}<span class="ml-2">Symbol: <b>{{ active_symbol }}</b> · <a href="/proposals/" class="text-blue-500 hover:underline">clear</a></span>{% endif %}
+    </p>
+  </div>
+</div>
+
+<!-- State filter chips -->
+<div class="flex flex-wrap gap-2 mb-3">
+  <a href="/proposals/" class="px-2.5 py-1 rounded text-xs border {{ 'bg-blue-700 text-white border-blue-700' if not active_state else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+    All <span class="text-[10px] opacity-70">· {{ counts.values() | sum }}</span>
+  </a>
+  {% for key, meta in state_meta.items() %}
+    {% if counts.get(key, 0) > 0 %}
+    <a href="/proposals/?state={{ key }}"
+       class="px-2.5 py-1 rounded text-xs border {{ 'bg-blue-700 text-white border-blue-700' if active_state == key else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+      {{ meta.icon }} {{ meta.label }} <span class="text-[10px] opacity-70">· {{ counts.get(key, 0) }}</span>
+    </a>
+    {% endif %}
+  {% endfor %}
+</div>
+
+<div class="relative overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+  <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
     <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
       <tr>
-        <th scope="col" class="px-6 py-3">Created</th>
-        <th scope="col" class="px-6 py-3">Proposal</th>
-        <th scope="col" class="px-6 py-3">Reason</th>
-        <th scope="col" class="px-6 py-3">Action</th>
+        <th class="px-4 py-3">Created</th>
+        <th class="px-4 py-3">Symbol</th>
+        <th class="px-4 py-3">Side</th>
+        <th class="px-4 py-3">Conv.</th>
+        <th class="px-4 py-3">State</th>
+        <th class="px-4 py-3">Reason / outcome</th>
+        <th class="px-4 py-3 text-right">Actions</th>
       </tr>
     </thead>
     <tbody>
-      {% for p in pending %}
-      <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700">
-        <td class="px-6 py-4">{{ p.created_at }}</td>
-        <td class="px-6 py-4">
-          <details>
-            <summary class="cursor-pointer font-mono text-xs">{{ p.proposal_ulid }}</summary>
-            <pre class="text-xs whitespace-pre-wrap mt-2">{{ p.proposal | tojson(indent=2) }}</pre>
-          </details>
+      {% for p in rows %}
+      <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+        <td class="px-4 py-3 text-xs whitespace-nowrap">
+          <time data-utc="{{ p.created_at.isoformat() }}">{{ p.created_at.strftime('%m-%d %H:%M') }}</time>
         </td>
-        <td class="px-6 py-4">{{ p.reason }}</td>
-        <td class="px-6 py-4 flex gap-2">
-          <form method="post" action="/proposals/{{ p.proposal_ulid }}/decide">
+        <td class="px-4 py-3">
+          <a href="/proposals/?symbol={{ p.symbol }}" class="font-mono font-semibold hover:text-blue-500">{{ p.symbol }}</a>
+        </td>
+        <td class="px-4 py-3">
+          {% if p.side == 'long' %}<span class="text-green-500">↑ long</span>
+          {% else %}<span class="text-red-500">↓ short</span>{% endif %}
+        </td>
+        <td class="px-4 py-3 font-mono text-xs">{{ '%.2f' % p.conviction if p.conviction is not none else '—' }}</td>
+        <td class="px-4 py-3">
+          <span class="text-[10px] font-medium px-2 py-0.5 rounded {{ p.state_color }}">{{ p.state_icon }} {{ p.state_label }}</span>
+        </td>
+        <td class="px-4 py-3 text-xs">
+          {% if p.state_reason %}<span class="font-mono">{{ p.state_reason }}</span>{% endif %}
+          {% if p.trade_ulid %}
+            <a href="/trades/{{ p.trade_ulid }}" class="ml-2 text-blue-500 hover:underline">→ trade</a>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right whitespace-nowrap">
+          <button type="button" class="text-xs text-blue-500 hover:underline detail-btn"
+                  data-ulid="{{ p.ulid }}">Details ▾</button>
+          {% if p.state == 'pending_hitl' %}
+          <form method="post" action="/proposals/{{ p.ulid }}/decide" class="inline ml-2">
             <input type="hidden" name="action" value="approve" />
-            <button class="text-white bg-green-700 hover:bg-green-800 font-medium rounded-lg text-xs px-3 py-1.5">✅ Approve</button>
+            <button class="text-xs text-green-600 hover:underline">✅</button>
           </form>
-          <form method="post" action="/proposals/{{ p.proposal_ulid }}/decide">
+          <form method="post" action="/proposals/{{ p.ulid }}/decide" class="inline">
             <input type="hidden" name="action" value="reject" />
-            <button class="text-white bg-red-700 hover:bg-red-800 font-medium rounded-lg text-xs px-3 py-1.5">❌ Reject</button>
+            <button class="text-xs text-red-600 hover:underline">❌</button>
           </form>
+          {% endif %}
+        </td>
+      </tr>
+      <tr id="detail-{{ p.ulid }}" class="hidden border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+        <td colspan="7" class="px-6 py-4">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+            <!-- Reasoning + analogs -->
+            <div>
+              <h3 class="text-[10px] uppercase text-gray-500 mb-1">Strategist reasoning</h3>
+              <p class="whitespace-pre-wrap leading-relaxed">{{ p.reasoning or '—' }}</p>
+              {% if p.analogs %}
+              <h3 class="text-[10px] uppercase text-gray-500 mt-3 mb-1">{{ p.analogs | length }} analog events (KNN)</h3>
+              <ul class="space-y-1">
+                {% for a in p.analogs %}
+                <li class="flex items-start gap-2">
+                  <span class="font-mono text-[10px] text-gray-400 mt-0.5">{{ '%.2f' % (a.similarity or 0) }}</span>
+                  <span class="flex-1">
+                    {{ a.summary or a.event_ulid or '—' }}
+                    {% if a.price_impact %}<span class="text-[10px] text-gray-400 ml-1">· {{ a.price_impact | tojson }}</span>{% endif %}
+                  </span>
+                </li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+              {% if p.milestones %}
+              <h3 class="text-[10px] uppercase text-gray-500 mt-3 mb-1">Predicted milestones</h3>
+              <ul class="space-y-0.5">
+                {% for m in p.milestones %}
+                <li>+{{ m.eta_minutes }}m → {{ '%.2f' % (m.expected_pct_move or 0) }}% (conf {{ '%.2f' % (m.confidence or 0) }}){% if m.rationale %} · <span class="text-gray-400">{{ m.rationale }}</span>{% endif %}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+              {% if p.extras %}
+              <h3 class="text-[10px] uppercase text-gray-500 mt-3 mb-1">Risk snapshot</h3>
+              <pre class="text-[10px] bg-white dark:bg-gray-800 rounded p-2 border border-gray-200 dark:border-gray-700 overflow-x-auto">{{ p.extras | tojson(indent=2) }}</pre>
+              {% endif %}
+            </div>
+            <!-- Clone & edit -->
+            <div>
+              <h3 class="text-[10px] uppercase text-gray-500 mb-1">Clone &amp; edit — re-submit to executor</h3>
+              <form method="post" action="/proposals/{{ p.ulid }}/resubmit" class="space-y-2">
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="block">
+                    <span class="text-[10px] text-gray-500">Symbol</span>
+                    <input name="symbol" value="{{ p.symbol }}" required
+                           class="w-full p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                  </label>
+                  <label class="block">
+                    <span class="text-[10px] text-gray-500">Side</span>
+                    <select name="side" class="w-full p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+                      <option value="long"  {% if p.side == 'long' %}selected{% endif %}>long</option>
+                      <option value="short" {% if p.side == 'short' %}selected{% endif %}>short</option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="text-[10px] text-gray-500">Conviction (0–1)</span>
+                    <input name="conviction" type="number" step="0.01" min="0" max="1"
+                           value="{{ '%.2f' % p.conviction if p.conviction is not none else '0.70' }}" required
+                           class="w-full p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                  </label>
+                  <label class="block">
+                    <span class="text-[10px] text-gray-500">SL % / TP %</span>
+                    <div class="flex gap-1">
+                      <input name="sl_pct" type="number" step="0.001" min="0" max="0.5" placeholder="0.02"
+                             value="{{ '%.3f' % p.sl_pct if p.sl_pct else '' }}"
+                             class="w-1/2 p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                      <input name="tp_pct" type="number" step="0.001" min="0" max="1" placeholder="0.05"
+                             value="{{ '%.3f' % p.tp_pct if p.tp_pct else '' }}"
+                             class="w-1/2 p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                    </div>
+                  </label>
+                </div>
+                <label class="block">
+                  <span class="text-[10px] text-gray-500">Reasoning (optional)</span>
+                  <textarea name="reasoning" rows="2"
+                            class="w-full p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">{{ p.reasoning or '' }}</textarea>
+                </label>
+                <label class="flex items-center gap-2 text-[11px]">
+                  <input type="checkbox" name="bypass_risk" value="true" />
+                  <span>Bypass risk gates (publish straight to executor as manual override)</span>
+                </label>
+                <button type="submit" class="px-3 py-1.5 text-xs rounded text-white bg-purple-700 hover:bg-purple-800">
+                  ✋ Re-submit
+                </button>
+              </form>
+              <p class="text-[10px] text-gray-500 mt-2">
+                Without bypass: goes through risk_manager again — useful if you just want to tweak conviction or symbol.
+                With bypass: emits a sized order directly to the executor (audited as
+                <span class="font-mono">manual_override</span>; uses default $100 notional).
+              </p>
+            </div>
+          </div>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="px-6 py-12 text-center text-gray-400">No pending proposals.</td></tr>
+      <tr><td colspan="7" class="px-6 py-12 text-center text-gray-400">No proposals yet for this filter.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+
+<script>
+  // Expand/collapse detail row.
+  document.querySelectorAll('.detail-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ulid = btn.getAttribute('data-ulid');
+      const row = document.getElementById('detail-' + ulid);
+      if (row) row.classList.toggle('hidden');
+    });
+  });
+</script>
 {% endblock %}
