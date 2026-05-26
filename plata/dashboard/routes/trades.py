@@ -58,6 +58,58 @@ async def _find_audit(target_ulid: str) -> list[AuditLog]:
     return rows
 
 
+@router.get("/watch", response_class=HTMLResponse)
+async def watch_list(request: Request):
+    """Per-symbol price watch list — one row per distinct symbol that has an
+    open position, refreshed every 5 min by the trade_sampler loop, regardless
+    of each trade's milestone cadence."""
+    from datetime import datetime as _dt, timezone as _tz
+    from plata.execution.router import venue_for
+    redis = get_redis()
+    async with session_scope() as session:
+        rows = (await session.execute(
+            select(TradeLedger).where(TradeLedger.exit_price.is_(None))
+        )).scalars().all()
+    by_symbol: dict[str, dict[str, Any]] = {}
+    for t in rows:
+        s = by_symbol.setdefault(t.symbol, {
+            "symbol": t.symbol, "venue": venue_for(t.symbol),
+            "trades": [], "net_qty_long": 0.0, "net_qty_short": 0.0,
+        })
+        s["trades"].append({
+            "ulid": t.trade_ulid, "side": t.side, "qty": float(t.qty or 0),
+            "entry": float(t.entry_price or 0), "opened_at": t.opened_at,
+        })
+        if (t.side or "").lower() == "long":
+            s["net_qty_long"] += float(t.qty or 0)
+        else:
+            s["net_qty_short"] += float(t.qty or 0)
+    for s in by_symbol.values():
+        latest = await redis.hgetall(f"symbol:latest:{s['symbol']}")
+        price = float(latest.get("price") or 0) or None
+        ts_iso = latest.get("ts")
+        age_sec = None
+        if ts_iso:
+            try:
+                age_sec = (_dt.now(_tz.utc) - _dt.fromisoformat(ts_iso)).total_seconds()
+            except Exception:  # noqa: BLE001
+                pass
+        unrealized = 0.0
+        for tr in s["trades"]:
+            if price and tr["entry"]:
+                sign = 1.0 if (tr["side"] or "").lower() == "long" else -1.0
+                unrealized += sign * (price - tr["entry"]) * tr["qty"]
+        s["price"] = price
+        s["ts"] = ts_iso
+        s["age_sec"] = int(age_sec) if age_sec is not None else None
+        s["unrealized"] = round(unrealized, 2)
+    items = sorted(by_symbol.values(), key=lambda x: -abs(x["unrealized"]))
+    return templates.TemplateResponse(
+        request, "pages/positions_watch.html",
+        {"active": "trades", "items": items, "cadence_sec": 5 * 60},
+    )
+
+
 @router.get("/{trade_ulid}/samples")
 async def samples(trade_ulid: str):
     """Return recorded price samples + a diagnostic block explaining

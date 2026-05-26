@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Symbol watch · Plata{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-3">
+  <div>
+    <h1 class="text-2xl font-semibold">Symbol watch</h1>
+    <p class="text-xs text-gray-500 mt-1">
+      Every distinct symbol with an open position is polled every <b>{{ cadence_sec // 60 }} min</b>,
+      independent of each trade's milestone cadence. Prices land in
+      <span class="font-mono">symbol:latest:&lt;symbol&gt;</span> and feed the topbar
+      <i>Open · unrealized</i> KPI.
+      <a href="/trades/" class="text-blue-500 hover:underline ml-1">← back to positions</a>
+    </p>
+  </div>
+</div>
+
+<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+  <table class="w-full text-sm text-left">
+    <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+      <tr>
+        <th class="px-4 py-3">Symbol</th>
+        <th class="px-4 py-3">Venue</th>
+        <th class="px-4 py-3 text-right">Last price</th>
+        <th class="px-4 py-3 text-right">Age</th>
+        <th class="px-4 py-3 text-right">Net qty (L / S)</th>
+        <th class="px-4 py-3 text-right">Open trades</th>
+        <th class="px-4 py-3 text-right">Unrealized</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in items %}
+      <tr class="border-t border-gray-100 dark:border-gray-700">
+        <td class="px-4 py-3 font-mono font-semibold">{{ s.symbol }}</td>
+        <td class="px-4 py-3 text-xs">
+          {% if s.venue == 'alpaca' %}<span class="bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded text-[10px]">📈 alpaca</span>
+          {% else %}<span class="bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded text-[10px]">🪙 bybit</span>{% endif %}
+        </td>
+        <td class="px-4 py-3 font-mono text-right">{{ '%.4f' % s.price if s.price else '—' }}</td>
+        <td class="px-4 py-3 text-right text-xs {% if s.age_sec is none %}text-gray-400{% elif s.age_sec > cadence_sec * 2 %}text-red-500{% elif s.age_sec > cadence_sec %}text-yellow-500{% else %}text-gray-500{% endif %}">
+          {% if s.age_sec is none %}—
+          {% elif s.age_sec < 60 %}{{ s.age_sec }}s
+          {% elif s.age_sec < 3600 %}{{ s.age_sec // 60 }}m
+          {% else %}{{ s.age_sec // 3600 }}h{% endif %}
+        </td>
+        <td class="px-4 py-3 text-right font-mono text-xs">
+          <span class="text-green-500">{{ '%.4f' % s.net_qty_long if s.net_qty_long else '·' }}</span>
+          /
+          <span class="text-red-500">{{ '%.4f' % s.net_qty_short if s.net_qty_short else '·' }}</span>
+        </td>
+        <td class="px-4 py-3 text-right">
+          <details class="text-xs">
+            <summary class="cursor-pointer">{{ s.trades | length }}</summary>
+            <ul class="mt-1 space-y-0.5">
+              {% for t in s.trades %}
+              <li>
+                <a href="/trades/{{ t.ulid }}" class="text-blue-500 hover:underline">{{ t.ulid[:8] }}</a>
+                <span class="{% if t.side == 'long' %}text-green-500{% else %}text-red-500{% endif %}">{{ t.side }}</span>
+                {{ '%.4f' % t.qty }} @ {{ '%.4f' % t.entry }}
+              </li>
+              {% endfor %}
+            </ul>
+          </details>
+        </td>
+        <td class="px-4 py-3 text-right font-mono font-semibold {% if s.unrealized > 0 %}text-green-500{% elif s.unrealized < 0 %}text-red-500{% else %}text-gray-400{% endif %}">
+          {% if s.unrealized > 0 %}+{% endif %}${{ '%.2f' % s.unrealized }}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="px-6 py-12 text-center text-gray-400">No open positions to watch.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="text-[10px] text-gray-500 mt-2">
+  Auto-refreshes when you reload. Yellow age = stale (>{{ cadence_sec // 60 }}m); red = >2×.
+</p>
+<script>
+  // Background refresh every 30s so the page stays useful while open.
+  setTimeout(() => location.reload(), 30000);
+</script>
+{% endblock %}

@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.084 — 2026-05-26
+- **"Trades" → "Positions"** in the UI (URL stays at `/trades/` for back-compat with bookmarks / Telegram links). Sidebar icon flipped to 💼.
+- **Per-symbol watch list — decoupled from trade milestones.** Every distinct symbol that has an open position is now polled every **5 minutes** by the sampler, regardless of how the per-trade cadence behaves (which can be as long as a few hours for week-out milestones). Result lives in `symbol:latest:<symbol>` Redis hash. The topbar `Open · unrealized` KPI prefers this over the per-trade cache, so even slow-cadence trades show fresh PnL.
+- **New `/trades/watch` page** — one row per symbol with: venue badge (🪙 bybit / 📈 alpaca), last price, age (gray < 5m, yellow 5–10m, red > 10m), net long/short qty, list of open trade ULIDs at that symbol, summed unrealized PnL. Auto-refreshes every 30 s. Linked from `/trades/`.
+- **What to test:** open a trade on any symbol → wait 5 min → `/trades/watch` shows the symbol with a fresh age. Topbar `Open · unrealized` updates within a minute (sampler floor) or 5 min (symbol-watch worst case).
+
 ## 2.24.083 — 2026-05-26
 - **Agent activity now durable in Postgres.** Previously the Done lane (`/workflow/`) was the only place agent actions lived, and it was a 50-entry Redis ring buffer per agent — chatty agents like `graph_ingestion` would overwrite their tail within an hour. Now every action is mirrored into a new `agent_activity_log` Postgres table.
   - **Redis stays small and ephemeral** (50 entries per agent) — fast for the live Done lane, no memory bloat.

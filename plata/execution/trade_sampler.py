@@ -38,6 +38,34 @@ _log = get_logger("trade_sampler")
 
 MAX_SAMPLES_PER_TRADE = 720           # cap memory (e.g. 720×5s = 1h, 720×1min = 12h, etc.)
 PROPOSAL_CACHE_TTL_SEC = 600          # remember the longest-milestone lookup per trade
+SYMBOL_WATCH_CADENCE_SEC = 5 * 60     # refresh every open-position symbol every 5 min
+_SYMBOL_WATCH_LAST: dict[str, float] = {}  # symbol → monotonic last-fetched ts
+
+
+async def _refresh_symbol_watch(symbols: list[str], now: float) -> None:
+    """Per-symbol fixed-cadence watcher. One fetch per distinct open-position
+    symbol every SYMBOL_WATCH_CADENCE_SEC, independent of per-trade cadence.
+    Result stored in Redis hash `symbol:latest:<symbol>` for the UI."""
+    redis = get_redis()
+    from plata.execution.router import venue_for
+    for sym in symbols:
+        last = _SYMBOL_WATCH_LAST.get(sym, 0)
+        if now - last < SYMBOL_WATCH_CADENCE_SEC:
+            continue
+        try:
+            price = await _latest_price(sym)
+            if price is None or price <= 0:
+                _SYMBOL_WATCH_LAST[sym] = now  # don't hammer a failing symbol
+                continue
+            await redis.hset(f"symbol:latest:{sym}", mapping={
+                "price": price,
+                "venue": venue_for(sym),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+            await redis.expire(f"symbol:latest:{sym}", 24 * 60 * 60)
+            _SYMBOL_WATCH_LAST[sym] = now
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("symbol_watch_failed", symbol=sym, error=str(exc)[:160])
 
 
 def _cadence_seconds(longest_eta_minutes: int) -> int:
@@ -170,6 +198,13 @@ async def run_sampler_loop() -> None:
                 "halted": "False",
             })
             now = time.monotonic()
+            # Refresh the per-symbol watch-list: every distinct symbol with an
+            # open position gets a fresh price every SYMBOL_WATCH_CADENCE_SEC,
+            # independent of per-trade milestone cadence. Result lands in
+            # `symbol:latest:<symbol>` so the dashboard can compute unrealized
+            # PnL even for trades whose own sampler cadence is much slower.
+            distinct_symbols = sorted({t.symbol for t in rows if t.symbol})
+            await _refresh_symbol_watch(distinct_symbols, now)
             sampled_now: list[str] = []
             # Cache the latest price per symbol so N trades on the same symbol
             # = ONE Bybit fetch per tick, not N.

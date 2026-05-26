@@ -275,8 +275,14 @@ def create_app() -> FastAPI:
                 # Unrealized PnL: sum (latest_price - entry) * qty * side_sign
                 u = 0.0
                 for r in open_rows:
-                    latest = await redis.hgetall(f"trade:latest:{r.trade_ulid}")
-                    price = float(latest.get("price") or 0)
+                    # Prefer the per-symbol watch cache (refreshed every 5min
+                    # for every open-position symbol); fall back to the
+                    # per-trade sample if the symbol watcher hasn't run yet.
+                    sym_latest = await redis.hgetall(f"symbol:latest:{r.symbol}")
+                    price = float(sym_latest.get("price") or 0)
+                    if price <= 0:
+                        latest = await redis.hgetall(f"trade:latest:{r.trade_ulid}")
+                        price = float(latest.get("price") or 0)
                     entry = float(r.entry_price or 0)
                     qty = float(r.qty or 0)
                     if price <= 0 or entry <= 0 or qty <= 0:

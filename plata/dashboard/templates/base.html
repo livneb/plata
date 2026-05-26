@@ -71,7 +71,7 @@
       <div class="flex items-center gap-3">
         <!-- KPI strip — populated by /api/header_stats every 10s -->
         <div id="header-kpis" class="hidden sm:flex items-center gap-3 text-[11px] mr-2">
-          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Realized PnL — closed trades only, since 00:00 UTC. Open trades' mark-to-market shows under OPEN.">
+          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Realized PnL — closed trades only, since 00:00 UTC. Open positions' mark-to-market shows under OPEN.">
             <span class="text-[9px] uppercase text-gray-500">Realized today</span>
             <span id="kpi-pnl" class="font-mono font-semibold text-gray-400">—</span>
           </a>
@@ -157,7 +157,7 @@
         {'key': 'trading', 'label': 'Trading', 'icon': '💰',
          'children': [
           ('proposals', '/proposals/', 'Proposals', '🎯'),
-          ('trades', '/trades/', 'Trades', '💰'),
+          ('trades', '/trades/', 'Positions', '💼'),
         ]},
         {'key': 'diag', 'label': 'Diagnostics', 'icon': '🩺',
          'children': [
@@ -699,7 +699,7 @@
         graph:      ['Graph', '/graph/'],
         historian:  ['Historian seed', '/historian/'],
         proposals:  ['Proposals', '/proposals/'],
-        trades:     ['Trades', '/trades/'],
+        trades:     ['Positions', '/trades/'],
         errors:     ['Errors', '/errors/'],
         dlq:        ['Dead Letters', '/dlq/'],
         settings:   ['Settings', '/settings/'],

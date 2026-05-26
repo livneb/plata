@@ -1,7 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Trades – Plata{% endblock %}
+{% block title %}Positions · Plata{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">Trade Ledger</h1>
+<div class="flex items-center justify-between mb-3">
+  <h1 class="text-2xl font-semibold">Positions</h1>
+  <a href="/trades/watch" class="text-xs text-blue-500 hover:underline">📡 Symbol watch list →</a>
+</div>
 <div class="relative overflow-x-auto shadow-md sm:rounded-lg">
   <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
     <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
