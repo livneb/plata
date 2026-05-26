@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.077 — 2026-05-26
+- **Settings → Environment tab now reflects DB-stored credentials.** The Bybit / Alpaca status badges were only checking `settings.bybit_api_key` / `alpaca_api_key` (env-vars), so keys saved via the 🔑 API Keys tab still showed `NOT SET`. They now show `CONFIGURED` if **either** the env-var **or** the DB row is present (matches the actual runtime lookup order in `credentials.get()`).
+- Replaced the misleading footer line ("configured per Railway service") with a link to the API Keys tab.
+- **What to test:** save Bybit + Alpaca keys via the API Keys tab → switch to the Environment tab → both cards flip from `NOT SET` to `CONFIGURED · MAINNET` / `CONFIGURED · PAPER`.
+
 ## 2.24.076 — 2026-05-26
 - **🐛 Fix saving API keys from Settings → API Keys.** The upsert was crashing with `column "metadata_" of relation "api_credentials" does not exist`. The `ApiCredential` ORM model renames the Python attribute to `metadata_` (because `metadata` collides with SQLAlchemy's `Base.metadata`) but the actual Postgres column is still `metadata`. The `INSERT ... ON CONFLICT DO UPDATE SET` block was using the Python attribute name in its `set_` dict — `set_` takes raw column names. Now uses `"metadata"`.
 - **What to test:** Settings → API Keys → paste a new value into any row → Save → row updates with new last-4 suffix, no 500.
