@@ -60,8 +60,12 @@ async def _find_audit(target_ulid: str) -> list[AuditLog]:
 
 @router.get("/{trade_ulid}/samples")
 async def samples(trade_ulid: str):
-    """Return recorded price samples for an open trade (newest at end)."""
+    """Return recorded price samples + a diagnostic block explaining
+    *why* the sampler may not have written any (helps when the
+    actual-price line on the trade chart stays empty)."""
+    from datetime import datetime, timezone
     from fastapi.responses import JSONResponse
+
     redis = get_redis()
     raw = await redis.lrange(f"trade:samples:{trade_ulid}", 0, -1)
     out = []
@@ -70,7 +74,71 @@ async def samples(trade_ulid: str):
             out.append(json.loads(s))
         except Exception:  # noqa: BLE001
             pass
-    return JSONResponse({"count": len(out), "samples": out})
+
+    diag: dict = {}
+    try:
+        async with session_scope() as session:
+            trade = (await session.execute(
+                select(TradeLedger).where(TradeLedger.trade_ulid == trade_ulid)
+            )).scalar_one_or_none()
+        if trade is None:
+            diag["trade"] = "not_found"
+        else:
+            from plata.execution.router import venue_for
+            venue = venue_for(trade.symbol)
+            diag["symbol"] = trade.symbol
+            diag["venue"] = venue
+            diag["side"] = trade.side
+            diag["entry_price"] = float(trade.entry_price or 0)
+            diag["exit_price"] = float(trade.exit_price) if trade.exit_price is not None else None
+            diag["closed"] = trade.exit_price is not None
+            diag["opened_at"] = trade.opened_at.isoformat() if trade.opened_at else None
+
+            # Sampler heartbeat (set inside run_sampler_loop every tick)
+            hb = await redis.hgetall("agent_status:trade_sampler")
+            if hb:
+                last = hb.get("last_heartbeat")
+                age_sec = None
+                if last:
+                    try:
+                        age_sec = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+                    except Exception:  # noqa: BLE001
+                        pass
+                diag["sampler_heartbeat"] = {
+                    "last": last,
+                    "age_sec": int(age_sec) if age_sec is not None else None,
+                    "in_flight": hb.get("in_flight"),
+                    "halted": hb.get("halted"),
+                    "alive": (age_sec is not None and age_sec < 30),
+                }
+            else:
+                diag["sampler_heartbeat"] = None  # sampler has never run
+
+            # Cadence the loop *would* use for this trade
+            try:
+                from plata.execution.trade_sampler import _cadence_seconds, _longest_milestone_eta
+                longest = await _longest_milestone_eta(trade.proposal_id)
+                diag["longest_milestone_eta_minutes"] = longest
+                diag["cadence_sec"] = _cadence_seconds(longest)
+            except Exception as exc:  # noqa: BLE001
+                diag["cadence_lookup_error"] = str(exc)[:160]
+
+            # Live one-shot price probe — same path the sampler takes
+            try:
+                from plata.execution.trade_sampler import _latest_price
+                price = await _latest_price(trade.symbol)
+                diag["probe_price"] = price
+                if price is None:
+                    if venue == "alpaca":
+                        diag["probe_hint"] = "Alpaca returned None — Alpaca key/secret may be missing or symbol is unsupported."
+                    else:
+                        diag["probe_hint"] = "Bybit OHLCV returned None — Bybit credentials may be missing or symbol is delisted."
+            except Exception as exc:  # noqa: BLE001
+                diag["probe_error"] = str(exc)[:200]
+    except Exception as exc:  # noqa: BLE001
+        diag["diag_error"] = str(exc)[:200]
+
+    return JSONResponse({"count": len(out), "samples": out, "diag": diag})
 
 
 @router.get("/{trade_ulid}", response_class=HTMLResponse)

@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.074 — 2026-05-26
+- **`/trades/<ulid>/samples` is now self-diagnostic.** When the actual-price line is empty, hit this endpoint and the `diag` block tells you exactly why: sampler heartbeat age (sampler dead?), computed cadence for this trade, trade entry/exit price, venue routing (`bybit` or `alpaca`), and a one-shot live price probe — if the probe returns `null` you also get a hint pointing at missing Bybit/Alpaca credentials.
+- **What to test:** `GET /trades/<ulid>/samples` returns `{count, samples, diag:{venue, sampler_heartbeat:{age_sec, alive}, cadence_sec, probe_price, probe_hint?}}`. If `sampler_heartbeat.alive` is `false` your execution_vault deploy isn't running the sampler. If `probe_price` is null the venue credentials are missing.
+
 ## 2.24.073 — 2026-05-26
 - **Trade detail chart: diagnostic banner above the milestone chart.** When no live samples have been recorded yet, the chart now shows `⏳ No live price samples yet.` with an explanation (the sampler in `execution_vault` records one every 5s–6h depending on the longest milestone ETA; needs Bybit credentials for crypto, Alpaca for stocks) and a `View raw samples →` link to `/trades/<ulid>/samples`. Once samples arrive, the banner flips to `📈 N live price sample(s) recorded for this trade.` and stays in sync with the 15-second auto-refresh.
 - **Why your actual-price line was empty:** if the trade pre-dates the sampler, or `execution_vault` is missing the venue credential for that symbol, no samples land in `trade:samples:<ulid>` and the actual-price series stays empty. The banner makes that obvious instead of looking like a chart bug.
