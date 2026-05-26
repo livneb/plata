@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.097 — 2026-05-26
+- **Settings → Risk tab redesigned.** Replaced the flat key/value table with **grouped, friendly controls**: sliders for percentages / counts / minutes, toggles for booleans, currency inputs with `$` prefix, inline help text for every field, and dynamic readouts (e.g. `5%`, `15m`). Grouped into 5 sections — Execution mode · Capital & sizing · Portfolio limits · Behavioural guards · Strategist tuning — each with a one-line description. Dangerous fields (kill-switch loss cap) get a red border.
+  - Field metadata lives in `plata/dashboard/risk_field_meta.py` — add an entry there to give any new `risk_config` key its own slider/toggle/help.
+  - Unknown keys still render as a raw text-input row in an "Advanced / unrecognised keys" section below — nothing's hidden, you can always edit any key.
+- **Proposals: the triggering event is now visible at the top of every row's expanded detail.** Shows title, source, category, sentiment + magnitude, timestamp, link to the original URL, and a link to the event's neighbourhood in the graph (`/graph/?focus=<ulid>`). Plus the original event summary itself with the 🌐 translate icon. If the event has expired (events have a 7-day TTL in Redis), an amber notice explains why the content isn't visible anymore.
+- **What to test:** open `/settings/?tab=risk` → see grouped cards with sliders + toggles + help. Drag any slider → readout updates instantly; click Save (or flip a toggle, which auto-saves). Open `/proposals/` → expand any row → at the top of the detail you see the actual news headline that triggered the proposal, with sentiment and a clickable source link.
+
 ## 2.24.096 — 2026-05-26
 - **Proposals page: 🌐 translate icon** added to the strategist reasoning block and every analog summary in the expandable detail. Same `data-translate` pattern as `/trades/<ulid>`.
 - **Strategist thresholds are now live-editable from the UI** — moved from hardcoded module constants in `agents/strategist.py` to the `risk_config` Redis hash, alongside every other tunable. Two new keys appear on `/settings/?tab=risk` (and `/risk_config/`):

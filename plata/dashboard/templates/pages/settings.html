@@ -98,16 +98,85 @@
     <!-- ===== Risk Config ===== -->
     <div class="hidden p-3" id="tab-risk" role="tabpanel" aria-labelledby="risk-tab">
       <div class="flex items-center justify-between mb-3">
-        <p class="text-xs text-gray-500">
-          Common keys: <span class="font-mono">paper_trading_mode</span>, <span class="font-mono">risk_per_trade_pct</span>,
-          <span class="font-mono">max_open_positions</span>, <span class="font-mono">max_daily_loss_pct</span>,
-          <span class="font-mono">auto_approve_threshold_usd</span>, <span class="font-mono">llm.daily_budget_usd_total</span>.
-        </p>
+        <div>
+          <p class="text-xs text-gray-500">Live tunables. Sliders/toggles update instantly. Every change is audited + versioned in Postgres.</p>
+        </div>
         <button data-modal-target="create-modal" data-modal-toggle="create-modal" type="button"
-                class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-4 py-2">
-          + New
+                class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+          + New key
         </button>
       </div>
+
+      {# Friendly grouped form — sliders / toggles / number inputs with help text. #}
+      {% for group_key, group_title, group_desc in risk_groups %}
+        {% if risk_grouped.get(group_key) %}
+        <div class="mb-5">
+          <div class="mb-2">
+            <h3 class="text-sm font-semibold">{{ group_title }}</h3>
+            <p class="text-[11px] text-gray-500">{{ group_desc }}</p>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {% for row in risk_grouped[group_key] %}
+              {% set m = row.meta %}
+              <form method="post" action="/risk_config/{{ row.key }}/update"
+                    class="rc-form bg-white dark:bg-gray-800 rounded-lg border {% if m.danger %}border-red-200 dark:border-red-800{% else %}border-gray-200 dark:border-gray-700{% endif %} p-3">
+                <div class="flex items-start justify-between gap-2 mb-1">
+                  <div>
+                    <div class="text-sm font-medium">{{ m.label }}</div>
+                    <div class="text-[10px] font-mono text-gray-400">{{ row.key }}</div>
+                  </div>
+                  <span class="text-[10px] text-gray-400 self-end whitespace-nowrap" title="{{ row.updated_at or '' }}">v{{ row.version or 0 }} · {{ row.updated_at | time_ago if row.updated_at else 'never' }}</span>
+                </div>
+                {% if m.type == 'bool' %}
+                  {% set is_on = row.value | string | lower in ['true','1','yes','on'] %}
+                  <label class="inline-flex items-center cursor-pointer mt-1">
+                    <input type="hidden" name="value" value="{{ 'true' if is_on else 'false' }}" />
+                    <input type="checkbox" {{ 'checked' if is_on else '' }} class="sr-only peer rc-toggle" />
+                    <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    <span class="ml-3 text-xs rc-toggle-label">{{ 'On' if is_on else 'Off' }}</span>
+                  </label>
+                {% elif m.type in ['percent','fraction','int','float','minutes'] %}
+                  {% set val = row.value | string %}
+                  <div class="flex items-center gap-2 mt-1">
+                    <input type="range" name="value"
+                           value="{{ val }}"
+                           min="{{ m.min }}" max="{{ m.max }}" step="{{ m.step }}"
+                           class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 rc-slider"
+                           data-type="{{ m.type }}" />
+                    <span class="rc-slider-val font-mono text-sm w-24 text-right">{{ val }}{% if m.type == 'percent' %}%{% elif m.type == 'minutes' %}m{% endif %}</span>
+                    <button type="submit" class="text-[10px] px-2 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Save</button>
+                  </div>
+                  <div class="text-[10px] text-gray-400 mt-0.5">range {{ m.min }}–{{ m.max }} · step {{ m.step }}</div>
+                {% elif m.type == 'currency' %}
+                  <div class="flex items-center gap-2 mt-1">
+                    <span class="text-gray-400">$</span>
+                    <input type="number" name="value" value="{{ row.value }}"
+                           min="{{ m.min }}" max="{{ m.max }}" step="{{ m.step }}"
+                           class="flex-1 p-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                    <button type="submit" class="text-[10px] px-2 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Save</button>
+                  </div>
+                {% else %}
+                  <div class="flex items-center gap-2 mt-1">
+                    <input type="text" name="value" value="{{ row.value }}"
+                           class="flex-1 p-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+                    <button type="submit" class="text-[10px] px-2 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Save</button>
+                  </div>
+                {% endif %}
+                <p class="text-[11px] text-gray-500 mt-2">{{ m.help }}</p>
+              </form>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+
+      {# Advanced: any keys we don't have metadata for, plus a raw table for everything. #}
+      {% if risk_grouped.get('advanced') %}
+      <div class="mb-3">
+        <h3 class="text-sm font-semibold">Advanced / unrecognised keys</h3>
+        <p class="text-[11px] text-gray-500">Keys without dedicated UI metadata — raw value editing below.</p>
+      </div>
+      {% endif %}
 
       <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
         <table class="w-full text-sm text-left">
@@ -121,7 +190,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in risk_rows %}
+            {% for row in risk_grouped.get('advanced', []) %}
             <tr class="border-t border-gray-100 dark:border-gray-700">
               <td class="px-4 py-3 font-mono">{{ row.key }}{{ help_icon(row.key) }}</td>
               <td class="px-4 py-3 font-mono break-all">{{ row.value }}</td>
@@ -164,7 +233,7 @@
               </div>
             </td></tr>
             {% else %}
-            <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No config keys yet — click "New" to add one.</td></tr>
+            <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">All known keys have friendly UI above. Use "+ New key" to add a custom one.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -443,6 +512,33 @@
     if (!ok) return;
     const r = await fetch('/api/resume', { method: 'POST' });
     plataToast(r.ok ? 'Resume requested.' : 'Resume failed.', r.ok ? 'success' : 'error');
+  });
+
+  // --- Risk-config friendly form: slider readout + toggle auto-submit ---
+  document.querySelectorAll('.rc-slider').forEach(slider => {
+    const form = slider.closest('form');
+    const out = form?.querySelector('.rc-slider-val');
+    const type = slider.dataset.type;
+    const suffix = type === 'percent' ? '%' : type === 'minutes' ? 'm' : '';
+    function fmt(v) {
+      const n = parseFloat(v);
+      if (type === 'int' || type === 'minutes') return Math.round(n) + suffix;
+      // keep up to 2 decimals but trim trailing zeros
+      return parseFloat(n.toFixed(2)) + suffix;
+    }
+    slider.addEventListener('input', () => { if (out) out.textContent = fmt(slider.value); });
+  });
+  // Toggles auto-submit on change.
+  document.querySelectorAll('.rc-toggle').forEach(t => {
+    const form = t.closest('form');
+    const hidden = form?.querySelector('input[type="hidden"][name="value"]');
+    const label = form?.querySelector('.rc-toggle-label');
+    t.addEventListener('change', () => {
+      const on = t.checked;
+      if (hidden) hidden.value = on ? 'true' : 'false';
+      if (label) label.textContent = on ? 'On' : 'Off';
+      form.submit();
+    });
   });
 </script>
 {% endblock %}

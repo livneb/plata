@@ -17,6 +17,10 @@ async def index(request: Request, tab: str = "controls"):
     redis = get_redis()
     system_state = await redis.get("system:state") or "RUNNING"
     rows = await _load_rows()
+    # Group rows by their declared field-meta group (execution / capital / …)
+    # so the Risk tab can render friendly sliders + toggles instead of a flat table.
+    from plata.dashboard.risk_field_meta import FIELDS as RISK_FIELDS, GROUPS as RISK_GROUPS, grouped_rows
+    risk_grouped = grouped_rows(rows)
     s = get_settings()
     # UI-managed API credentials (show last-4 only, never the cleartext secret).
     try:
@@ -70,6 +74,9 @@ async def index(request: Request, tab: str = "controls"):
             "tab": tab,
             "system_state": system_state,
             "risk_rows": rows,
+            "risk_grouped": risk_grouped,
+            "risk_groups": RISK_GROUPS,
+            "risk_fields": RISK_FIELDS,
             "tuning_rows": tuning_rows,
             "paper_mode": s.default_paper_trading_mode,
             "app_version": s.app_version,

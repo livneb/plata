@@ -115,6 +115,30 @@ async def index(
     # Apply reason filter client-side (it lives in extras.drop_reason_code).
     if reason:
         rows = [r for r in rows if (r["extras"] or {}).get("drop_reason_code") == reason]
+    # Enrich each row with the triggering event's headline / summary / sentiment
+    # so the user sees WHY the proposal existed in the first place (not just what
+    # the LLM said about it). Falls back gracefully when the event TTL has expired.
+    try:
+        from plata.core.graph import get_event
+        for r in rows:
+            eu = r.get("event_ulid")
+            if not eu:
+                continue
+            doc = await get_event(eu)
+            if not doc:
+                continue
+            r["event"] = {
+                "title": doc.get("title") or "",
+                "summary": doc.get("summary") or "",
+                "category": doc.get("category") or "",
+                "source": doc.get("source") or "",
+                "ts": doc.get("ts") or "",
+                "sentiment": doc.get("sentiment"),
+                "sentiment_magnitude": doc.get("sentiment_magnitude"),
+                "url": doc.get("url") or "",
+            }
+    except Exception:  # noqa: BLE001
+        pass
     # Counts per state + per drop-reason for the filter chips.
     counts: dict[str, int] = {}
     reason_counts: dict[str, int] = {}

@@ -139,6 +139,32 @@
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
             <!-- Reasoning + analogs -->
             <div>
+              {% if p.event %}
+              <h3 class="text-[10px] uppercase text-gray-500 mb-1">Triggering event — why this proposal existed</h3>
+              <div class="mb-3 p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                {% if p.event.title %}<div class="font-semibold text-sm">{{ p.event.title }}</div>{% endif %}
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-500 mt-1">
+                  {% if p.event.source %}<span>{{ p.event.source }}</span>{% endif %}
+                  {% if p.event.category %}<span class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700">{{ p.event.category }}</span>{% endif %}
+                  {% if p.event.sentiment is not none %}
+                  <span>sentiment <b class="{% if p.event.sentiment > 0 %}text-green-500{% elif p.event.sentiment < 0 %}text-red-500{% else %}text-gray-400{% endif %}">{{ '%.2f' % p.event.sentiment }}</b></span>
+                  {% endif %}
+                  {% if p.event.sentiment_magnitude is not none %}
+                  <span>magnitude <b>{{ '%.2f' % p.event.sentiment_magnitude }}</b></span>
+                  {% endif %}
+                  {% if p.event.ts %}<time data-utc="{{ p.event.ts }}">{{ p.event.ts }}</time>{% endif %}
+                  {% if p.event.url %}<a href="{{ p.event.url }}" target="_blank" rel="noopener" class="text-blue-500 hover:underline">↗ source</a>{% endif %}
+                  <a href="/graph/?focus={{ p.event_ulid }}" class="text-blue-500 hover:underline">↗ graph</a>
+                </div>
+                {% if p.event.summary %}
+                <p data-translate class="mt-2 whitespace-pre-wrap leading-relaxed text-gray-700 dark:text-gray-300">{{ p.event.summary }}</p>
+                {% endif %}
+              </div>
+              {% elif p.event_ulid %}
+              <div class="mb-3 p-2 rounded border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-[11px] text-amber-700 dark:text-amber-300">
+                Triggering event <span class="font-mono">{{ p.event_ulid[:10] }}…</span> expired from Redis (events have a 7-day TTL). Original content no longer available.
+              </div>
+              {% endif %}
               <h3 class="text-[10px] uppercase text-gray-500 mb-1">Strategist reasoning</h3>
               <p data-translate class="whitespace-pre-wrap leading-relaxed">{{ p.reasoning or '—' }}</p>
               {% if p.analogs %}
