@@ -78,19 +78,16 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("dashboard").warning("historian_resume_skipped: %s", exc)
-    # Make sure all auto-created tables exist (api_credentials, proposals).
+    # Make sure all auto-created tables exist (api_credentials, proposals,
+    # agent_activity_log). Idempotent — safe across redeploys.
+    try:
+        from plata.core.db import ensure_aux_tables
+        await ensure_aux_tables()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("aux_tables_create_failed", error=str(exc)[:160])
     try:
         from plata.config import credentials as _creds
         await _creds.ensure_table()
-        # Proposals + agent activity log tables (auto-create — no Alembic).
-        try:
-            from plata.core.db import AgentActivityLog, Proposal, get_engine
-            engine = get_engine()
-            async with engine.begin() as conn:
-                await conn.run_sync(lambda c: Proposal.__table__.create(c, checkfirst=True))
-                await conn.run_sync(lambda c: AgentActivityLog.__table__.create(c, checkfirst=True))
-        except Exception as exc:  # noqa: BLE001
-            _log.warning("aux_tables_create_failed", error=str(exc)[:160])
         for p in ("openrouter", "voyage", "bybit_key", "bybit_secret",
                    "alpaca_key", "alpaca_secret", "telegram",
                    "langfuse_public", "langfuse_secret"):
@@ -320,7 +317,10 @@ def create_app() -> FastAPI:
                 if (data.get("status") or "").lower() == "halted":
                     continue
                 interval = float(data.get("interval_sec") or 0)
-                last = data.get("last_poll_at")
+                # `last_poll_at` is only set AFTER the first poll completes;
+                # on a fresh deploy fall back to `started_at` so the user sees
+                # a countdown right away.
+                last = data.get("last_poll_at") or data.get("started_at")
                 if not last or interval <= 0:
                     continue
                 try:

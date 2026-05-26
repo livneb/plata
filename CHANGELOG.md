@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.089 — 2026-05-26
+- **🐛 Root cause: proposals table existed only in the dashboard service.** Strategist runs in `intelligence_sandbox` (a separate Railway service) and `Reviewer`/`Executor` in `execution_vault` — none of them created the `proposals` or `agent_activity_log` tables. When the dashboard hadn't booted yet (or had failed), every strategist `record_drop()` INSERT silently failed (`relation "proposals" does not exist`), and we were swallowing the exception. **Zero rows persisted, regardless of how many events the strategist processed.** Same root cause as why no `dropped` proposals appeared since v2.24.087.
+  - New `plata.core.db.ensure_aux_tables()` called from `_bind_then_run()` in `entrypoints.py` — runs in **every** service's startup (ingestion_hub / intelligence_sandbox / execution_vault), idempotent (`checkfirst=True`).
+  - First failure in `record_drop()` / `record_published()` now logs at **ERROR** (loudly, once per process) instead of WARN-then-silent. Subsequent failures go to DEBUG so logs don't fill up.
+- **🐛 Header "Next poll" countdown was empty on fresh deploys.** Scrapers only write `last_poll_at` after their first poll completes — on a fresh container that can take up to 15 min (GDELT). Now falls back to `started_at` (set instantly when the source begins polling) so the chip appears immediately.
+- **Strategist pipeline diagnostic banner** at the top of `/proposals/`. Even when the table is empty, you see: `processed N · below_threshold X · missing_event Y · no_embedding Z · last HB …`. Yellow banner if `processed=0` (upstream is quiet); red banner if the strategist is halted. **Plus a clickable alert** when `processed > 0` but persisted rows = 0 → pointing at the exact log line to grep for.
+- **What to test:** open `/proposals/` — diagnostic banner at top tells you immediately whether the loop is alive. After the deploy lands and the strategist sees its next event, drop rows should start appearing. The header `Next poll` chip should populate within seconds.
+
 ## 2.24.088 — 2026-05-26
 - **Header KPI refresh cadence picked properly per-value, not arbitrarily.** Audited each KPI's actual change rate vs the cost of fetching:
 

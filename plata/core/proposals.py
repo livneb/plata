@@ -27,6 +27,10 @@ from plata.core.db import Proposal, session_scope
 from plata.core.observability import get_logger
 
 _log = get_logger("proposals_store")
+# Surface the FIRST failure loudly (so we don't silently drop everything if
+# the table is missing); after that, downgrade to debug to avoid log spam.
+_warned_drop = False
+_warned_published = False
 
 
 async def record_published(proposal: Any) -> None:
@@ -49,7 +53,13 @@ async def record_published(proposal: Any) -> None:
             ).on_conflict_do_nothing(index_elements=["proposal_ulid"])
             await session.execute(stmt)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("record_published_failed", ulid=getattr(proposal, "ulid", None), error=str(exc)[:160])
+        global _warned_published
+        if not _warned_published:
+            _log.error("record_published_failed_first_time",
+                       ulid=getattr(proposal, "ulid", None), error=str(exc)[:400])
+            _warned_published = True
+        else:
+            _log.debug("record_published_failed", ulid=getattr(proposal, "ulid", None), error=str(exc)[:160])
 
 
 async def update_state(
@@ -144,7 +154,13 @@ async def record_drop(
             ).on_conflict_do_nothing(index_elements=["proposal_ulid"])
             await session.execute(stmt)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("record_drop_failed", event=event_ulid, code=reason_code, error=str(exc)[:160])
+        global _warned_drop
+        if not _warned_drop:
+            _log.error("record_drop_failed_first_time", event=event_ulid,
+                       code=reason_code, error=str(exc)[:400])
+            _warned_drop = True
+        else:
+            _log.debug("record_drop_failed", event=event_ulid, code=reason_code, error=str(exc)[:160])
 
 
 async def get(proposal_ulid: str) -> Proposal | None:

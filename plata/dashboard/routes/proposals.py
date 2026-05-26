@@ -69,6 +69,29 @@ DROP_REASON_META: dict[str, dict[str, str]] = {
 }
 
 
+async def _strategist_pipeline_stats() -> dict[str, Any]:
+    """Snapshot of what the strategist has seen vs done — surfaces upstream
+    pipeline issues (no events arriving, enricher dead, etc.)."""
+    from plata.core.bus import get_redis
+    redis = get_redis()
+    out: dict[str, Any] = {}
+    try:
+        stats = await redis.hgetall("agent_stats:strategist")
+        out["processed_total"] = int(stats.get("processed_total") or 0)
+        out["dropped_below_threshold"] = int(stats.get("dropped_below_threshold") or 0)
+        out["dropped_missing_event"] = int(stats.get("dropped_missing_event") or 0)
+        out["dropped_no_embedding"] = int(stats.get("dropped_no_embedding") or 0)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        hb = await redis.hgetall("agent_status:strategist")
+        out["last_heartbeat"] = hb.get("last_heartbeat")
+        out["halted"] = (hb.get("halted") or "").lower() == "true"
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(
     request: Request,
@@ -90,6 +113,7 @@ async def index(
             code = (r.extras or {}).get("drop_reason_code") or "unknown"
             reason_counts[code] = reason_counts.get(code, 0) + 1
     legacy_pending = await list_pending()
+    pipeline = await _strategist_pipeline_stats()
     return templates.TemplateResponse(
         request,
         "pages/proposals.html",
@@ -104,6 +128,7 @@ async def index(
             "active_symbol": symbol,
             "active_reason": reason,
             "legacy_pending": legacy_pending,
+            "pipeline": pipeline,
         },
     )
 

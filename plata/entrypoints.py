@@ -77,6 +77,14 @@ def _agent_task(name: str, factory) -> asyncio.Task:
 
 async def _bind_then_run(http_runner, agent_factories: list[tuple[str, Any]]) -> None:
     """Bind the HTTP server first (so healthchecks pass), then start agents."""
+    # Make sure aux tables exist BEFORE any agent starts writing to them.
+    # Each Railway service runs this independently — no service depends on
+    # the dashboard having booted first.
+    try:
+        from plata.core.db import ensure_aux_tables
+        await ensure_aux_tables()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("ensure_aux_tables_failed", error=str(exc)[:160])
     started = asyncio.Event()
     http_task = asyncio.create_task(http_runner(started=started), name="http")
     await started.wait()
