@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.098 — 2026-05-26
+- **🐛 Re-submit (clone-and-edit) actually executes now.** Two bugs were preventing the manual-override path from reaching the trade ledger:
+  1. The bypass-risk branch synthesized a `RiskDecision` with `final_qty=Decimal("0")` — so even when it reached the executor, paper-mode rows landed with quantity 0 and live-mode orders were rejected by the venue for min-qty.
+  2. The bypass branch only published to `approved_trades:stream` — but the executor's `_load_proposal()` does an XRANGE on `trading_proposals:stream` to look up symbol/side. With nothing there, `proposal_not_found` log + silent exit. **Nothing ever executed.**
+  - Fix: bypass branch now (a) fetches the current ticker via the venue router to compute a real qty from a $100 default notional, (b) publishes to `trading_proposals:stream` first so the executor can find the proposal. Trades land on `/trades/` within ~5 seconds of clicking Re-submit.
+- **Bypass-risk is now ON by default** in the clone-edit form, with explanation: re-submitting a rejected proposal *without* bypass almost always gets rejected again (the original triggering event already produced a trade or is on cooldown). Inline copy explains both paths.
+- The manual_override state row now stores `qty`, `notional_usd`, and `price_at_manual` in extras for the audit trail.
+- **What to test:** open `/proposals/` → expand any rejected/dropped row → keep "Bypass risk gates" checked → Re-submit. Within ~5s a new row should appear with state `Manual` then flip to `📈 Executed` with a link to the new trade in `/trades/`.
+
 ## 2.24.097 — 2026-05-26
 - **Settings → Risk tab redesigned.** Replaced the flat key/value table with **grouped, friendly controls**: sliders for percentages / counts / minutes, toggles for booleans, currency inputs with `$` prefix, inline help text for every field, and dynamic readouts (e.g. `5%`, `15m`). Grouped into 5 sections — Execution mode · Capital & sizing · Portfolio limits · Behavioural guards · Strategist tuning — each with a one-line description. Dangerous fields (kill-switch loss cap) get a red border.
   - Field metadata lives in `plata/dashboard/risk_field_meta.py` — add an entry there to give any new `risk_config` key its own slider/toggle/help.

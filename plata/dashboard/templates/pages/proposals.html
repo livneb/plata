@@ -234,18 +234,17 @@
                   <textarea name="reasoning" rows="2"
                             class="w-full p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">{{ p.reasoning or '' }}</textarea>
                 </label>
-                <label class="flex items-center gap-2 text-[11px]">
-                  <input type="checkbox" name="bypass_risk" value="true" />
-                  <span>Bypass risk gates (publish straight to executor as manual override)</span>
+                <label class="flex items-center gap-2 text-[11px] p-2 rounded border border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/20">
+                  <input type="checkbox" name="bypass_risk" value="true" checked />
+                  <span><b>Bypass risk gates</b> — execute directly. Recommended for re-submitting a rejected proposal (otherwise risk_manager will likely reject it again, e.g. for <span class="font-mono">guard_dedup_event_ulid</span> since this clone shares the original triggering event).</span>
                 </label>
                 <button type="submit" class="px-3 py-1.5 text-xs rounded text-white bg-purple-700 hover:bg-purple-800">
                   ✋ Re-submit
                 </button>
               </form>
               <p class="text-[10px] text-gray-500 mt-2">
-                Without bypass: goes through risk_manager again — useful if you just want to tweak conviction or symbol.
-                With bypass: emits a sized order directly to the executor (audited as
-                <span class="font-mono">manual_override</span>; uses default $100 notional).
+                <b>With bypass (default):</b> sizes a $100 notional order at the current ticker price → goes straight to the executor → trade appears on <a href="/trades/" class="text-blue-500 hover:underline">/trades/</a> within seconds. Audited as <span class="font-mono">manual_override</span>. Paper-mode default applies.<br>
+                <b>Without bypass:</b> re-runs every risk guard. Almost always rejected because the original event already produced an open trade. Use only if you've changed something meaningful (e.g. different symbol).
               </p>
             </div>
           </div>

@@ -226,20 +226,57 @@ async def resubmit(
 
     if bypass_risk:
         # Skip risk_manager — push straight to approved_trades for the executor.
-        # We synthesize a minimal RiskDecision so the executor can consume it.
+        # Two things the previous version got wrong:
+        #   1. executor._load_proposal does an XRANGE on trading_proposals:stream
+        #      to find symbol/side; we have to publish there too, not just
+        #      approved_trades.
+        #   2. final_qty=0 silently produced zero-quantity orders (or paper
+        #      ledger rows with 0 qty). Compute a real qty from a $100 default
+        #      notional ÷ current ticker price.
         from decimal import Decimal
         from plata.core.schemas import RiskDecision
-        # Default 1% size with no SL/TP — user knows what they're doing if they bypass.
+        from plata.execution.router import client_for, venue_for
+
+        default_notional = Decimal("100")
+        venue = venue_for(cloned.symbol)
+        # Best-effort live price for sizing. Falls back to a per-venue stub if
+        # neither venue is configured.
+        last_price: Decimal = Decimal("0")
+        try:
+            client = client_for(agent="manual_override", venue=venue)
+            t = await client.fetch_ticker(cloned.symbol)
+            lp = float(t.get("last") or t.get("close") or 0)
+            if lp > 0:
+                last_price = Decimal(str(lp))
+        except Exception:  # noqa: BLE001
+            pass
+        if last_price <= 0:
+            last_price = Decimal("100") if venue == "alpaca" else Decimal("50000")
+        qty = (default_notional / last_price).quantize(Decimal("0.0001"))
+        if qty <= 0:
+            qty = Decimal("0.0001")
+
         decision = RiskDecision(
             proposal_ulid=cloned.ulid, approved=True, requires_hitl=False,
-            final_qty=Decimal("0"), final_notional_usd=Decimal("100"),
+            final_qty=qty, final_notional_usd=default_notional,
             final_sl_price=None, final_tp_price=None,
-            risk_snapshot={"manual_override": True, "actor": actor},
+            risk_snapshot={"manual_override": True, "actor": actor,
+                            "default_notional_usd": str(default_notional),
+                            "price_at_manual": str(last_price)},
         )
+        # IMPORTANT: publish to trading_proposals first so executor's
+        # _load_proposal can find symbol/side via XRANGE.
+        await publish(Streams.TRADING_PROPOSALS, cloned)
         await record_published(cloned)
         await update_state(cloned.ulid, state="manual_override",
-                            reason=f"cloned from {proposal_ulid}", actor=f"user:{actor}",
-                            extras={"source_proposal_ulid": proposal_ulid})
+                            reason=f"cloned from {proposal_ulid} · ${default_notional} @ ~${last_price}",
+                            actor=f"user:{actor}",
+                            extras={
+                                "source_proposal_ulid": proposal_ulid,
+                                "qty": str(qty),
+                                "notional_usd": str(default_notional),
+                                "price_at_manual": str(last_price),
+                            })
         await publish(Streams.APPROVED_TRADES, decision)
     else:
         await publish(Streams.TRADING_PROPOSALS, cloned)
