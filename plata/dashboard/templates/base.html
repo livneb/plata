@@ -670,7 +670,17 @@
         return (n >= 0 ? '+$' : '−$') + v;
       }
       const CACHE_KEY = 'plata.header.kpis';
-      const STALE_AFTER_MS = 10000;  // re-fetch in background after 10s; cache stays valid up to 10× that on page nav
+      // Refresh cadence: 60s is right for every KPI we display.
+      //   • Realized PnL changes only when a trade closes (hours-days)
+      //   • Open count / unrealized PnL: sampler floor is 60s per trade — going
+      //     faster than the sampler gives no new info
+      //   • LLM spend: small increments; 60s smooths network noise
+      //   • Pending HITL: rare events — BUT the SSE listener below refreshes
+      //     immediately on dashboard:events, so we still surface instantly
+      //   • Next poll: server-anchor every 60s, JS ticks locally every 1s
+      // Net effect: ~1,440 polls/day per active tab instead of 8,640 — ~6×
+      // cheaper for Postgres + Redis, no perceived latency thanks to SSE.
+      const STALE_AFTER_MS = 60_000;
       function loadCache() {
         try {
           const raw = sessionStorage.getItem(CACHE_KEY);
@@ -737,6 +747,12 @@
       const age = cached ? (Date.now() - cached.fetched_at) : Infinity;
       if (age > STALE_AFTER_MS) tick();
       setInterval(tick, STALE_AFTER_MS);
+      // SSE push: refresh immediately when something meaningful happens,
+      // so the 60s base cadence doesn't make us miss real-time changes.
+      // (HITL needs to surface fast; trades opening/closing move PnL.)
+      ['plata:pending_changed', 'plata:trades_changed'].forEach(evt => {
+        document.addEventListener(evt, () => tick());
+      });
     })();
 
     // ---------- Breadcrumbs ----------

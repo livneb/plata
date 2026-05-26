@@ -2,6 +2,20 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.088 — 2026-05-26
+- **Header KPI refresh cadence picked properly per-value, not arbitrarily.** Audited each KPI's actual change rate vs the cost of fetching:
+
+  | KPI | Real change rate | Cost | Picked |
+  |---|---|---|---|
+  | Realized today | Only when a trade closes | Postgres `sum` | 60s |
+  | Open count + unrealized | Sampler floor = 60s per trade — anything faster gives no new info | PG scan + Redis hgetall | 60s |
+  | HITL pending | Rare — but must surface instantly when it changes | Redis SCAN | 60s + SSE push |
+  | LLM $ today | Tiny increments many times/min | Redis GET | 60s smooths noise |
+  | Next poll | Already a local 1s tick on a server-anchor | Redis SCAN | 60s anchor |
+
+  Net: **6× fewer polls per active tab** (~1,440/day → ~240) without losing real-time feel. The SSE listener for `proposal_pending` / `trade_opened` / `trade_closed` now also invalidates the KPI cache and triggers an immediate refetch, so anything meaningful still surfaces within ~100ms.
+- **What to test:** open the dashboard, watch the network tab — `/api/header_stats` calls drop to ~1/min. Open a paper trade in another window → topbar KPI updates within a second via the SSE push, not 60s later.
+
 ## 2.24.087 — 2026-05-26
 - **Every drop reason is now persisted** — not just `should_trade=false`. New helper `record_drop()` is called for all four early-return paths in the strategist:
   - `📉 below_threshold` — sentiment_magnitude < 0.5
