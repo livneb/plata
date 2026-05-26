@@ -641,25 +641,60 @@
     });
     reloadBtn.addEventListener('click', () => { focusKey = null; loadGraph(); });
     document.getElementById('normalize-btn').addEventListener('click', async () => {
-      // Preview first.
+      // 1. Preview
       const r = await fetch('/graph/normalize_aliases?dry_run=true', { method: 'POST' });
       const preview = await r.json();
       if (!preview.count) { plataToast('No alias duplicates to merge.', 'success'); return; }
       const ok = await plataConfirm({
-        title: 'Merge alias duplicates',
-        message: `Found ${preview.count} duplicate entity node(s) to merge into their canonical form (US→USA, IL→ISR, etc.). Apply?`,
-        confirmLabel: 'Merge',
+        title: 'Dedup graph',
+        message: `Found ${preview.count} duplicate entity node(s). Run the background dedup pass? It walks every entity:* key and merges aliases (US/USA, IL/ISR, IL/ILS classified as asset, etc.).`,
+        confirmLabel: 'Run dedup',
         danger: true,
       });
       if (!ok) return;
-      const r2 = await fetch('/graph/normalize_aliases?dry_run=false', { method: 'POST' });
-      const done = await r2.json();
-      plataToast(`Merged ${done.count} alias node(s). Reloading graph…`, 'success');
-      // Bust cache + reload.
-      try { localStorage.removeItem('plata-graph-cache:v1:' + limitSel.value); } catch {}
-      focusKey = null;
-      unfocusedCache = { limit: null, data: null, positions: null, viewport: null };
-      loadGraph();
+      // 2. Kick the background job
+      const r2 = await fetch('/graph/dedup/start', { method: 'POST' });
+      if (r2.status === 409) {
+        plataToast('A dedup pass is already running.', 'error');
+      } else if (!r2.ok) {
+        plataToast('Failed to start dedup.', 'error'); return;
+      } else {
+        plataToast('Dedup started — watch progress in the toast bottom-right.', 'success');
+      }
+      // 3. Poll status every 2 s, show a sticky toast with the running count.
+      let stickyEl;
+      function sticky(html) {
+        if (!stickyEl) {
+          stickyEl = document.createElement('div');
+          stickyEl.className = 'fixed bottom-4 right-4 z-[80] p-3 rounded-lg shadow text-xs bg-gray-900 text-white max-w-xs';
+          document.body.appendChild(stickyEl);
+        }
+        stickyEl.innerHTML = html;
+      }
+      function clearSticky() { if (stickyEl) { stickyEl.remove(); stickyEl = null; } }
+      const timer = setInterval(async () => {
+        try {
+          const s = await (await fetch('/graph/dedup/status')).json();
+          if (!s || s.state === 'never_run') { clearInterval(timer); clearSticky(); return; }
+          const merged = parseInt(s.merged || 0, 10);
+          const planned = parseInt(s.planned || 0, 10);
+          const failed = parseInt(s.failed || 0, 10);
+          const edges = parseInt(s.edges_rewritten || 0, 10);
+          if (s.state === 'running') {
+            sticky(`🧹 dedup running…<br><b>${merged}/${planned}</b> merged · ${edges} edges rewritten${failed ? ` · ${failed} failed` : ''}<br><span class="text-gray-300">${s.current || ''}</span>`);
+          } else {
+            sticky(`✅ dedup done — <b>${merged}</b> merged, ${edges} edges rewritten${failed ? `, ${failed} failed` : ''}.<br><span class="text-gray-300">Click anywhere to dismiss.</span>`);
+            clearInterval(timer);
+            stickyEl.style.cursor = 'pointer';
+            stickyEl.addEventListener('click', () => { clearSticky(); }, { once: true });
+            // Bust cache + reload the graph.
+            try { localStorage.removeItem('plata-graph-cache:v1:' + limitSel.value); } catch {}
+            focusKey = null;
+            unfocusedCache = { limit: null, data: null, positions: null, viewport: null };
+            loadGraph();
+          }
+        } catch {}
+      }, 2000);
     });
     limitSel.addEventListener('change', () => loadGraph());
 

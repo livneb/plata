@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.070 — 2026-05-25
+- **Country alias dedup is now aggressive.** Previously the canonicalizer only fired when the LLM already classified a node as `country`, so misclassifications (IL as `asset`, USA as `org`, ILS as `ticker`) slipped through and created duplicates. Now `canonicalize_entity()` returns `(new_type, new_id, new_name)` — if the id OR name matches a known country alias we **force `type=country`** regardless of the LLM's guess. The graph_ingestion agent uses the corrected type at write time.
+- **Stricter LLM extractor prompt**: explicit rules listing the right typing for each entity class, with examples for the most common misclassifications. Currency codes (ILS/USD) must NOT become country nodes; ISO country codes (US/IL/USA/GB/EU) must NOT become asset/ticker.
+- **Background dedup job** with progress: `POST /graph/dedup/start` kicks an async pass that scans every `entity:*` key, merges every alias-duplicate into its canonical sibling, rewrites every incident edge, and reports progress in `graph:dedup:status` (state / merged / planned / edges_rewritten / failed / current). `GET /graph/dedup/status` exposes it; the 🧹 Dedup button on the graph page kicks the job and shows a sticky toast that updates every 2 s until the run completes, then reloads the graph.
+
 ## 2.24.069 — 2026-05-25
 - **Esc actually closes modals now.** Previous visibility check used `offsetParent`, which is always `null` for `position: fixed` elements — so the handler skipped every modal it tried to close. Switched to `getComputedStyle(o).display !== 'none'`. Works on card-detail, confirm, settings tabs, changelog carousel, graph focus, every modal.
 - **Sticky red banner** at the top when any agent is halted (or the system is). Polls `/api/agents/halted` every 10s + reacts instantly to SSE `system_state` events. Click → `/agents/`.

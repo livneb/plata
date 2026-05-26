@@ -184,22 +184,24 @@ async def node_detail(key: str) -> JSONResponse:
     return JSONResponse(doc or {})
 
 
-@router.post("/normalize_aliases")
-async def normalize_aliases(dry_run: bool = True) -> JSONResponse:
-    """Merge duplicate entity nodes that are known aliases of each other.
+_DEDUP_TASKS: set = set()  # strong refs so the background task isn't GC'd
 
-    Walks every `entity:country:<id>` key, computes the canonical id, and if the
-    canonical differs:
-      - merges sentiment_ewma (EWMA-weighted average toward canonical),
-      - unions the aliases list,
-      - rewrites every edge that points at the alias to point at canonical instead,
-      - deletes the alias node.
 
-    Call with `?dry_run=false` to actually apply. Default is a preview.
-    """
+def _alias_target_for(type_: str, id_: str, name: str) -> tuple[str, str, str] | None:
+    """Return (new_type, new_id, new_name) if this entity has an alias-canonical,
+    else None. Wraps `canonicalize_entity` and reports only when something changes."""
     from plata.core.entity_aliases import canonicalize_entity
-    redis = get_redis()
+    new_type, new_id, new_name = canonicalize_entity(type_, id_, name)
+    if (new_type, new_id) == (type_, id_):
+        return None
+    return new_type, new_id, new_name
 
+
+async def _scan_planned_merges() -> list[dict]:
+    """Walk every entity:* key and compute which ones should merge into a canonical one.
+    Now scans ALL entity types (was: country only) so misclassified IL/ILS/USA nodes
+    classified as asset/ticker/org are caught too."""
+    redis = get_redis()
     merges: list[dict] = []
     async for key in redis.scan_iter(match="entity:*", count=200):
         parts = key.split(":", 2)
@@ -209,67 +211,147 @@ async def normalize_aliases(dry_run: bool = True) -> JSONResponse:
         doc = await redis.json().get(key)
         if not isinstance(doc, dict):
             continue
-        canon_id, canon_name = canonicalize_entity(type_, id_, doc.get("name") or id_)
-        if canon_id == id_:
+        target = _alias_target_for(type_, id_, doc.get("name") or id_)
+        if not target:
             continue
-        canon_key = f"entity:{type_}:{canon_id}"
+        new_type, new_id, new_name = target
         merges.append({
             "from": key,
-            "to": canon_key,
-            "alias_id": id_,
-            "canonical_id": canon_id,
+            "to": f"entity:{new_type}:{new_id}",
+            "from_type": type_, "from_id": id_, "from_name": doc.get("name") or id_,
+            "to_type": new_type, "to_id": new_id, "to_name": new_name,
         })
+    return merges
 
+
+async def _apply_merge(m: dict) -> int:
+    """Merge a single alias node into its canonical sibling. Returns edges rewritten."""
+    redis = get_redis()
+    src_key, dst_key = m["from"], m["to"]
+    src_doc = await redis.json().get(src_key)
+    if not isinstance(src_doc, dict):
+        return 0
+    dst_doc = await redis.json().get(dst_key) or {}
+    aliases = list({*(dst_doc.get("aliases") or []),
+                    *(src_doc.get("aliases") or []),
+                    src_doc.get("name") or "", src_doc.get("id") or "",
+                    m["from_id"]})
+    aliases = [a for a in aliases if a and a != m["to_name"]]
+    s_src = float(src_doc.get("sentiment_ewma") or 0)
+    s_dst = float(dst_doc.get("sentiment_ewma") or 0)
+    merged = {
+        **(dst_doc or src_doc),
+        "type": m["to_type"],
+        "id": m["to_id"],
+        "name": m["to_name"],
+        "aliases": aliases,
+        "sentiment_ewma": (s_src + s_dst) / 2 if (dst_doc and src_doc) else (s_src or s_dst),
+        "embedding": dst_doc.get("embedding") or src_doc.get("embedding"),
+    }
+    await redis.json().set(dst_key, "$", merged)
+
+    rewritten = 0
+    async for ek in redis.scan_iter(match="edge:*", count=500):
+        edoc = await redis.json().get(ek)
+        if not isinstance(edoc, dict):
+            continue
+        changed = False
+        if edoc.get("dst") == src_key: edoc["dst"] = dst_key; changed = True
+        if edoc.get("src") == src_key: edoc["src"] = dst_key; changed = True
+        if not changed:
+            continue
+        new_ek = f"edge:{edoc['src']}:{edoc.get('rel') or 'mentions'}:{edoc['dst']}"
+        await redis.json().set(new_ek, "$", edoc)
+        if new_ek != ek:
+            await redis.delete(ek)
+        rewritten += 1
+    if src_key != dst_key:
+        await redis.delete(src_key)
+    return rewritten
+
+
+@router.post("/normalize_aliases")
+async def normalize_aliases(dry_run: bool = True) -> JSONResponse:
+    """One-shot merge (kept for back-compat). For large graphs use /graph/dedup."""
+    merges = await _scan_planned_merges()
     if dry_run or not merges:
         return JSONResponse({"dry_run": True, "would_merge": merges, "count": len(merges)})
-
-    # Apply
     applied = 0
     for m in merges:
-        src_key = m["from"]
-        dst_key = m["to"]
-        src_doc = await redis.json().get(src_key)
-        dst_doc = await redis.json().get(dst_key) or {}
-        if not isinstance(src_doc, dict):
+        try:
+            await _apply_merge(m); applied += 1
+        except Exception:  # noqa: BLE001
             continue
-
-        # 1. Merge aliases + sentiment_ewma (mean of both, weighted equally for simplicity).
-        merged_aliases = list({*(dst_doc.get("aliases") or []), *(src_doc.get("aliases") or []),
-                               src_doc.get("name") or "", src_doc.get("id") or ""})
-        merged_aliases = [a for a in merged_aliases if a]
-        s_src = float(src_doc.get("sentiment_ewma") or 0)
-        s_dst = float(dst_doc.get("sentiment_ewma") or 0)
-        merged = {
-            **(dst_doc or src_doc),
-            "id": m["canonical_id"],
-            "name": m["canonical_id"],
-            "type": src_doc.get("type") or dst_doc.get("type"),
-            "aliases": merged_aliases,
-            "sentiment_ewma": (s_src + s_dst) / 2 if (dst_doc and src_doc) else (s_src or s_dst),
-            "embedding": dst_doc.get("embedding") or src_doc.get("embedding"),
-        }
-        await redis.json().set(dst_key, "$", merged)
-
-        # 2. Rewrite every edge that references the alias.
-        async for ek in redis.scan_iter(match="edge:*", count=500):
-            edoc = await redis.json().get(ek)
-            if not isinstance(edoc, dict):
-                continue
-            changed = False
-            if edoc.get("dst") == src_key:
-                edoc["dst"] = dst_key; changed = True
-            if edoc.get("src") == src_key:
-                edoc["src"] = dst_key; changed = True
-            if not changed:
-                continue
-            # Move the edge to the new key path (edge:<src>:<rel>:<dst>) so the scan pattern stays consistent.
-            new_ek = f"edge:{edoc['src']}:{edoc.get('rel') or 'mentions'}:{edoc['dst']}"
-            await redis.json().set(new_ek, "$", edoc)
-            if new_ek != ek:
-                await redis.delete(ek)
-
-        # 3. Drop the alias node.
-        await redis.delete(src_key)
-        applied += 1
-
     return JSONResponse({"dry_run": False, "merged": merges, "count": applied})
+
+
+@router.post("/dedup/start")
+async def dedup_start():
+    """Kick a background dedup pass. Idempotent: refuses if one is already running."""
+    import asyncio
+    from datetime import datetime, timezone
+    redis = get_redis()
+    state = await redis.hget("graph:dedup:status", "state")
+    if state == "running":
+        return JSONResponse({"ok": False, "reason": "already_running"}, status_code=409)
+    await redis.hset("graph:dedup:status", mapping={
+        "state": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "scanned": 0, "planned": 0, "merged": 0, "failed": 0, "edges_rewritten": 0,
+        "last_error": "", "current": "",
+    })
+
+    async def _run() -> None:
+        try:
+            print("[dedup] scanning entity:* keys…", flush=True)
+            merges = await _scan_planned_merges()
+            await redis.hset("graph:dedup:status", mapping={
+                "scanned": len(merges), "planned": len(merges),
+            })
+            print(f"[dedup] {len(merges)} merge(s) planned", flush=True)
+            merged = 0; failed = 0; edges = 0
+            for i, m in enumerate(merges):
+                await redis.hset("graph:dedup:status", mapping={
+                    "current": f"{m['from_id']} → {m['to_name']}",
+                })
+                try:
+                    edges += await _apply_merge(m)
+                    merged += 1
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    await redis.hset("graph:dedup:status", "last_error",
+                                     f"{m['from_id']}: {type(exc).__name__}: {str(exc)[:160]}")
+                await redis.hset("graph:dedup:status", mapping={
+                    "merged": merged, "failed": failed, "edges_rewritten": edges,
+                })
+            await redis.hset("graph:dedup:status", mapping={
+                "state": "done",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "current": "",
+            })
+            print(f"[dedup] done — merged={merged} failed={failed}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            await redis.hset("graph:dedup:status", mapping={
+                "state": "failed",
+                "last_error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    loop = asyncio.get_running_loop()
+    t = loop.create_task(_run(), name="graph-dedup")
+    _DEDUP_TASKS.add(t); t.add_done_callback(_DEDUP_TASKS.discard)
+    return JSONResponse({"ok": True})
+
+
+@router.get("/dedup/status")
+async def dedup_status() -> JSONResponse:
+    redis = get_redis()
+    data = await redis.hgetall("graph:dedup:status")
+    return JSONResponse(data or {"state": "never_run"})
+
+
+@router.post("/dedup/reset")
+async def dedup_reset():
+    redis = get_redis()
+    await redis.delete("graph:dedup:status")
+    return JSONResponse({"ok": True})

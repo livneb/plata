@@ -123,19 +123,21 @@ def canonical_country(name_or_id: str) -> str:
     return name_or_id
 
 
-def canonicalize_entity(type_: str, id_: str, name: str) -> tuple[str, str]:
-    """Return (canonical_id, canonical_name) for an entity.
+def canonicalize_entity(type_: str, id_: str, name: str) -> tuple[str, str, str]:
+    """Return (canonical_type, canonical_id, canonical_name) for an entity.
 
-    - Country: collapse ISO codes + informal names → full English name.
-    - Other types: pass through unchanged for now (extend per type as needed).
+    Aggressive normalisation — if the id OR the name matches a known country alias
+    we force `type='country'` and collapse to the canonical English name, **even if
+    the LLM classified the node as something else** (asset/ticker/org). This is the
+    most common LLM misclassification ("IL" as ticker, "USA" as org, etc.).
     """
-    t = (type_ or "").lower()
-    if t == "country":
-        # Try both id and name; whichever resolves wins. id_ usually has the LLM's choice.
-        canon = canonical_country(id_)
-        if canon == id_:
-            canon = canonical_country(name)
-        if canon:
-            return (canon, canon)
-        return (id_, name)
-    return (id_, name)
+    # Country alias takes priority — covers misclassifications.
+    for candidate in (id_, name):
+        canon = canonical_country(candidate)
+        if canon and canon != candidate:
+            return ("country", canon, canon)
+        # Exact-match on the canonical full name too ("Israel" → "Israel")
+        if candidate and _norm_key(candidate) in COUNTRY_ALIASES:
+            canon2 = COUNTRY_ALIASES[_norm_key(candidate)]
+            return ("country", canon2, canon2)
+    return (type_, id_, name)
