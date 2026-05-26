@@ -71,13 +71,17 @@
       <div class="flex items-center gap-3">
         <!-- KPI strip — populated by /api/header_stats every 10s -->
         <div id="header-kpis" class="hidden sm:flex items-center gap-3 text-[11px] mr-2">
-          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Today's realized PnL (closed trades, since 00:00 UTC)">
-            <span class="text-[9px] uppercase text-gray-500">PnL today</span>
+          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Realized PnL — closed trades only, since 00:00 UTC. Open trades' mark-to-market shows under OPEN.">
+            <span class="text-[9px] uppercase text-gray-500">Realized today</span>
             <span id="kpi-pnl" class="font-mono font-semibold text-gray-400">—</span>
           </a>
-          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Open positions and unrealized PnL right now">
-            <span class="text-[9px] uppercase text-gray-500">Open</span>
+          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Open positions and their live unrealized PnL (mark-to-market vs entry).">
+            <span class="text-[9px] uppercase text-gray-500">Open · unrealized</span>
             <span id="kpi-open" class="font-mono text-gray-400">—</span>
+          </a>
+          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Total = realized today + unrealized on open positions.">
+            <span class="text-[9px] uppercase text-gray-500">Total today</span>
+            <span id="kpi-total" class="font-mono font-semibold text-gray-400">—</span>
           </a>
           <a href="/proposals/" id="kpi-hitl-link" class="flex flex-col items-end leading-tight hover:opacity-80 hidden" title="Proposals waiting for your approval">
             <span class="text-[9px] uppercase text-red-400">HITL</span>
@@ -628,6 +632,7 @@
       const $pnl = document.getElementById('kpi-pnl');
       if (!$pnl) return;
       const $open = document.getElementById('kpi-open');
+      const $total = document.getElementById('kpi-total');
       const $hitl = document.getElementById('kpi-hitl');
       const $hitlLink = document.getElementById('kpi-hitl-link');
       const $budget = document.getElementById('kpi-budget');
@@ -650,6 +655,9 @@
           $open.innerHTML = s.open_count + (s.open_count > 0
             ? ` · <span class="${unr > 0 ? 'text-green-500' : unr < 0 ? 'text-red-500' : 'text-gray-400'}">${fmt(unr, true)}</span>`
             : '');
+          const total = (s.daily_pnl || 0) + unr;
+          $total.textContent = fmt(total, true);
+          $total.className = 'font-mono font-semibold ' + (total > 0 ? 'text-green-500' : total < 0 ? 'text-red-500' : 'text-gray-400');
           if (s.pending_hitl > 0) {
             $hitlLink.classList.remove('hidden');
             $hitl.textContent = s.pending_hitl;

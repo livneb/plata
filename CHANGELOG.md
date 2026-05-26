@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.082 — 2026-05-26
+- **Topbar KPI labels clarified + added "Total today".** The previous `PnL today` showed only *realized* PnL from closed trades, so with 3 open trades and nothing closed yet it sat at `$0.00` — looked stuck. Now:
+  - `Realized today` — closed trades only, since 00:00 UTC.
+  - `Open · unrealized` — open count and live mark-to-market.
+  - `Total today` — sum of the two (the number you actually care about glancing at).
+- **What to test:** topbar should show three PnL chips. Open a paper trade in profit → `Open · unrealized` ticks up immediately; `Realized today` only moves when something closes; `Total today` reflects both.
+
 ## 2.24.081 — 2026-05-26
 - **Proposals are now first-class Postgres rows** — every TradeProposal the strategist publishes is mirrored into a new `proposals` table (auto-created on dashboard startup) and its state evolves through the pipeline: `published → rejected | pending_hitl | hitl_(approved/rejected/timeout) | approved → executed | failed_execution | manual_override`. Survives Railway restarts (Redis streams are bounded; this isn't).
 - **Proposals page rebuilt** (`/proposals/`). Was: pending-HITL only. Now:
