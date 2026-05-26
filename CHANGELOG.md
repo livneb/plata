@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.104 — 2026-05-26
+- **🐛 Fix `AttributeError: 'str' object has no attribute 'value'` in risk_manager.** The opposing-side guard read `proposal.side.value.lower()` — assumes `.side` is the `Side` StrEnum. In some serialization paths (in particular manual-override re-submits round-tripping through the Redis stream) it deserialized as a plain string, no `.value`. Switched to `str(proposal.side).lower()` which works for both — `Side` is a `StrEnum`, so `str(Side.LONG) == "long"`.
+
 ## 2.24.103 — 2026-05-26
 - **Why some trades had no chart**: the strategist LLM returns a `milestones` array but the JSON schema allowed `minItems: 0`, so the model sometimes shipped an empty list. The trade-detail page only rendered the chart `{% if proposal.milestones %}`, so milestone-less trades looked broken.
 - **Two fixes:**

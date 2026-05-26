@@ -125,7 +125,10 @@ class RiskManager(BaseAgent):
         # Opposing-side block.
         if self._cfg_bool("guard_block_opposing_side", True):
             same_sym = [t for t in open_trades if (t.get("symbol") or "").upper() == proposal.symbol.upper()]
-            if any((t.get("side") or "").lower() != proposal.side.value.lower() for t in same_sym):
+            # Side is a StrEnum but Pydantic deserialization from the stream
+            # can leave it as a plain string in some paths — str() handles both.
+            proposal_side = str(proposal.side).lower()
+            if any((t.get("side") or "").lower() != proposal_side for t in same_sym):
                 await self._reject(proposal, "opposing_side_open_on_symbol")
                 return
 
