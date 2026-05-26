@@ -2,6 +2,18 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.080 — 2026-05-26
+- **Header redesign — KPIs + account dropdown + breadcrumbs.**
+  - **3 live KPIs** in the topbar (polled every 10s from new `/api/header_stats`):
+    - `PnL today` — sum of `net_pnl` for trades closed since 00:00 UTC. Green / red / gray.
+    - `Open · ±$unrealized` — count of open trades + live unrealized PnL computed from `trade:latest:<ulid>` against entry × qty × side.
+    - `HITL n` — only shown when proposals are waiting for human approval (red).
+    - `LLM $today / $cap` — only shown when a daily budget is set; turns yellow > 70 %, red > 90 %.
+  - **Account dropdown** — Flowbite dropdown anchored to a circular avatar; replaces the previous inline email + Log-out button. Items: Account &amp; preferences, API keys, Controls, Sign out.
+  - **Dynamic breadcrumbs** — Flowbite breadcrumb bar above every page. Auto-derives the trail from the active sidebar entry + an optional `?from=<page>` referrer param (e.g. a dashboard tile linking to `/trades/?from=dashboard` renders `Dashboard › Trades`; visiting `/trades/` directly renders just `Trades`). Pages can also override the trail via `window.PLATA_BREADCRUMBS`.
+- Sidebar label renamed `Pending Proposals` → `Proposals` (the upcoming page will include dropped + rejected proposals, not just pending HITL).
+- **What to test:** look at topbar after deploy — 3 numbers should populate. Click the avatar → menu. Navigate to /trades/ from dashboard via a tile vs from the sidebar — breadcrumbs differ.
+
 ## 2.24.079 — 2026-05-26
 - **Graph: per-category event icons.** Events were all rendering as a single 📰 newspaper icon regardless of what they were about. Now: ⚔️ war · 🛡️ cyber · 🏦 macro · ⚖️ regulation · 📊 earnings · 🔥 social_virality · 🐋 whale_move · 🌐 geopolitics · 🪙 crypto · 💻 tech · 🏢 company. The legend on the right rail is rewritten to match the actual `EventCategory` enum.
 - **What to test:** open `/graph/` — should see a mix of icons instead of a wall of newspapers.

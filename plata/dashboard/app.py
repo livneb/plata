@@ -218,6 +218,64 @@ def create_app() -> FastAPI:
         system_state = await redis.get("system:state") or "RUNNING"
         return {"count": len(halted), "names": sorted(halted), "system_state": system_state}
 
+    @app.get("/api/header_stats")
+    async def api_header_stats():
+        """Top-bar KPIs: today's realized PnL, open positions + unrealized PnL,
+        pending HITL count, today's LLM spend. Polled every ~10s by the topbar."""
+        from datetime import date, datetime, timezone
+        from plata.core.bus import get_redis
+        from plata.core.db import TradeLedger, session_scope
+        from sqlalchemy import func, select
+        redis = get_redis()
+        stats: dict = {
+            "daily_pnl": 0.0, "open_count": 0, "unrealized_pnl": 0.0,
+            "pending_hitl": 0, "llm_spend_today": 0.0, "llm_budget": 0.0,
+        }
+        try:
+            today_utc = datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc)
+            async with session_scope() as session:
+                stats["daily_pnl"] = float((await session.execute(
+                    select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))
+                    .where(TradeLedger.exit_price.is_not(None))
+                    .where(TradeLedger.opened_at >= today_utc)
+                )).scalar() or 0)
+                open_rows = (await session.execute(
+                    select(TradeLedger).where(TradeLedger.exit_price.is_(None))
+                )).scalars().all()
+                stats["open_count"] = len(open_rows)
+                # Unrealized PnL: sum (latest_price - entry) * qty * side_sign
+                u = 0.0
+                for r in open_rows:
+                    latest = await redis.hgetall(f"trade:latest:{r.trade_ulid}")
+                    price = float(latest.get("price") or 0)
+                    entry = float(r.entry_price or 0)
+                    qty = float(r.qty or 0)
+                    if price <= 0 or entry <= 0 or qty <= 0:
+                        continue
+                    sign = 1.0 if (r.side or "").lower() == "long" else -1.0
+                    u += sign * (price - entry) * qty
+                stats["unrealized_pnl"] = round(u, 2)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            n = 0
+            async for k in redis.scan_iter(match="proposal:pending:*", count=100):
+                n += 1
+            stats["pending_hitl"] = n
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            today_key = "llm:spend:" + date.today().isoformat()
+            v = await redis.get(today_key)
+            if v:
+                stats["llm_spend_today"] = float(v)
+            budget = await redis.get("llm:daily_budget_usd")
+            if budget:
+                stats["llm_budget"] = float(budget)
+        except Exception:  # noqa: BLE001
+            pass
+        return stats
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         from datetime import date, datetime, timezone

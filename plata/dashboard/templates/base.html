@@ -69,6 +69,25 @@
                 title="Show changelog">v{{ app_version_global() }}</button>
       </div>
       <div class="flex items-center gap-3">
+        <!-- KPI strip — populated by /api/header_stats every 10s -->
+        <div id="header-kpis" class="hidden sm:flex items-center gap-3 text-[11px] mr-2">
+          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Today's realized PnL (closed trades, since 00:00 UTC)">
+            <span class="text-[9px] uppercase text-gray-500">PnL today</span>
+            <span id="kpi-pnl" class="font-mono font-semibold text-gray-400">—</span>
+          </a>
+          <a href="/trades/" class="flex flex-col items-end leading-tight hover:opacity-80" title="Open positions and unrealized PnL right now">
+            <span class="text-[9px] uppercase text-gray-500">Open</span>
+            <span id="kpi-open" class="font-mono text-gray-400">—</span>
+          </a>
+          <a href="/proposals/" id="kpi-hitl-link" class="flex flex-col items-end leading-tight hover:opacity-80 hidden" title="Proposals waiting for your approval">
+            <span class="text-[9px] uppercase text-red-400">HITL</span>
+            <span id="kpi-hitl" class="font-mono font-semibold text-red-400">0</span>
+          </a>
+          <a href="/activity/" id="kpi-budget-link" class="flex flex-col items-end leading-tight hover:opacity-80 hidden" title="LLM spend today vs daily budget cap">
+            <span class="text-[9px] uppercase text-gray-500">LLM $</span>
+            <span id="kpi-budget" class="font-mono text-gray-400">—</span>
+          </a>
+        </div>
         <span id="mode-badge" class="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">
           PAPER
         </span>
@@ -80,13 +99,32 @@
         {% if current_user %}
         <button id="push-toggle" type="button" title="Enable push notifications"
                 class="text-xs text-gray-500 hover:text-gray-300 hidden sm:inline">🔔</button>
-        <span class="text-xs text-gray-400 hidden sm:inline">{{ current_user }}</span>
-        <form method="post" action="/logout" class="inline">
-          <button type="submit" class="text-xs text-gray-500 hover:text-gray-300">Log out</button>
-        </form>
+        <!-- Account dropdown (Flowbite). Click the avatar to open. -->
+        <button type="button" id="account-btn" data-dropdown-toggle="account-dropdown"
+                class="flex items-center text-sm rounded-full focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600"
+                title="{{ current_user }}">
+          <span class="sr-only">Open account menu</span>
+          <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-600 text-white text-xs font-semibold">
+            {{ (current_user[0] | upper) if current_user else '?' }}
+          </span>
+        </button>
+        <div id="account-dropdown" class="z-50 hidden my-4 text-sm bg-white divide-y divide-gray-100 rounded-lg shadow border border-gray-200 dark:bg-gray-700 dark:divide-gray-600 dark:border-gray-600 w-56">
+          <div class="px-4 py-3">
+            <span class="block text-[10px] uppercase text-gray-500">Signed in as</span>
+            <span class="block text-sm font-medium text-gray-900 dark:text-white truncate" title="{{ current_user }}">{{ current_user }}</span>
+          </div>
+          <ul class="py-2 text-sm text-gray-700 dark:text-gray-200">
+            <li><a href="/settings/?tab=account" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600">⚙️ Account &amp; preferences</a></li>
+            <li><a href="/settings/?tab=api" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600">🔑 API keys</a></li>
+            <li><a href="/settings/?tab=controls" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600">🎛️ Controls</a></li>
+          </ul>
+          <div class="py-2">
+            <form method="post" action="/logout">
+              <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-600">↩ Sign out</button>
+            </form>
+          </div>
+        </div>
         {% endif %}
-        <a href="/settings/?tab=controls"
-           class="text-xs text-gray-500 hover:text-gray-300" title="Open settings">⚙</a>
       </div>
     </div>
   </nav>
@@ -113,7 +151,7 @@
         ]},
         {'key': 'trading', 'label': 'Trading', 'icon': '💰',
          'children': [
-          ('proposals', '/proposals/', 'Pending Proposals', '⏳'),
+          ('proposals', '/proposals/', 'Proposals', '🎯'),
           ('trades', '/trades/', 'Trades', '💰'),
         ]},
         {'key': 'diag', 'label': 'Diagnostics', 'icon': '🩺',
@@ -168,6 +206,13 @@
 
   <!-- Main content -->
   <div id="main-content" class="p-4 sm:ml-64 pt-20">
+    <!-- Breadcrumbs (Flowbite). Auto-populated from URL + ?from=<key> param.
+         Pages can override the trail via window.PLATA_BREADCRUMBS = [{label, href?}, …]. -->
+    <nav id="breadcrumbs" class="mb-3 hidden" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-2 text-xs text-gray-500">
+        <!-- filled by JS -->
+      </ol>
+    </nav>
     {% block content %}{% endblock %}
   </div>
 
@@ -574,6 +619,122 @@
       }
       document.addEventListener('DOMContentLoaded', () => init());
       document.body.addEventListener('htmx:afterSwap', e => init(e.target));
+    })();
+
+    // ---------- Header KPIs ----------
+    // Polls /api/header_stats every 10s. Renders PnL today, open positions
+    // + unrealized PnL, pending HITL count, and LLM spend vs budget.
+    (function () {
+      const $pnl = document.getElementById('kpi-pnl');
+      if (!$pnl) return;
+      const $open = document.getElementById('kpi-open');
+      const $hitl = document.getElementById('kpi-hitl');
+      const $hitlLink = document.getElementById('kpi-hitl-link');
+      const $budget = document.getElementById('kpi-budget');
+      const $budgetLink = document.getElementById('kpi-budget-link');
+      const $kpis = document.getElementById('header-kpis');
+      function fmt(n, signed) {
+        const v = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (!signed) return '$' + v;
+        return (n >= 0 ? '+$' : '−$') + v;
+      }
+      async function tick() {
+        try {
+          const r = await fetch('/api/header_stats', { cache: 'no-store' });
+          if (!r.ok) return;
+          const s = await r.json();
+          $kpis.classList.remove('hidden');
+          $pnl.textContent = fmt(s.daily_pnl, true);
+          $pnl.className = 'font-mono font-semibold ' + (s.daily_pnl > 0 ? 'text-green-500' : s.daily_pnl < 0 ? 'text-red-500' : 'text-gray-400');
+          const unr = s.unrealized_pnl || 0;
+          $open.innerHTML = s.open_count + (s.open_count > 0
+            ? ` · <span class="${unr > 0 ? 'text-green-500' : unr < 0 ? 'text-red-500' : 'text-gray-400'}">${fmt(unr, true)}</span>`
+            : '');
+          if (s.pending_hitl > 0) {
+            $hitlLink.classList.remove('hidden');
+            $hitl.textContent = s.pending_hitl;
+          } else {
+            $hitlLink.classList.add('hidden');
+          }
+          if (s.llm_budget > 0) {
+            $budgetLink.classList.remove('hidden');
+            const used = s.llm_spend_today || 0;
+            const pct = used / s.llm_budget;
+            $budget.textContent = fmt(used) + ' / ' + fmt(s.llm_budget);
+            $budget.className = 'font-mono ' + (pct > 0.9 ? 'text-red-500' : pct > 0.7 ? 'text-yellow-500' : 'text-gray-400');
+          } else if (s.llm_spend_today > 0) {
+            $budgetLink.classList.remove('hidden');
+            $budget.textContent = fmt(s.llm_spend_today);
+            $budget.className = 'font-mono text-gray-400';
+          }
+        } catch (e) { /* ignore */ }
+      }
+      tick();
+      setInterval(tick, 10000);
+    })();
+
+    // ---------- Breadcrumbs ----------
+    // Pages set window.PLATA_BREADCRUMBS = [{label,href?}, …] before this runs,
+    // OR we derive from active sidebar item + a ?from=<page> referrer.
+    (function () {
+      const nav = document.getElementById('breadcrumbs');
+      if (!nav) return;
+      const ol = nav.querySelector('ol');
+      // Page key → label + href (for ?from=… referrers and the active page name)
+      const PAGES = {
+        dashboard:  ['Dashboard', '/'],
+        workflow:   ['Workflow', '/workflow/'],
+        activity:   ['Activity', '/activity/'],
+        agents:     ['Agent Health', '/agents/'],
+        history:    ['History', '/history/'],
+        graph:      ['Graph', '/graph/'],
+        historian:  ['Historian seed', '/historian/'],
+        proposals:  ['Proposals', '/proposals/'],
+        trades:     ['Trades', '/trades/'],
+        errors:     ['Errors', '/errors/'],
+        dlq:        ['Dead Letters', '/dlq/'],
+        settings:   ['Settings', '/settings/'],
+      };
+      function currentKey() {
+        // The active sidebar item already encodes which page we're on.
+        const active = document.querySelector('aside a.bg-gray-200, aside a.dark\\:bg-gray-700');
+        if (active) {
+          const href = active.getAttribute('href');
+          for (const [k, [label, h]] of Object.entries(PAGES)) {
+            if (href === h) return k;
+          }
+        }
+        // Fallback: match by URL prefix
+        for (const [k, [, h]] of Object.entries(PAGES)) {
+          if (h !== '/' && location.pathname.startsWith(h)) return k;
+        }
+        return null;
+      }
+      function render(items) {
+        ol.innerHTML = items.map((it, i) => {
+          const isLast = i === items.length - 1;
+          const sep = i === 0 ? '' : '<svg class="w-3 h-3 mx-1 text-gray-400" fill="none" viewBox="0 0 6 10"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 9 4-4-4-4"/></svg>';
+          const inner = isLast
+            ? `<span class="text-gray-700 dark:text-gray-300 font-medium">${it.label}</span>`
+            : `<a href="${it.href}" class="hover:text-blue-500">${it.label}</a>`;
+          return `<li class="inline-flex items-center">${sep}${inner}</li>`;
+        }).join('');
+        nav.classList.remove('hidden');
+      }
+      // Custom trail wins
+      if (Array.isArray(window.PLATA_BREADCRUMBS) && window.PLATA_BREADCRUMBS.length) {
+        render(window.PLATA_BREADCRUMBS);
+        return;
+      }
+      const key = currentKey();
+      if (!key || key === 'dashboard') return;  // hide on root
+      const trail = [];
+      const from = new URLSearchParams(location.search).get('from');
+      if (from && PAGES[from] && from !== key) {
+        trail.push({ label: PAGES[from][0], href: PAGES[from][1] });
+      }
+      trail.push({ label: PAGES[key][0] });
+      render(trail);
     })();
 
     // ---------- Live elapsed-time ticker ----------
