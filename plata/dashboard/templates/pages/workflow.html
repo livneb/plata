@@ -4,6 +4,11 @@
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-semibold">Workflow</h1>
   <div class="flex items-center gap-2">
+    <button id="resume-all-sources-btn" type="button"
+            class="text-xs px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+            title="Clear `halted` on every scraper source (system + user halts).">
+      ▶ Resume all sources
+    </button>
     <span class="text-xs uppercase text-gray-500">System:</span>
     {% if system_state == 'HALTED' %}
     <span class="bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-red-900 dark:text-red-300">HALTED</span>
@@ -108,6 +113,7 @@
         const target = cancel.getAttribute('data-cancel-target') || '';
         let url, msg, danger = true, label = 'Cancel';
         if (kind === 'source') { url = '/workflow/cancel/source/' + encodeURIComponent(target); msg = `Halt the "${target}" source's poll loop?`; label = 'Halt'; }
+        else if (kind === 'resume-source') { url = '/workflow/resume/source/' + encodeURIComponent(target); msg = `Resume the "${target}" source's poll loop?`; label = 'Resume'; danger = false; }
         else if (kind === 'agent') { url = '/workflow/cancel/agent/' + encodeURIComponent(target); msg = `Halt the "${target}" agent?`; label = 'Halt'; }
         else if (kind === 'historian-dismiss') { url = '/historian/reset'; msg = 'Dismiss the historian card?'; label = 'Dismiss'; }
         else if (kind === 'historian-batch') {
@@ -163,6 +169,23 @@
       } else grpWrap.classList.add('hidden');
       document.getElementById('cm-raw').textContent = JSON.stringify(data, null, 2);
       modal.classList.remove('hidden');
+    });
+    // Resume-all-sources button — clears every scraper:source halted flag.
+    document.getElementById('resume-all-sources-btn')?.addEventListener('click', async () => {
+      const ok = await plataConfirm({
+        title: 'Resume all sources',
+        message: 'Clear the halted flag on every scraper source? They will start polling again on their next 5-second tick.',
+        confirmLabel: 'Resume all',
+      });
+      if (!ok) return;
+      try {
+        const r = await fetch('/workflow/resume/sources/all', { method: 'POST' });
+        const j = await r.json();
+        plataToast(`Resumed ${j.count} source(s).`, 'success');
+        setTimeout(() => location.reload(), 600);
+      } catch (e) {
+        plataToast('Failed to resume — see console.', 'error');
+      }
     });
   })();
 </script>

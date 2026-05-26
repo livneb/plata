@@ -503,6 +503,31 @@ async def cancel_source(name: str):
     return JSONResponse({"ok": True, "source": name, "status": "halted"})
 
 
+@router.post("/resume/source/{name}")
+async def resume_source(name: str):
+    """Resume a single halted scraper source. Clears both 'status' and
+    'halted_by' — the next scraper tick (within ~5s) starts polling again."""
+    from fastapi.responses import JSONResponse
+    redis = get_redis()
+    await redis.hset(f"scraper:source:{name}", mapping={"status": "idle", "halted_by": ""})
+    return JSONResponse({"ok": True, "source": name, "status": "idle"})
+
+
+@router.post("/resume/sources/all")
+async def resume_all_sources():
+    """Clear `halted` on every scraper source (system and user halts).
+    Useful when 'Next poll: all halted' shows up."""
+    from fastapi.responses import JSONResponse
+    redis = get_redis()
+    cleared: list[str] = []
+    async for k in redis.scan_iter(match="scraper:source:*", count=100):
+        data = await redis.hgetall(k)
+        if (data.get("status") or "").lower() == "halted":
+            await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
+            cleared.append(k.rsplit(":", 1)[-1])
+    return JSONResponse({"ok": True, "cleared": cleared, "count": len(cleared)})
+
+
 @router.post("/cancel/agent/{name}")
 async def cancel_agent(name: str):
     """Per-agent halt. Reuses the existing system:halt channel with `agent` payload."""

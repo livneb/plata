@@ -44,7 +44,11 @@
         {% set cancel = {'kind': 'historian-dismiss', 'label': 'Dismiss'} %}
       {% elif key == 'sleeping' and c.agent == 'scraper' %}
         {# Source card in Sleeping lane — title is the source name (e.g. 'GDELT'). #}
+        {% if c.status == 'halted' %}
+        {% set cancel = {'kind': 'resume-source', 'target': (c.title | lower | replace(' ', '_')), 'label': 'Resume source'} %}
+        {% else %}
         {% set cancel = {'kind': 'source', 'target': (c.title | lower | replace(' ', '_')), 'label': 'Halt source'} %}
+        {% endif %}
       {% elif key in ('doing','active') and c.agent in ('graph_ingestion','strategist','reviewer','risk_manager','executor','orchestrator','telegram_bot','trade_sampler') %}
         {% set cancel = {'kind': 'agent', 'target': c.agent, 'label': 'Halt agent'} %}
       {% elif c.agent == 'historian' and c.title and 'Batch' in c.title and c.status == 'running' %}
@@ -58,8 +62,8 @@
         <button type="button"
                 data-cancel-kind="{{ cancel.kind }}"
                 {% if cancel.target %}data-cancel-target="{{ cancel.target }}"{% endif %}
-                class="absolute top-1 right-1 w-5 h-5 text-gray-400 hover:text-red-500 text-xs leading-none"
-                title="{{ cancel.label }}">✕</button>
+                class="absolute top-1 right-1 w-5 h-5 text-xs leading-none {% if cancel.kind == 'resume-source' %}text-emerald-500 hover:text-emerald-400{% else %}text-gray-400 hover:text-red-500{% endif %}"
+                title="{{ cancel.label }}">{% if cancel.kind == 'resume-source' %}▶{% else %}✕{% endif %}</button>
         {% endif %}
         <div class="flex items-center justify-between mb-1">
           <span class="text-[10px] px-1.5 py-0.5 rounded {{ cat_colors.get(c.category, 'bg-gray-200 text-gray-700') }}">{{ c.category }}</span>

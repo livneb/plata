@@ -151,27 +151,51 @@ async def _lifespan(_app: FastAPI):
                     await redis.hset(cooldown_key, code, now_utc.isoformat())
 
                 # 1. Scrapers all halted while system says RUNNING.
+                #    For halts marked `halted_by=system` (left over from a past
+                #    system halt that never cleaned up): AUTO-RESUME them.
+                #    For user-halted sources: WARN — those need a human.
                 if state == "RUNNING":
                     seen_any = False
                     active_count = 0
-                    halted_names: list[str] = []
+                    auto_resumed: list[str] = []
+                    still_halted_by_user: list[str] = []
                     async for k in redis.scan_iter(match="scraper:source:*", count=100):
                         seen_any = True
                         data = await redis.hgetall(k)
                         name = k.rsplit(":", 1)[-1]
-                        if (data.get("status") or "").lower() == "halted":
-                            halted_names.append(name)
+                        status = (data.get("status") or "").lower()
+                        if status == "halted":
+                            if (data.get("halted_by") or "system") == "system":
+                                # Self-healing: the resume action must have missed
+                                # this one (e.g. service was down then). Fix it now.
+                                await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
+                                auto_resumed.append(name)
+                                active_count += 1
+                            else:
+                                still_halted_by_user.append(name)
                         else:
                             active_count += 1
+                    if auto_resumed:
+                        await reporter.capture(
+                            agent="health_watchdog", severity="WARN",
+                            error_type="ScrapersAutoResumed",
+                            message=(
+                                f"Auto-resumed {len(auto_resumed)} scraper source(s) "
+                                f"that were halted_by=system while system is RUNNING: "
+                                f"{', '.join(auto_resumed)}. Root cause is a past "
+                                f"system halt whose resume didn't clean up these flags."
+                            ),
+                            context={"sources": ",".join(auto_resumed[:10])},
+                        )
                     if seen_any and active_count == 0:
                         await _maybe_warn(
                             "all_scrapers_halted",
                             "AllScrapersHalted",
                             f"System is RUNNING but every scraper source is halted "
-                            f"({len(halted_names)} sources). No new signals will reach "
-                            f"the pipeline until at least one source is resumed. "
-                            f"Resume from /workflow/.",
-                            {"halted_sources": ",".join(halted_names[:10])},
+                            f"by the user ({len(still_halted_by_user)} sources). "
+                            f"No new signals will reach the pipeline until at least "
+                            f"one source is resumed. Resume from /workflow/.",
+                            {"halted_sources": ",".join(still_halted_by_user[:10])},
                         )
 
                 # 2. Critical agents with stale heartbeats while RUNNING.

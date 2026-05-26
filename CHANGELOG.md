@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.093 — 2026-05-26
+- **Three ways to restart halted scraper sources.**
+  - **▶ on each card** — halted source cards in the Sleeping lane now show a green ▶ instead of ✕. One click resumes that source.
+  - **▶ Resume all sources** — page-level button at the top of `/workflow/`. One-click clears every halted source at once.
+  - **🤖 Auto-start (the real fix).** The health watchdog now actively **self-heals**: every 60 s, if the system is RUNNING and any source is halted with `halted_by=system` (left over from a past system halt that didn't clean up), it **auto-resumes** them and writes a `ScrapersAutoResumed` WARN to `/errors/` so you see what happened. User-halted sources stay sticky and trigger a separate `AllScrapersHalted` warning only if every source is in that state.
+- New endpoints: `POST /workflow/resume/source/<name>`, `POST /workflow/resume/sources/all`.
+- **What to test:** open `/workflow/` — every halted source card has a ▶ button. Click any → that one resumes within ~5 s. Or click the page header's **▶ Resume all sources** → all clear at once. Halt the whole system → resume → within 60 s the watchdog auto-clears any source the resume action missed.
+
 ## 2.24.092 — 2026-05-26
 - **🐛 Root cause of "Next poll: all halted".** When the system is HALTED (kill-switch, daily-loss guard, LLM-budget cap), the scraper writes `status=halted` to every source's Redis hash on every tick. **Resume only flipped `system:state` back to `RUNNING` — it did not clear the per-source halted flags.** So sources stayed halted forever (silently) even though the dashboard banner says RUNNING. Fixed two ways:
   - Sources now carry `halted_by=system|user`. The `/api/resume` endpoint auto-clears any source with `halted_by=system`. User-cancelled sources stay sticky (intentional).
