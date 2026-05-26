@@ -95,18 +95,20 @@
       </div>
       <div class="mt-4">
         <h3 class="text-[10px] uppercase text-gray-500 mb-1">Legend</h3>
+        <p class="text-[10px] uppercase text-gray-500 mt-2 mb-1">Events (icon by category)</p>
         <ul class="text-[11px] space-y-1">
-          <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#60a5fa"></span> event · crypto</li>
-          <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#a78bfa"></span> event · macro</li>
-          <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#f59e0b"></span> event · regulatory</li>
-          <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#34d399"></span> event · company</li>
-          <li><span class="inline-block w-3 h-3 rounded-full align-middle" style="background:#fb7185"></span> event · geopolitics</li>
-          <li><span class="inline-block">📰</span> event (sized by connections)</li>
-          <li><span class="inline-block">🇺🇸 🇮🇷 …</span> country (flag = the node)</li>
-          <li><span class="inline-block">👨 👩 👤</span> person</li>
-          <li><span class="inline-block">🏢</span> company</li>
-          <li><span class="inline-block">🏛️</span> organisation</li>
-          <li><span class="inline-block">💰 💹</span> asset / ticker</li>
+          <li>⚔️ war &nbsp;·&nbsp; 🛡️ cyber &nbsp;·&nbsp; 🏦 macro</li>
+          <li>⚖️ regulation &nbsp;·&nbsp; 📊 earnings</li>
+          <li>🔥 social virality &nbsp;·&nbsp; 🐋 whale move</li>
+          <li>🌐 geopolitics &nbsp;·&nbsp; 🪙 crypto &nbsp;·&nbsp; 💻 tech</li>
+          <li>📰 other / uncategorised</li>
+        </ul>
+        <p class="text-[10px] uppercase text-gray-500 mt-3 mb-1">Entities</p>
+        <ul class="text-[11px] space-y-1">
+          <li>🇺🇸 🇮🇷 …  country (flag = the node)</li>
+          <li>👨 👩 👤  person</li>
+          <li>🏢  company &nbsp;·&nbsp; 🏛️  organisation</li>
+          <li>💰  asset &nbsp;·&nbsp; 💹  ticker</li>
         </ul>
         <p class="text-[10px] text-gray-500 mt-3">Hover any node to highlight its relations · double-click anywhere to zoom in.</p>
       </div>
@@ -281,6 +283,25 @@
         person: '👤', company: '🏢', country: '🌍', asset: '💰',
         org: '🏛️', ticker: '💹', event: '📰', default: '◾',
       };
+      // Per-category event icons (was a single 📰 for all). Categories come
+      // from EventCategory in plata/core/schemas.py.
+      const EVENT_CAT_ICON = {
+        war:             '⚔️',
+        cyber:           '🛡️',
+        macro:           '🏦',
+        regulation:      '⚖️',
+        earnings:        '📊',
+        social_virality: '🔥',
+        whale_move:      '🐋',
+        // Aliases / legacy values we've seen come back from the enricher.
+        geopolitics:     '🌐',
+        crypto:          '🪙',
+        tech:            '💻',
+        company:         '🏢',
+        regulatory:      '⚖️',
+        other:           '📰',
+        default:         '📰',
+      };
       // Best-effort gendered person icon from common first names.
       const FEMALE = new Set(['mary','jane','sarah','rachel','michelle','janet','christine','kamala','angela','margaret','theresa','ursula','lisa','hillary','melinda','melania','elizabeth','queen','janet_yellen','kristalina','gita','nikki']);
       const MALE = new Set(['donald','barack','joe','joseph','vladimir','xi','kim','jerome','warren','elon','jeff','bill','mark','sundar','satya','mohammed','abdullah','benjamin','volodymyr','emmanuel','olaf','rishi','keir','jay','jamie','jeffrey','larry','christopher']);
@@ -323,7 +344,10 @@
         PRK:'🇰🇵',KP:'🇰🇵',NORTH_KOREA:'🇰🇵',
       };
       function iconFor(d) {
-        if (d.kind === 'event') return ENTITY_ICONS.event;
+        if (d.kind === 'event') {
+          const cat = String(d.category || 'default').toLowerCase();
+          return EVENT_CAT_ICON[cat] || EVENT_CAT_ICON.default;
+        }
         const t = (d.etype || 'default').toLowerCase();
         if (t === 'country') {
           const key = String(d.label || '').toUpperCase().replace(/[\s-]+/g, '_');

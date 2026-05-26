@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.079 — 2026-05-26
+- **Graph: per-category event icons.** Events were all rendering as a single 📰 newspaper icon regardless of what they were about. Now: ⚔️ war · 🛡️ cyber · 🏦 macro · ⚖️ regulation · 📊 earnings · 🔥 social_virality · 🐋 whale_move · 🌐 geopolitics · 🪙 crypto · 💻 tech · 🏢 company. The legend on the right rail is rewritten to match the actual `EventCategory` enum.
+- **What to test:** open `/graph/` — should see a mix of icons instead of a wall of newspapers.
+
 ## 2.24.078 — 2026-05-26
 - **Stocks are now first-class** — the strategist, universe and risk-manager all know stocks exist, not just crypto.
   - **Strategist prompt** (`agents/strategist.py`): replaced the "BTC/ETH/SOL pairs only" rule with a legal-universe map per asset class: crypto names for on-chain events, **SPY/QQQ/IWM/GLD/TLT** for macro shocks, **AAPL/MSFT/NVDA/GOOGL/META/AMZN/TSLA/AMD/AVGO** for single-name US tech earnings/regulatory news, **COIN/MSTR** for crypto-adjacent equities, **XAUUSDT/GLD** for gold, **EURUSDT/GBPUSDT** for dollar stories. Default to SPY for ambiguous macro.
