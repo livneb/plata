@@ -21,13 +21,13 @@
       <div class="text-xs uppercase text-gray-500">Open positions{{ help_icon('open_positions') }}</div>
       <div class="text-2xl font-semibold">{{ open_positions }}</div>
     </a>
-    <a href="/trades/"
+    <a href="/trades/?from=dashboard"
        class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">PnL today{{ help_icon('daily_pnl') }}</div>
       <div class="text-2xl font-semibold {% if daily_pnl > 0 %}text-green-500{% elif daily_pnl < 0 %}text-red-500{% endif %}">${{ '%.2f' % daily_pnl }}</div>
       <div id="spark-pnl" class="h-10 -mb-2"></div>
     </a>
-    <a href="/proposals/"
+    <a href="/proposals/?from=dashboard"
        class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">Pending HITL{{ help_icon('pending_hitl') }}</div>
       <div class="text-2xl font-semibold">{{ pending_hitl }}</div>
@@ -38,7 +38,7 @@
       <div class="text-2xl font-semibold">{{ signals_24h }}</div>
       <div id="spark-signals" class="h-10 -mb-2"></div>
     </a>
-    <a href="/agents/"
+    <a href="/agents/?from=dashboard"
        class="block p-4 bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
       <div class="text-xs uppercase text-gray-500">LLM spend today{{ help_icon('llm_spend_today') }}</div>
       <div class="text-2xl font-semibold">${{ '%.4f' % llm_spend_today }}</div>
@@ -66,7 +66,7 @@
     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
       <div class="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
         <h3 class="font-semibold">Recent trades</h3>
-        <a href="/trades/" class="text-xs text-blue-500 hover:underline">View all</a>
+        <a href="/trades/?from=dashboard" class="text-xs text-blue-500 hover:underline">View all</a>
       </div>
       <ul class="divide-y divide-gray-100 dark:divide-gray-700">
         {% for t in recent_trades %}

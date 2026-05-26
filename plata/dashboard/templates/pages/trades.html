@@ -24,7 +24,7 @@
     <tbody>
       {% for t in trades %}
       <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
-          onclick="location.href='/trades/{{ t.trade_ulid }}'">
+          onclick="location.href='/trades/{{ t.trade_ulid }}?from=trades'">
         <td class="px-6 py-3 font-mono text-xs">{{ t.trade_ulid[:10] }}…</td>
         <td class="px-6 py-3">
           <span class="px-2 py-0.5 rounded text-xs

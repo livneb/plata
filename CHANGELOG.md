@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.085 — 2026-05-26
+- **Breadcrumbs work for ANY URL now**, not just section roots. On a sub-page like `/trades/<ulid>` you get `Positions › <H1-text-or-fallback>`; on `/trades/watch` you get `Positions › Symbol watch`; on `/agents/strategist` (when those exist) `Agent Health › Agent: strategist`. The leaf label is derived from the page's `<h1>`, falling back to `<title>` (with the ` · Plata` suffix stripped), and finally a per-section synthesized label (e.g. `Trade 01ABCDEF…`).
+- The section crumb is now a real link when there's a leaf — clicking "Positions" from a trade detail page takes you back to the list.
+- Dashboard tiles now pass `?from=dashboard`; trade rows pass `?from=trades` — those compose into `Dashboard › Positions › Trade …`.
+- **What to test:** click any trade from `/trades/` → top of page shows `Positions › Trade 01ABCDEF…`. Land directly on `/trades/<ulid>` (from a Telegram link) → still get the same trail. Go Dashboard → Positions tile → trade → see all three crumbs.
+
 ## 2.24.084 — 2026-05-26
 - **"Trades" → "Positions"** in the UI (URL stays at `/trades/` for back-compat with bookmarks / Telegram links). Sidebar icon flipped to 💼.
 - **Per-symbol watch list — decoupled from trade milestones.** Every distinct symbol that has an open position is now polled every **5 minutes** by the sampler, regardless of how the per-trade cadence behaves (which can be as long as a few hours for week-out milestones). Result lives in `symbol:latest:<symbol>` Redis hash. The topbar `Open · unrealized` KPI prefers this over the per-trade cache, so even slow-cadence trades show fresh PnL.

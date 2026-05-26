@@ -683,8 +683,13 @@
     })();
 
     // ---------- Breadcrumbs ----------
-    // Pages set window.PLATA_BREADCRUMBS = [{label,href?}, …] before this runs,
-    // OR we derive from active sidebar item + a ?from=<page> referrer.
+    // Universal: derives a trail for ANY URL in the app.
+    //   1. If the page explicitly set window.PLATA_BREADCRUMBS, use that.
+    //   2. Otherwise: optionally a `?from=<key>` referrer crumb,
+    //      then the parent section (matched against PAGES),
+    //      then — if the URL has a sub-path beyond the section — a "leaf"
+    //      crumb derived from the page's <h1> (truncated) or a smart
+    //      fallback (e.g. "Trade 01ABCDEF" for /trades/<ulid>).
     (function () {
       const nav = document.getElementById('breadcrumbs');
       if (!nav) return;
@@ -704,45 +709,92 @@
         dlq:        ['Dead Letters', '/dlq/'],
         settings:   ['Settings', '/settings/'],
       };
-      function currentKey() {
-        // The active sidebar item already encodes which page we're on.
-        const active = document.querySelector('aside a.bg-gray-200, aside a.dark\\:bg-gray-700');
-        if (active) {
-          const href = active.getAttribute('href');
-          for (const [k, [label, h]] of Object.entries(PAGES)) {
-            if (href === h) return k;
-          }
-        }
-        // Fallback: match by URL prefix
+      // Pages whose URL has a {path}-style "leaf" segment — used to
+      // generate a fallback label when the page has no <h1>.
+      const LEAF_FALLBACK = {
+        trades:     (seg) => seg === 'watch' ? 'Symbol watch' : `Trade ${seg.slice(0, 8)}…`,
+        proposals:  (seg) => `Proposal ${seg.slice(0, 8)}…`,
+        agents:     (seg) => `Agent: ${seg}`,
+        activity:   (seg) => seg === 'history' ? 'Activity history' : seg,
+        historian:  (seg) => `Seed ${seg.slice(0, 8)}…`,
+        history:    (seg) => seg,
+        graph:      (seg) => `Node ${seg.slice(0, 8)}…`,
+        settings:   (seg) => seg,
+        errors:     (seg) => `Error ${seg.slice(0, 8)}…`,
+        dlq:        (seg) => `DLQ ${seg.slice(0, 8)}…`,
+      };
+      function sectionKey() {
+        // Find the section (sidebar) the current URL belongs to. We match
+        // by URL prefix; the active-sidebar highlight is just a hint.
         for (const [k, [, h]] of Object.entries(PAGES)) {
           if (h !== '/' && location.pathname.startsWith(h)) return k;
         }
+        if (location.pathname === '/') return 'dashboard';
         return null;
+      }
+      function deriveLeafLabel(key) {
+        // Prefer the page's <h1> — usually the cleanest human label.
+        const h1 = document.querySelector('main h1, #main-content h1');
+        if (h1) {
+          const text = (h1.textContent || '').trim().replace(/\s+/g, ' ');
+          if (text) return text.length > 60 ? text.slice(0, 57) + '…' : text;
+        }
+        // Try the page's <title> minus the " · Plata" suffix.
+        if (document.title) {
+          const t = document.title.replace(/[·–—|]\s*Plata.*$/i, '').trim();
+          if (t) return t.length > 60 ? t.slice(0, 57) + '…' : t;
+        }
+        // Last resort: synthesize from the URL leaf.
+        const [, , ...rest] = location.pathname.split('/');
+        const leaf = (rest.filter(Boolean).pop() || '').trim();
+        if (leaf && LEAF_FALLBACK[key]) return LEAF_FALLBACK[key](leaf);
+        return leaf || null;
+      }
+      function isLeaf(key) {
+        // True when the URL has a path component beyond the section base.
+        const base = PAGES[key][1];   // e.g. "/trades/"
+        const rest = location.pathname.slice(base.length);
+        // Strip any trailing slash and look for non-empty remainder.
+        return rest.replace(/^\/+|\/+$/g, '').length > 0;
       }
       function render(items) {
         ol.innerHTML = items.map((it, i) => {
           const isLast = i === items.length - 1;
           const sep = i === 0 ? '' : '<svg class="w-3 h-3 mx-1 text-gray-400" fill="none" viewBox="0 0 6 10"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 9 4-4-4-4"/></svg>';
-          const inner = isLast
+          const inner = isLast || !it.href
             ? `<span class="text-gray-700 dark:text-gray-300 font-medium">${it.label}</span>`
             : `<a href="${it.href}" class="hover:text-blue-500">${it.label}</a>`;
           return `<li class="inline-flex items-center">${sep}${inner}</li>`;
         }).join('');
         nav.classList.remove('hidden');
       }
-      // Custom trail wins
+      // Custom trail wins entirely.
       if (Array.isArray(window.PLATA_BREADCRUMBS) && window.PLATA_BREADCRUMBS.length) {
         render(window.PLATA_BREADCRUMBS);
         return;
       }
-      const key = currentKey();
-      if (!key || key === 'dashboard') return;  // hide on root
+      const key = sectionKey();
+      if (!key) return;
       const trail = [];
       const from = new URLSearchParams(location.search).get('from');
+      // Optional referrer crumb (e.g. from a Dashboard tile)
       if (from && PAGES[from] && from !== key) {
         trail.push({ label: PAGES[from][0], href: PAGES[from][1] });
       }
-      trail.push({ label: PAGES[key][0] });
+      // Section crumb — link unless we're already at the section root and there's no leaf
+      const atSectionRoot = location.pathname === PAGES[key][1] || location.pathname === PAGES[key][1].replace(/\/$/, '');
+      const leaf = isLeaf(key) ? deriveLeafLabel(key) : null;
+      if (key !== 'dashboard') {
+        trail.push({ label: PAGES[key][0], href: leaf ? PAGES[key][1] : null });
+      } else if (leaf) {
+        trail.push({ label: 'Dashboard', href: '/' });
+      }
+      if (leaf) trail.push({ label: leaf });
+      // Hide if we'd only render the section itself at its root (no value-add).
+      if (trail.length === 0) return;
+      if (trail.length === 1 && atSectionRoot && key !== 'dashboard') {
+        // Show a single non-link crumb anyway for visual consistency.
+      }
       render(trail);
     })();
 
