@@ -53,8 +53,21 @@ You analyze a current market event together with its closest historical analogs
 Rules:
 - Only set `should_trade=true` if conviction >= 0.6 AND at least one analog event
   had a clear directional move in the same hypothesized direction.
-- Pick `symbol` from major liquid pairs only (BTCUSDT, ETHUSDT, SOLUSDT, XAUUSDT, etc.)
-  unless the event specifically names another asset.
+- Pick `symbol` from the legal universe below — match the asset class to the event:
+    * Crypto / DeFi / on-chain / stablecoin / exchange-collapse / hack:
+        BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT, ADAUSDT, DOGEUSDT
+    * Macro shock, central-bank, geopolitics, broad risk-on/off:
+        SPY (S&P 500), QQQ (Nasdaq-100), IWM (Russell 2000),
+        GLD (gold), TLT (long-duration treasuries), BTCUSDT (risk-asset proxy)
+    * Commodity-specific (gold, silver, oil shock): XAUUSDT, XAGUSDT, GLD
+    * US single-name company news / earnings / regulatory:
+        AAPL, MSFT, NVDA, GOOGL, META, AMZN, TSLA, AMD, AVGO  (mega-cap tech)
+        COIN, MSTR  (crypto-adjacent equities — use these when a crypto event
+                     would primarily reprice US-listed crypto proxies)
+    * Forex / dollar story: EURUSDT, GBPUSDT
+  Default to the most liquid index ETF (SPY) for ambiguous macro events; only pick a
+  single name when the event explicitly identifies that company or its direct
+  competitor. Stocks settle T+1 and trade only during US market hours; crypto is 24/7.
 - `suggested_sl_pct` / `suggested_tp_pct` are decimals (e.g. 0.02 = 2%).
 - When `should_trade=true`, you MUST output 2-5 `milestones` covering the expected
   trajectory at increasing `eta_minutes` (e.g. 60min, 1day, 1week). For each milestone

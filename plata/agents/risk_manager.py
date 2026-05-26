@@ -44,6 +44,7 @@ class RiskManager(BaseAgent):
     def __init__(self) -> None:
         super().__init__()
         self._bybit: BybitClient | None = None
+        self._alpaca: Any | None = None
         self._config: dict[str, str] = {}
 
     async def setup(self) -> None:
@@ -56,6 +57,13 @@ class RiskManager(BaseAgent):
             self._bybit = BybitClient(agent=self.name)
         except Exception as e:
             self.log.warning("bybit_init_failed", error=str(e))
+        try:
+            from plata.execution.alpaca_client import AlpacaClient
+            a = AlpacaClient(agent=self.name)
+            if a.configured():
+                self._alpaca = a
+        except Exception as e:  # noqa: BLE001
+            self.log.warning("alpaca_init_failed", error=str(e))
 
     async def _reload_config(self) -> None:
         redis = get_redis()
@@ -150,8 +158,10 @@ class RiskManager(BaseAgent):
                     return
 
         # ---- Existing portfolio caps ----
-        positions = await self._fetch_positions()
-        # Use the larger of Bybit positions or local-ledger open count.
+        from plata.execution.router import venue_for
+        venue = venue_for(proposal.symbol)
+        positions = await self._fetch_positions(venue)
+        # Use the larger of venue positions or local-ledger open count.
         local_open = len(open_trades)
         effective_open = max(len(positions), local_open)
         if effective_open >= int(self._config.get("max_open_positions", 3)):
@@ -164,8 +174,8 @@ class RiskManager(BaseAgent):
             await self._reject(proposal, "sector_cap")
             return
 
-        # Approximate notional sizing: 1% of equity per trade (fallback if no Bybit)
-        equity = await self._fetch_equity()
+        # Approximate notional sizing: 1% of equity per trade (fallback if venue unset)
+        equity = await self._fetch_equity(venue)
         risk_pct = Decimal(self._config.get("risk_per_trade_pct", "1.0")) / Decimal("100")
         notional_usd = (Decimal(str(equity)) * risk_pct) if equity else Decimal("100")
 
@@ -252,7 +262,21 @@ class RiskManager(BaseAgent):
                 n += 1
         return n
 
-    async def _fetch_equity(self) -> float | None:
+    async def _fetch_equity(self, venue: str = "bybit") -> float | None:
+        """Return free equity (USD) at the given venue, or None if unconfigured.
+        Caller passes the venue resolved from `venue_for(proposal.symbol)`."""
+        if venue == "alpaca":
+            if not self._alpaca:
+                return None
+            try:
+                bal = await self._alpaca.fetch_balance()
+                # AlpacaClient returns {"total": {"USD": float}}
+                total = bal.get("total", {})
+                usd = total.get("USD") or total.get("USDT")
+                return float(usd) if usd else None
+            except Exception:  # noqa: BLE001
+                return None
+        # bybit
         if not self._bybit:
             return None
         try:
@@ -263,7 +287,14 @@ class RiskManager(BaseAgent):
         except Exception:
             return None
 
-    async def _fetch_positions(self) -> list[dict[str, Any]]:
+    async def _fetch_positions(self, venue: str = "bybit") -> list[dict[str, Any]]:
+        if venue == "alpaca":
+            if not self._alpaca:
+                return []
+            try:
+                return await self._alpaca.fetch_positions()
+            except Exception:  # noqa: BLE001
+                return []
         if not self._bybit:
             return []
         try:
@@ -301,8 +332,18 @@ class RiskManager(BaseAgent):
         return raw in ("1", "true", "yes", "on")
 
     async def _fetch_price(self, symbol: str) -> float | None:
+        from plata.execution.router import venue_for
+        venue = venue_for(symbol)
+        if venue == "alpaca":
+            if not self._alpaca:
+                # Fallback synthetic so paper-mode flow continues without Alpaca keys.
+                return 100.0
+            try:
+                t = await self._alpaca.fetch_ticker(symbol)
+                return float(t.get("last") or t.get("close") or 0) or None
+            except Exception:  # noqa: BLE001
+                return None
         if not self._bybit:
-            # Fallback synthetic for paper mode
             return 50000.0 if symbol.startswith("BTC") else 1.0
         try:
             t = await self._bybit.fetch_ticker(symbol)

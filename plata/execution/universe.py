@@ -35,6 +35,24 @@ UNIVERSE: dict[str, Symbol] = {
     # FX
     "EURUSDT":  Symbol("EURUSDT",  sector="fx",            min_qty=Decimal("1"),      tick_size=Decimal("0.00001")),
     "GBPUSDT":  Symbol("GBPUSDT",  sector="fx",            min_qty=Decimal("1"),      tick_size=Decimal("0.00001")),
+    # US Equities (Alpaca, fractional shares supported)
+    "AAPL":     Symbol("AAPL",     venue="alpaca_paper", instrument_type="stock", sector="us_megacap", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "MSFT":     Symbol("MSFT",     venue="alpaca_paper", instrument_type="stock", sector="us_megacap", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "NVDA":     Symbol("NVDA",     venue="alpaca_paper", instrument_type="stock", sector="us_megacap", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "GOOGL":    Symbol("GOOGL",    venue="alpaca_paper", instrument_type="stock", sector="us_megacap", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "META":     Symbol("META",     venue="alpaca_paper", instrument_type="stock", sector="us_megacap", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "AMZN":     Symbol("AMZN",     venue="alpaca_paper", instrument_type="stock", sector="us_megacap", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "TSLA":     Symbol("TSLA",     venue="alpaca_paper", instrument_type="stock", sector="us_megacap", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "AMD":      Symbol("AMD",      venue="alpaca_paper", instrument_type="stock", sector="us_semis",   min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "AVGO":     Symbol("AVGO",     venue="alpaca_paper", instrument_type="stock", sector="us_semis",   min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "COIN":     Symbol("COIN",     venue="alpaca_paper", instrument_type="stock", sector="us_crypto_adj", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "MSTR":     Symbol("MSTR",     venue="alpaca_paper", instrument_type="stock", sector="us_crypto_adj", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    # US ETFs
+    "SPY":      Symbol("SPY",      venue="alpaca_paper", instrument_type="etf",   sector="us_index",   min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "QQQ":      Symbol("QQQ",      venue="alpaca_paper", instrument_type="etf",   sector="us_index",   min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "IWM":      Symbol("IWM",      venue="alpaca_paper", instrument_type="etf",   sector="us_index",   min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "GLD":      Symbol("GLD",      venue="alpaca_paper", instrument_type="etf",   sector="us_commodity", min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
+    "TLT":      Symbol("TLT",      venue="alpaca_paper", instrument_type="etf",   sector="us_bonds",   min_qty=Decimal("0.01"), tick_size=Decimal("0.01")),
 }
 
 

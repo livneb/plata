@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.078 — 2026-05-26
+- **Stocks are now first-class** — the strategist, universe and risk-manager all know stocks exist, not just crypto.
+  - **Strategist prompt** (`agents/strategist.py`): replaced the "BTC/ETH/SOL pairs only" rule with a legal-universe map per asset class: crypto names for on-chain events, **SPY/QQQ/IWM/GLD/TLT** for macro shocks, **AAPL/MSFT/NVDA/GOOGL/META/AMZN/TSLA/AMD/AVGO** for single-name US tech earnings/regulatory news, **COIN/MSTR** for crypto-adjacent equities, **XAUUSDT/GLD** for gold, **EURUSDT/GBPUSDT** for dollar stories. Default to SPY for ambiguous macro.
+  - **Universe** (`execution/universe.py`): added 16 new symbols — 11 US single names + 5 ETFs (SPY, QQQ, IWM, GLD, TLT), each with `venue="alpaca_paper"`, `instrument_type="stock" | "etf"`, sector tags (`us_megacap`, `us_index`, `us_semis`, `us_crypto_adj`, `us_commodity`, `us_bonds`) so the existing sector caps apply automatically.
+  - **Risk Manager** (`agents/risk_manager.py`): `_fetch_price`, `_fetch_equity`, `_fetch_positions` now route through `venue_for(symbol)` — crypto→Bybit, stock→Alpaca. Also opens an AlpacaClient on startup. Sector-cap and max-open-positions counts use the right venue's positions.
+- **Both paper modes confirmed running:** Bybit testnet + Alpaca paper. Trades for crypto symbols go to Bybit testnet; trades for stock tickers (AAPL, SPY, etc.) go to Alpaca paper.
+- **What to test:** Wait for the next macro-flavoured event (Fed, CPI, geopolitics) → strategist should now propose `SPY` or `GLD` instead of forcing `BTCUSDT`. Then watch the trade detail page — venue badge should show 📈 stock and the sampler should record Alpaca prices.
+
 ## 2.24.077 — 2026-05-26
 - **Settings → Environment tab now reflects DB-stored credentials.** The Bybit / Alpaca status badges were only checking `settings.bybit_api_key` / `alpaca_api_key` (env-vars), so keys saved via the 🔑 API Keys tab still showed `NOT SET`. They now show `CONFIGURED` if **either** the env-var **or** the DB row is present (matches the actual runtime lookup order in `credentials.get()`).
 - Replaced the misleading footer line ("configured per Railway service") with a link to the API Keys tab.
