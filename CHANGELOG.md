@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.075 — 2026-05-26
+- **🐛 Real fix for the empty actual-price line.** The sampler was calling `fetch_ohlcv_bybit(symbol, start_ts=now, end_ts=now)` — a zero-width window — so Bybit returned **zero bars every tick** and `_latest_price` returned `None` forever. **No trade ever got a sample.** Now queries the last 5 minutes and takes the latest bar's close. The same diagnostic endpoint added in `v2.24.074` would have told us this immediately (`probe_price: null` for a crypto symbol with no auth needed).
+- **What to test:** wait ~1 minute after deploy → open any open crypto trade's detail page → banner above the chart should flip to `📈 N live price sample(s) recorded for this trade.` and the orange **Actual** line should draw alongside the predicted dashed line.
+
 ## 2.24.074 — 2026-05-26
 - **`/trades/<ulid>/samples` is now self-diagnostic.** When the actual-price line is empty, hit this endpoint and the `diag` block tells you exactly why: sampler heartbeat age (sampler dead?), computed cadence for this trade, trade entry/exit price, venue routing (`bybit` or `alpaca`), and a one-shot live price probe — if the probe returns `null` you also get a hint pointing at missing Bybit/Alpaca credentials.
 - **What to test:** `GET /trades/<ulid>/samples` returns `{count, samples, diag:{venue, sampler_heartbeat:{age_sec, alive}, cadence_sec, probe_price, probe_hint?}}`. If `sampler_heartbeat.alive` is `false` your execution_vault deploy isn't running the sampler. If `probe_price` is null the venue credentials are missing.

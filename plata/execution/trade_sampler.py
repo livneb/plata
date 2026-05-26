@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -101,9 +101,11 @@ async def _latest_price(symbol: str) -> float | None:
                 return None
             t = await client.fetch_ticker(symbol)
             return float(t.get("last") or t.get("close") or 0) or None
-        # Default: Bybit OHLCV
+        # Default: Bybit — query the last few minutes (a 0-width window
+        # returns zero bars, which is why every trade had 0 samples).
         end = datetime.now(timezone.utc)
-        bars = await fetch_ohlcv_bybit(symbol, start_ts=end, end_ts=end, interval="1")
+        start = end - timedelta(minutes=5)
+        bars = await fetch_ohlcv_bybit(symbol, start_ts=start, end_ts=end, interval="1")
         if not bars:
             return None
         return float(bars[-1][4])
