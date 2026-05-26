@@ -107,6 +107,46 @@ async def list_recent(
         return []
 
 
+async def record_drop(
+    *,
+    event_ulid: str,
+    reason_code: str,
+    reason_human: str,
+    symbol: str | None = None,
+    side: str | None = None,
+    conviction: float | None = None,
+    reasoning: str | None = None,
+    analogs: list[dict] | None = None,
+    extras: dict | None = None,
+) -> None:
+    """Persist a 'dropped' Proposal row capturing why the strategist
+    didn't publish a real proposal for this event. Idempotent per event_ulid
+    (the row's PK is derived from event_ulid, so re-deliveries don't create
+    duplicates)."""
+    if not event_ulid:
+        return
+    try:
+        async with session_scope() as session:
+            stmt = insert(Proposal).values(
+                # Use event_ulid as the PK so each event has at most one drop row.
+                # Real published proposals get their own random ULID, so no clash.
+                proposal_ulid=event_ulid[:26],
+                triggering_event_ulid=event_ulid,
+                symbol=(symbol or "—")[:32],
+                side=(side or "long")[:8],
+                conviction=conviction,
+                reasoning=(reasoning or reason_human)[:1500],
+                state="dropped",
+                state_reason=f"{reason_code}: {reason_human}"[:255],
+                last_actor="strategist",
+                analogs=analogs or [],
+                extras=extras or {"drop_reason_code": reason_code},
+            ).on_conflict_do_nothing(index_elements=["proposal_ulid"])
+            await session.execute(stmt)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("record_drop_failed", event=event_ulid, code=reason_code, error=str(exc)[:160])
+
+
 async def get(proposal_ulid: str) -> Proposal | None:
     try:
         async with session_scope() as session:

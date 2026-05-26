@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Symbol watch · Plata{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-3">
+  <div>
+    <h1 class="text-2xl font-semibold">Symbol watch</h1>
+    <p class="text-xs text-gray-500 mt-1">
+      Every distinct symbol with an open position is polled every <b>{{ cadence_sec // 60 }} min</b>
+      independent of trade milestones. Click a symbol for full chart + open trades.
+    </p>
+  </div>
+  <a href="/trades/?from=positions" class="text-xs text-blue-500 hover:underline">← positions list</a>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+  {% for c in cards %}
+  <a href="/positions/{{ c.symbol }}?from=positions" class="block bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-blue-500 transition">
+    <div class="flex items-center justify-between mb-1">
+      <div class="flex items-center gap-2">
+        <span class="font-mono font-semibold text-lg">{{ c.symbol }}</span>
+        {% if c.venue == 'alpaca' %}<span class="bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded text-[10px]">📈 alpaca</span>
+        {% else %}<span class="bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded text-[10px]">🪙 bybit</span>{% endif %}
+      </div>
+      <div class="text-right">
+        <div class="font-mono text-sm">{{ '%.4f' % c.price if c.price else '—' }}</div>
+        <div class="text-[10px] {% if c.age_sec is none %}text-gray-400{% elif c.age_sec > cadence_sec * 2 %}text-red-500{% elif c.age_sec > cadence_sec %}text-yellow-500{% else %}text-gray-500{% endif %}">
+          {% if c.age_sec is none %}—
+          {% elif c.age_sec < 60 %}{{ c.age_sec }}s ago
+          {% elif c.age_sec < 3600 %}{{ c.age_sec // 60 }}m ago
+          {% else %}{{ c.age_sec // 3600 }}h ago{% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="spark h-12 -mx-1" data-points='{{ c.spark | tojson }}'></div>
+    <div class="flex items-center justify-between text-xs mt-1">
+      <span class="text-gray-500">{{ c.trade_count }} trade(s) · L {{ '%.3f' % c.net_long if c.net_long else '·' }} / S {{ '%.3f' % c.net_short if c.net_short else '·' }}</span>
+      <span class="font-mono font-semibold {% if c.unrealized > 0 %}text-green-500{% elif c.unrealized < 0 %}text-red-500{% else %}text-gray-400{% endif %}">
+        {% if c.unrealized > 0 %}+{% endif %}${{ '%.2f' % c.unrealized }}
+      </span>
+    </div>
+  </a>
+  {% else %}
+  <div class="col-span-full text-center text-gray-400 py-16">No open positions to watch.</div>
+  {% endfor %}
+</div>
+
+<script>
+  // Sparklines (ApexCharts area, no axes, no toolbar)
+  document.querySelectorAll('.spark').forEach(el => {
+    let pts = [];
+    try { pts = JSON.parse(el.dataset.points || '[]'); } catch (e) { return; }
+    if (!pts.length || !window.ApexCharts) return;
+    const last = pts[pts.length - 1], first = pts[0];
+    const up = last >= first;
+    new ApexCharts(el, {
+      chart: { type: 'area', height: 48, sparkline: { enabled: true }, animations: { enabled: false } },
+      stroke: { curve: 'smooth', width: 1.5 },
+      series: [{ data: pts }],
+      colors: [up ? '#10b981' : '#ef4444'],
+      fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0 } },
+      tooltip: { enabled: false },
+    }).render();
+  });
+  // Background refresh every 60s.
+  setTimeout(() => location.reload(), 60000);
+</script>
+{% endblock %}

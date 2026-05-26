@@ -162,6 +162,7 @@
          'children': [
           ('proposals', '/proposals/', 'Proposals', '🎯'),
           ('trades', '/trades/', 'Positions', '💼'),
+          ('positions', '/positions/', 'Symbol watch', '📡'),
         ]},
         {'key': 'diag', 'label': 'Diagnostics', 'icon': '🩺',
          'children': [
@@ -668,48 +669,74 @@
         if (!signed) return '$' + v;
         return (n >= 0 ? '+$' : '−$') + v;
       }
+      const CACHE_KEY = 'plata.header.kpis';
+      const STALE_AFTER_MS = 10000;  // re-fetch in background after 10s; cache stays valid up to 10× that on page nav
+      function loadCache() {
+        try {
+          const raw = sessionStorage.getItem(CACHE_KEY);
+          if (!raw) return null;
+          const obj = JSON.parse(raw);
+          if (!obj || typeof obj.fetched_at !== 'number') return null;
+          return obj;
+        } catch (e) { return null; }
+      }
+      function saveCache(stats) {
+        try {
+          sessionStorage.setItem(CACHE_KEY, JSON.stringify({ stats, fetched_at: Date.now() }));
+        } catch (e) { /* quota etc — ignore */ }
+      }
+      function render(s) {
+        $kpis.classList.remove('hidden');
+        $pnl.textContent = fmt(s.daily_pnl, true);
+        $pnl.className = 'font-mono font-semibold ' + (s.daily_pnl > 0 ? 'text-green-500' : s.daily_pnl < 0 ? 'text-red-500' : 'text-gray-400');
+        const unr = s.unrealized_pnl || 0;
+        $open.innerHTML = s.open_count + (s.open_count > 0
+          ? ` · <span class="${unr > 0 ? 'text-green-500' : unr < 0 ? 'text-red-500' : 'text-gray-400'}">${fmt(unr, true)}</span>`
+          : '');
+        const total = (s.daily_pnl || 0) + unr;
+        $total.textContent = fmt(total, true);
+        $total.className = 'font-mono font-semibold ' + (total > 0 ? 'text-green-500' : total < 0 ? 'text-red-500' : 'text-gray-400');
+        if (s.pending_hitl > 0) {
+          $hitlLink.classList.remove('hidden');
+          $hitl.textContent = s.pending_hitl;
+        } else {
+          $hitlLink.classList.add('hidden');
+        }
+        if (s.llm_budget > 0) {
+          $budgetLink.classList.remove('hidden');
+          const used = s.llm_spend_today || 0;
+          const pct = used / s.llm_budget;
+          $budget.textContent = fmt(used) + ' / ' + fmt(s.llm_budget);
+          $budget.className = 'font-mono ' + (pct > 0.9 ? 'text-red-500' : pct > 0.7 ? 'text-yellow-500' : 'text-gray-400');
+        } else if (s.llm_spend_today > 0) {
+          $budgetLink.classList.remove('hidden');
+          $budget.textContent = fmt(s.llm_spend_today);
+          $budget.className = 'font-mono text-gray-400';
+        }
+        if (typeof s.next_poll_eta_sec === 'number') {
+          lastNextPollEta = s.next_poll_eta_sec;
+          lastNextPollLocalTs = Date.now();
+          lastNextPollSource = s.next_poll_source || '';
+          renderNextPoll();
+        }
+      }
       async function tick() {
         try {
           const r = await fetch('/api/header_stats', { cache: 'no-store' });
           if (!r.ok) return;
           const s = await r.json();
-          $kpis.classList.remove('hidden');
-          $pnl.textContent = fmt(s.daily_pnl, true);
-          $pnl.className = 'font-mono font-semibold ' + (s.daily_pnl > 0 ? 'text-green-500' : s.daily_pnl < 0 ? 'text-red-500' : 'text-gray-400');
-          const unr = s.unrealized_pnl || 0;
-          $open.innerHTML = s.open_count + (s.open_count > 0
-            ? ` · <span class="${unr > 0 ? 'text-green-500' : unr < 0 ? 'text-red-500' : 'text-gray-400'}">${fmt(unr, true)}</span>`
-            : '');
-          const total = (s.daily_pnl || 0) + unr;
-          $total.textContent = fmt(total, true);
-          $total.className = 'font-mono font-semibold ' + (total > 0 ? 'text-green-500' : total < 0 ? 'text-red-500' : 'text-gray-400');
-          if (s.pending_hitl > 0) {
-            $hitlLink.classList.remove('hidden');
-            $hitl.textContent = s.pending_hitl;
-          } else {
-            $hitlLink.classList.add('hidden');
-          }
-          if (s.llm_budget > 0) {
-            $budgetLink.classList.remove('hidden');
-            const used = s.llm_spend_today || 0;
-            const pct = used / s.llm_budget;
-            $budget.textContent = fmt(used) + ' / ' + fmt(s.llm_budget);
-            $budget.className = 'font-mono ' + (pct > 0.9 ? 'text-red-500' : pct > 0.7 ? 'text-yellow-500' : 'text-gray-400');
-          } else if (s.llm_spend_today > 0) {
-            $budgetLink.classList.remove('hidden');
-            $budget.textContent = fmt(s.llm_spend_today);
-            $budget.className = 'font-mono text-gray-400';
-          }
-          if (typeof s.next_poll_eta_sec === 'number') {
-            lastNextPollEta = s.next_poll_eta_sec;
-            lastNextPollLocalTs = Date.now();
-            lastNextPollSource = s.next_poll_source || '';
-            renderNextPoll();
-          }
+          render(s);
+          saveCache(s);
         } catch (e) { /* ignore */ }
       }
-      tick();
-      setInterval(tick, 10000);
+      // Paint immediately from sessionStorage so navigation between pages
+      // doesn't blank the KPIs. Only hit /api/header_stats if the cache is
+      // stale or missing — and even then, do it in the background.
+      const cached = loadCache();
+      if (cached && cached.stats) render(cached.stats);
+      const age = cached ? (Date.now() - cached.fetched_at) : Infinity;
+      if (age > STALE_AFTER_MS) tick();
+      setInterval(tick, STALE_AFTER_MS);
     })();
 
     // ---------- Breadcrumbs ----------
@@ -735,6 +762,7 @@
         historian:  ['Historian seed', '/historian/'],
         proposals:  ['Proposals', '/proposals/'],
         trades:     ['Positions', '/trades/'],
+        positions:  ['Symbol watch', '/positions/'],
         errors:     ['Errors', '/errors/'],
         dlq:        ['Dead Letters', '/dlq/'],
         settings:   ['Settings', '/settings/'],

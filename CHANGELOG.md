@@ -2,6 +2,19 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.087 — 2026-05-26
+- **Every drop reason is now persisted** — not just `should_trade=false`. New helper `record_drop()` is called for all four early-return paths in the strategist:
+  - `📉 below_threshold` — sentiment_magnitude < 0.5
+  - `❓ event_missing_in_graph` — event document expired from Redis JSON
+  - `🧬 no_embedding` — Voyage didn't return a vector (rate-limited / budget cap)
+  - `🤔 llm_no_trade` — strategist LLM said don't trade (with its reasoning + the 8 KNN analogs it considered)
+  Each row stores the full context in `extras` (event title, sentiment, category, LLM raw decision) so you can fine-tune thresholds against real data.
+- **Proposals page: drop-reason filter strip.** New chip row appears beneath the state filter once any drops exist: `📉 Below magnitude threshold · 145` / `🤔 LLM said don't trade · 22` etc. Click to filter. URL: `?state=dropped&reason=below_threshold`.
+- **Symbol watch is a top-level page** at `/positions/` (sidebar "📡 Symbol watch" under Trading). Old `/trades/watch` still works. The new page is **card grid** with a **sparkline** per symbol (ApexCharts area, color = up/down vs first sample), age badge, unrealized PnL.
+- **Per-symbol detail page** `/positions/<SYMBOL>` — big 24h price chart (5-min cadence, auto-refreshes every 30s without page reload), open-trades list on that symbol, net long/short, unrealized PnL. Sampler keeps the last 288 history points per symbol in Redis (`symbol:history:<sym>`, 7d TTL).
+- **Header KPIs no longer reload on every page navigation.** Cached in `sessionStorage` with a 10s freshness window; navigating from /trades/ to /proposals/ paints the previous values instantly and only fetches `/api/header_stats` in the background if the cache is older than 10s.
+- **What to test:** open `/proposals/?state=dropped` → reason chips appear. Open `/positions/` → cards with sparklines. Click a symbol → big chart. Navigate Dashboard → Positions → back → KPIs don't blink (they paint instantly from cache and update silently).
+
 ## 2.24.086 — 2026-05-26
 - **Header: "Next poll" countdown.** New KPI chip in the topbar showing the soonest scraper poll (e.g. `4m 18s · reddit`). Each tick is computed locally from a server-given remaining-seconds anchor; the full server value is refreshed every 10 s. Clicking it jumps to `/workflow/`. This is the most concrete answer to *"when could a new proposal possibly land?"* — strategist itself is event-driven (no schedule), but a scraper poll is the deterministic upstream trigger.
 - **Strategist now persists "dropped" proposals.** When the LLM says `should_trade=false` for an event that passed the magnitude gate, a row is written to `proposals` with state `🚫 Dropped` and the LLM's reasoning. Answers the "we deployed proposal-saving and nothing showed up — make sense?" question: yes, because we were only saving *published* ones. Now you can see the strategist considering events and deciding against them, with the full reasoning visible in the expandable detail.

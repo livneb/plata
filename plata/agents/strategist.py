@@ -92,10 +92,28 @@ class Strategist(BaseAgent):
 
     async def handle(self, payload: dict[str, Any]) -> None:
         from plata.core.bus import get_redis  # local import to avoid cycles
+        from plata.core.proposals import record_drop
         redis = get_redis()
         event = EnrichedEvent(**payload)
         if event.sentiment_magnitude < SENTIMENT_TRIGGER_THRESHOLD:
             await redis.hincrby(f"agent_stats:{self.name}", "dropped_below_threshold", 1)
+            await record_drop(
+                event_ulid=event.ulid,
+                reason_code="below_threshold",
+                reason_human=(
+                    f"sentiment_magnitude {event.sentiment_magnitude:.2f} < threshold "
+                    f"{SENTIMENT_TRIGGER_THRESHOLD}"
+                ),
+                reasoning=event.summary or event.title or "",
+                extras={
+                    "drop_reason_code": "below_threshold",
+                    "sentiment": getattr(event, "sentiment", None),
+                    "sentiment_magnitude": event.sentiment_magnitude,
+                    "category": str(event.category),
+                    "title": getattr(event, "title", None),
+                    "summary": getattr(event, "summary", None),
+                },
+            )
             return
 
         # Pull the full event document (has embedding + price_impact)
@@ -103,10 +121,32 @@ class Strategist(BaseAgent):
         if not full:
             self.log.warning("event_missing_in_graph", ulid=event.ulid)
             await redis.hincrby(f"agent_stats:{self.name}", "dropped_missing_event", 1)
+            await record_drop(
+                event_ulid=event.ulid,
+                reason_code="event_missing_in_graph",
+                reason_human="event document not found in Redis JSON — may have expired or graph_ingestion failed",
+                reasoning=event.summary or event.title or "",
+                extras={
+                    "drop_reason_code": "event_missing_in_graph",
+                    "category": str(event.category),
+                    "sentiment_magnitude": event.sentiment_magnitude,
+                },
+            )
             return
         embedding = full.get("embedding")
         if not embedding:
             await redis.hincrby(f"agent_stats:{self.name}", "dropped_no_embedding", 1)
+            await record_drop(
+                event_ulid=event.ulid,
+                reason_code="no_embedding",
+                reason_human="event has no Voyage embedding — KNN analog search not possible (Voyage probably rate-limited or budget capped)",
+                reasoning=event.summary or event.title or "",
+                extras={
+                    "drop_reason_code": "no_embedding",
+                    "category": str(event.category),
+                    "sentiment_magnitude": event.sentiment_magnitude,
+                },
+            )
             return
 
         analogs_raw = await vector_search_events(
@@ -153,29 +193,22 @@ class Strategist(BaseAgent):
         )
 
         if not decision.get("should_trade"):
-            # Persist the dropped consideration so the user can see *why* the
-            # strategist looked at this event and said no — and that the loop
-            # IS running, just being selective.
-            try:
-                from plata.core.db import Proposal, session_scope
-                from sqlalchemy.dialects.postgresql import insert as _pg_insert
-                ulid = event.ulid + "-skip"
-                async with session_scope() as session:
-                    stmt = _pg_insert(Proposal).values(
-                        proposal_ulid=ulid[:26],
-                        triggering_event_ulid=event.ulid,
-                        symbol=(decision.get("symbol") or "—")[:32],
-                        side=(decision.get("side") or "long"),
-                        conviction=float(decision.get("conviction") or 0),
-                        reasoning=(decision.get("reasoning") or "")[:1500],
-                        state="dropped",
-                        state_reason=(decision.get("reasoning") or "should_trade=false")[:255],
-                        last_actor="strategist",
-                        analogs=[a.model_dump(mode="json") for a in analogs],
-                    ).on_conflict_do_nothing(index_elements=["proposal_ulid"])
-                    await session.execute(stmt)
-            except Exception:  # noqa: BLE001
-                pass
+            await record_drop(
+                event_ulid=event.ulid,
+                reason_code="llm_no_trade",
+                reason_human=(decision.get("reasoning") or "LLM returned should_trade=false")[:200],
+                symbol=decision.get("symbol"),
+                side=decision.get("side"),
+                conviction=float(decision.get("conviction") or 0) or None,
+                reasoning=decision.get("reasoning") or "",
+                analogs=[a.model_dump(mode="json") for a in analogs],
+                extras={
+                    "drop_reason_code": "llm_no_trade",
+                    "category": str(event.category),
+                    "sentiment_magnitude": event.sentiment_magnitude,
+                    "llm_decision": decision,
+                },
+            )
             return
 
         milestones: list[Milestone] = []

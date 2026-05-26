@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ card.symbol }} · Symbol watch · Plata{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-3">
+  <div class="flex items-center gap-3">
+    <h1 class="text-2xl font-semibold font-mono">{{ card.symbol }}</h1>
+    {% if card.venue == 'alpaca' %}<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs">📈 alpaca</span>
+    {% else %}<span class="bg-orange-100 text-orange-800 px-2 py-0.5 rounded text-xs">🪙 bybit</span>{% endif %}
+  </div>
+  <div class="text-right">
+    <div class="font-mono text-xl">{{ '%.4f' % card.price if card.price else '—' }}</div>
+    <div class="text-xs text-gray-500">{% if card.age_sec is not none %}{{ card.age_sec }}s ago{% endif %}</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+  <!-- Price chart -->
+  <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <h2 class="text-xs uppercase text-gray-500 mb-1">Price (last 24 h, 5-min cadence)</h2>
+    <div id="symbol-chart" class="h-72"></div>
+  </div>
+
+  <!-- Stats + open trades -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <h2 class="text-xs uppercase text-gray-500 mb-2">This symbol</h2>
+    <dl class="text-sm space-y-1.5">
+      <div class="flex justify-between"><dt class="text-gray-500">Open trades</dt><dd class="font-mono">{{ card.trade_count }}</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-500">Net long</dt><dd class="font-mono text-green-500">{{ '%.4f' % card.net_long }}</dd></div>
+      <div class="flex justify-between"><dt class="text-gray-500">Net short</dt><dd class="font-mono text-red-500">{{ '%.4f' % card.net_short }}</dd></div>
+      <div class="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-1.5 mt-1.5">
+        <dt class="text-gray-500">Unrealized</dt>
+        <dd class="font-mono font-semibold {% if card.unrealized > 0 %}text-green-500{% elif card.unrealized < 0 %}text-red-500{% endif %}">
+          {% if card.unrealized > 0 %}+{% endif %}${{ '%.2f' % card.unrealized }}
+        </dd>
+      </div>
+    </dl>
+
+    <h2 class="text-xs uppercase text-gray-500 mt-4 mb-2">Open trades on this symbol</h2>
+    <ul class="space-y-1.5 text-xs">
+      {% for t in trades %}
+      <li class="flex items-center justify-between border border-gray-100 dark:border-gray-700 rounded px-2 py-1.5">
+        <div>
+          <a href="/trades/{{ t.ulid }}?from=positions" class="font-mono hover:text-blue-500">{{ t.ulid[:10] }}…</a>
+          <span class="{% if t.side == 'long' %}text-green-500{% else %}text-red-500{% endif %} ml-1">{{ t.side }}</span>
+        </div>
+        <span class="font-mono">{{ '%.4f' % t.qty }} @ {{ '%.4f' % t.entry }}</span>
+      </li>
+      {% else %}
+      <li class="text-gray-400 text-center py-4">No open trades.</li>
+      {% endfor %}
+    </ul>
+
+    <a href="/positions/?from=positions" class="block text-xs text-blue-500 hover:underline mt-3">← all symbols</a>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const data = {{ points | tojson }};
+    if (!window.ApexCharts) return;
+    const el = document.getElementById('symbol-chart');
+    if (!data.length) {
+      el.innerHTML = '<div class="text-xs text-gray-500 italic h-full flex items-center justify-center">No price history yet — sampler hasn\'t accumulated samples for this symbol.</div>';
+      return;
+    }
+    const first = data[0].y, last = data[data.length - 1].y;
+    const up = last >= first;
+    const chart = new ApexCharts(el, {
+      chart: { type: 'area', height: 280, toolbar: { show: false }, animations: { enabled: false }, fontFamily: 'Inter, sans-serif' },
+      stroke: { curve: 'smooth', width: 2 },
+      series: [{ name: '{{ card.symbol }}', data: data }],
+      colors: [up ? '#10b981' : '#ef4444'],
+      fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0 } },
+      xaxis: { type: 'datetime', labels: { style: { fontSize: '10px' } } },
+      yaxis: { labels: { formatter: (v) => v.toFixed(4), style: { fontSize: '10px' } } },
+      tooltip: { x: { format: 'HH:mm dd MMM' } },
+      grid: { borderColor: 'rgba(128,128,128,0.15)' },
+    });
+    chart.render();
+    // Refresh every 30s without a full page reload.
+    setInterval(async () => {
+      try {
+        const r = await fetch('/positions/{{ card.symbol }}/history.json', { cache: 'no-store' });
+        const j = await r.json();
+        chart.updateSeries([{ name: '{{ card.symbol }}', data: j.points || [] }]);
+      } catch (e) { /* ignore */ }
+    }, 30000);
+  })();
+</script>
+{% endblock %}

@@ -57,12 +57,18 @@ async def _refresh_symbol_watch(symbols: list[str], now: float) -> None:
             if price is None or price <= 0:
                 _SYMBOL_WATCH_LAST[sym] = now  # don't hammer a failing symbol
                 continue
+            ts_iso = datetime.now(timezone.utc).isoformat()
             await redis.hset(f"symbol:latest:{sym}", mapping={
                 "price": price,
                 "venue": venue_for(sym),
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": ts_iso,
             })
             await redis.expire(f"symbol:latest:{sym}", 24 * 60 * 60)
+            # Append to a capped history list for sparklines / charts —
+            # keep the last 288 samples (24h @ 5min cadence).
+            await redis.rpush(f"symbol:history:{sym}", f"{ts_iso}|{price}")
+            await redis.ltrim(f"symbol:history:{sym}", -288, -1)
+            await redis.expire(f"symbol:history:{sym}", 7 * 24 * 60 * 60)
             _SYMBOL_WATCH_LAST[sym] = now
         except Exception as exc:  # noqa: BLE001
             _log.warning("symbol_watch_failed", symbol=sym, error=str(exc)[:160])

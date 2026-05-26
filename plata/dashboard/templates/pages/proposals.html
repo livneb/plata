@@ -13,7 +13,8 @@
 </div>
 
 <!-- State filter chips -->
-<div class="flex flex-wrap gap-2 mb-3">
+<div class="flex flex-wrap gap-2 mb-2">
+  <span class="text-[10px] uppercase text-gray-500 self-center mr-1">state</span>
   <a href="/proposals/" class="px-2.5 py-1 rounded text-xs border {{ 'bg-blue-700 text-white border-blue-700' if not active_state else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
     All <span class="text-[10px] opacity-70">· {{ counts.values() | sum }}</span>
   </a>
@@ -26,6 +27,25 @@
     {% endif %}
   {% endfor %}
 </div>
+
+{% if reason_counts %}
+<!-- Drop-reason chips — only visible when there are any drops to filter -->
+<div class="flex flex-wrap gap-2 mb-3">
+  <span class="text-[10px] uppercase text-gray-500 self-center mr-1">drop reason</span>
+  <a href="/proposals/?state=dropped"
+     class="px-2.5 py-1 rounded text-xs border {{ 'bg-gray-700 text-white border-gray-700' if (active_state == 'dropped' and not active_reason) else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+    Any drop <span class="text-[10px] opacity-70">· {{ reason_counts.values() | sum }}</span>
+  </a>
+  {% for code, n in reason_counts.items() %}
+    {% set rm = reason_meta.get(code, {'label': code, 'icon': '?', 'hint': ''}) %}
+    <a href="/proposals/?state=dropped&reason={{ code }}"
+       title="{{ rm.hint }}"
+       class="px-2.5 py-1 rounded text-xs border {{ 'bg-gray-700 text-white border-gray-700' if active_reason == code else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+      {{ rm.icon }} {{ rm.label }} <span class="text-[10px] opacity-70">· {{ n }}</span>
+    </a>
+  {% endfor %}
+</div>
+{% endif %}
 
 <div class="relative overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
   <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">

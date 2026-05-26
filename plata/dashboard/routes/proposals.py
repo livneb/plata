@@ -57,17 +57,38 @@ def _row(p) -> dict[str, Any]:
     }
 
 
+DROP_REASON_META: dict[str, dict[str, str]] = {
+    "below_threshold":      {"label": "Below magnitude threshold", "icon": "📉",
+                              "hint": "sentiment_magnitude < 0.5 — event wasn't dramatic enough to consider"},
+    "event_missing_in_graph": {"label": "Event missing in graph",   "icon": "❓",
+                              "hint": "EnrichedEvent passed magnitude gate but its document is no longer in Redis JSON"},
+    "no_embedding":         {"label": "No embedding",                "icon": "🧬",
+                              "hint": "Voyage didn't return a vector — probably rate-limited or budget capped"},
+    "llm_no_trade":         {"label": "LLM said don't trade",        "icon": "🤔",
+                              "hint": "Strategist LLM looked at the analogs and decided conviction < 0.6 OR no analog moved the same direction"},
+}
+
+
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request, state: str | None = None, symbol: str | None = None):
+async def index(
+    request: Request,
+    state: str | None = None,
+    symbol: str | None = None,
+    reason: str | None = None,
+):
     rows_db = await list_recent(state=state, symbol=symbol, limit=200)
     rows = [_row(r) for r in rows_db]
-    # Counts per state for the filter chips.
-    all_rows = rows_db if (state or symbol) else rows_db
+    # Apply reason filter client-side (it lives in extras.drop_reason_code).
+    if reason:
+        rows = [r for r in rows if (r["extras"] or {}).get("drop_reason_code") == reason]
+    # Counts per state + per drop-reason for the filter chips.
     counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
     for r in (await list_recent(limit=500)):
         counts[r.state] = counts.get(r.state, 0) + 1
-    # Legacy pending list (HITL only) — for back-compat banner if any rows
-    # exist that didn't get mirrored into Postgres yet.
+        if r.state == "dropped":
+            code = (r.extras or {}).get("drop_reason_code") or "unknown"
+            reason_counts[code] = reason_counts.get(code, 0) + 1
     legacy_pending = await list_pending()
     return templates.TemplateResponse(
         request,
@@ -76,9 +97,12 @@ async def index(request: Request, state: str | None = None, symbol: str | None =
             "active": "proposals",
             "rows": rows,
             "counts": counts,
+            "reason_counts": reason_counts,
             "state_meta": STATE_META,
+            "reason_meta": DROP_REASON_META,
             "active_state": state,
             "active_symbol": symbol,
+            "active_reason": reason,
             "legacy_pending": legacy_pending,
         },
     )

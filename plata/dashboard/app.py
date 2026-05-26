@@ -24,6 +24,7 @@ from plata.dashboard.routes import (
     graph,
     historian,
     history,
+    positions,
     proposals,
     push as push_route,
     sse as sse_route,
@@ -409,6 +410,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(proposals.router)
     app.include_router(trades.router)
+    app.include_router(positions.router)
     app.include_router(risk_config.router)
     app.include_router(errors.router)
     app.include_router(agents.router)
