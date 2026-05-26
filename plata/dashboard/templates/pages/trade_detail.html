@@ -182,10 +182,12 @@
     const axisColor = dark ? '#9ca3af' : '#4b5563';
     const gridColor = dark ? '#374151' : '#e5e7eb';
 
-    {% if proposal and proposal.milestones %}
+    {% if proposal %}
     // Predicted trajectory: x = hours from entry, y = signed % move (cumulative).
+    // Older proposals may have no milestones — chart still renders with
+    // actual-price line only so the user can track the trade live.
     const msData = [
-      {% for m in proposal.milestones %}
+      {% for m in (proposal.milestones or []) %}
       { x: {{ (m.eta_minutes / 60) | round(2) }}, y: {{ (m.expected_pct_move * 100) | round(3) }}, confidence: {{ m.confidence }}, rationale: {{ (m.rationale or '') | tojson }} },
       {% endfor %}
     ];
@@ -203,12 +205,19 @@
         }));
       } catch { return []; }
     }
-    if (msData.length && window.ApexCharts) {
+    if (window.ApexCharts) {
       const el = document.getElementById('milestone-chart');
       const initial = await loadActualSeries();
       // Tiny diagnostic above the chart so it's obvious when actual data is missing.
       const diag = document.createElement('div');
       diag.className = 'text-[11px] text-gray-500 -mb-2';
+      if (!msData.length) {
+        // Inline notice — strategist didn't predict a trajectory for this trade.
+        const notice = document.createElement('div');
+        notice.className = 'text-[11px] text-amber-600 dark:text-amber-400 mb-2';
+        notice.innerHTML = '⚠ Strategist did not predict milestones for this proposal — showing live price only.';
+        el.parentNode.insertBefore(notice, el);
+      }
       function setDiag(n) {
         if (n > 0) {
           diag.innerHTML = `📈 <b>${n}</b> live price sample(s) recorded for this trade.`;

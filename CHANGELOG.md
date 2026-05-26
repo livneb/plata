@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.103 — 2026-05-26
+- **Why some trades had no chart**: the strategist LLM returns a `milestones` array but the JSON schema allowed `minItems: 0`, so the model sometimes shipped an empty list. The trade-detail page only rendered the chart `{% if proposal.milestones %}`, so milestone-less trades looked broken.
+- **Two fixes:**
+  - **Schema tightened**: `milestones.minItems` bumped from 0 → 2 in `PROPOSAL_SCHEMA`. The LLM is now forced to produce at least 2 milestones whenever it says `should_trade=true`. New proposals from here on will always have a chart.
+  - **Legacy trades still render**: chart block now renders even when `msData` is empty — falls back to *actual price line only* (orange) so you can still track the trade live. An inline amber note says `⚠ Strategist did not predict milestones for this proposal — showing live price only.` so you know why the predicted dashed line is missing.
+- **What to test:** open any trade that previously showed no trajectory chart — the chart should now appear with the orange actual-price line and the amber notice. New trades created after this deploy will have the full predicted+actual overlay.
+
 ## 2.24.102 — 2026-05-26
 - **🐛 Fix `/settings/` 500.** Two help strings in `risk_field_meta.py` used double-quote literals inside double-quoted Python strings (`"0.6 = "more confident than 50/50""`) — SyntaxError on import. Replaced outer quotes with single quotes on both rows. Confirms why the file passed local edits but exploded at import time on the server.
 - **Rejected proposals no longer write to `error_log`.** `risk_manager._reject()` was calling `error_reporter.capture(severity="INFO", error_type="ProposalRejected")` on every gate failure — a `max_open_positions_reached` rejection (which is the system *working as designed*) was filling `/errors/` with noise. Rejections live on `/proposals/?state=rejected` with full reasoning; that's the right place to investigate them. Removed the capture call.

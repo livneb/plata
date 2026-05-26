@@ -29,7 +29,10 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
         "suggested_sl_pct": {"type": "number", "minimum": 0.001, "maximum": 0.2},
         "suggested_tp_pct": {"type": "number", "minimum": 0.001, "maximum": 1.0},
         "milestones": {
-            "type": "array", "minItems": 0, "maxItems": 6,
+            # minItems=2 forces the LLM to actually produce a trajectory when
+            # should_trade is true — many proposals previously returned an
+            # empty list, which left trade-detail pages without a chart.
+            "type": "array", "minItems": 2, "maxItems": 6,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
