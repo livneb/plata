@@ -8,6 +8,7 @@ Responsibilities:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, datetime, timezone
 from functools import lru_cache
@@ -191,14 +192,41 @@ class LLMClient:
         if response_format is not None:
             kwargs["response_format"] = response_format
 
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=8),
-            retry=retry_if_exception_type(Exception),
-            reraise=True,
-        ):
-            with attempt:
-                response = await self._openai.chat.completions.create(**kwargs)
+        # If OpenRouter says "402 — can only afford N tokens", parse N and shrink.
+        async def _attempt_once():
+            return await self._openai.chat.completions.create(**kwargs)
+
+        response = None
+        for _try in range(3):
+            try:
+                response = await _attempt_once()
+                break
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                low = msg.lower()
+                # Credit-limit hint embedded in the OpenRouter message body.
+                m = None
+                if "can only afford" in low:
+                    import re as _re
+                    m = _re.search(r"can only afford (\d+)", low)
+                if m:
+                    affordable = max(64, int(m.group(1)) - 16)
+                    if affordable < int(kwargs.get("max_tokens") or 0):
+                        kwargs["max_tokens"] = affordable
+                        _log.warning("llm_max_tokens_shrunk", new_max=affordable)
+                        continue
+                # Flag the provider as out-of-credits so the Activity page lights up.
+                if "402" in msg or "credit" in low or "billing" in low or "payment" in low:
+                    try:
+                        from plata.core.error_reporter import flag_api_limit
+                        await flag_api_limit("openrouter", msg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                if _try == 2:
+                    raise
+                await asyncio.sleep(1 + _try * 2)
+        if response is None:
+            raise RuntimeError("LLM call returned no response")
 
         usage = response.usage
         if usage:

@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.069 — 2026-05-25
+- **Esc actually closes modals now.** Previous visibility check used `offsetParent`, which is always `null` for `position: fixed` elements — so the handler skipped every modal it tried to close. Switched to `getComputedStyle(o).display !== 'none'`. Works on card-detail, confirm, settings tabs, changelog carousel, graph focus, every modal.
+- **Sticky red banner** at the top when any agent is halted (or the system is). Polls `/api/agents/halted` every 10s + reacts instantly to SSE `system_state` events. Click → `/agents/`.
+- **Charts now render** on the trade-detail page and the dashboard tiles. Root cause: the ApexCharts CDN was loaded with `defer`, so every inline chart-init script (which runs synchronously after HTML parse) ran *before* `window.ApexCharts` was defined and silently skipped. Removed the `defer`.
+- **🌐 translate button now works.** Two fixes: route accepts both `/api/translate` and `/api/translate/`, the fetch now sends `credentials: 'same-origin'` (cookie) and surfaces the server error in a toast on failure.
+- **OpenRouter 402 "can only afford N tokens"** is parsed and the next attempt automatically shrinks `max_tokens` to that value (minus a small buffer) and retries — so a near-empty credit balance still produces output instead of a hard failure. If the 402 persists, the provider is flagged.
+- **Activity page** now shows a **LIMIT REACHED** badge + amber border next to any external API whose error rate-tripped (OpenRouter / Voyage / Bybit / Alpaca / Telegram / Langfuse). Inline panel with the message + a "→ Add credits / increase limit" link to that provider's settings page. Auto-clears after 6h. Driven by `flag_api_limit()` in `core/error_reporter.py`.
+- **Agent page spend** now shows **Today / Yesterday / Last 7d / Last 30d / All time** — both as a header strip (totals) and as 5 per-agent columns on each card. Built from existing `cost:daily:<date>` and `cost:daily:<date>:agent:<name>` Redis counters; the all-time aggregate scans every dated key under that pattern.
+
 ## 2.24.068 — 2026-05-25
 - **Layer-2 self-improving risk_manager.** The Reviewer agent now maintains rolling win-rate stats in Redis keyed by `(symbol, category, conviction-bucket)` — buckets `<0.6 / 0.6-0.7 / 0.7-0.8 / 0.8-0.9 / 0.9-1.0`. Every 25 closed trades it finds the worst-performing slice and asks the LLM whether ONE small, conservative tweak to a `guard_*` config key is warranted.
 - Proposed tweaks land in the Postgres `audit_log` as `action=proposed_config_tweak` with the full evidence + rationale, status=`pending`.

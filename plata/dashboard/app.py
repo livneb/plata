@@ -193,6 +193,20 @@ def create_app() -> FastAPI:
         await publish_channel(Channels.SYSTEM_HALT, {"agent": name, "reason": "manual_killswitch"})
         return {"ok": True, "agent": name}
 
+    @app.get("/api/agents/halted")
+    async def api_agents_halted():
+        """Returns the list of agents currently halted (per their own status hashes)
+        plus the global system:state for the topbar banner."""
+        from plata.core.bus import get_redis
+        redis = get_redis()
+        halted: list[str] = []
+        async for k in redis.scan_iter(match="agent_status:*", count=100):
+            data = await redis.hgetall(k)
+            if (data.get("halted") or "").lower() == "true":
+                halted.append(k.split(":")[-1])
+        system_state = await redis.get("system:state") or "RUNNING"
+        return {"count": len(halted), "names": sorted(halted), "system_state": system_state}
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         from datetime import date, datetime, timezone

@@ -29,10 +29,20 @@
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.49.1/dist/apexcharts.min.js" defer></script>
+  <!-- ApexCharts must load synchronously (without defer) so inline chart-init
+       scripts on subpages can call `new ApexCharts(...)` immediately. -->
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.49.1/dist/apexcharts.min.js"></script>
   <script src="https://unpkg.com/htmx.org@2.0.2"></script>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+  <!-- Halted-agents banner -->
+  <a id="halted-banner" href="/agents/"
+     class="hidden fixed top-0 inset-x-0 z-[59] flex items-center justify-between p-2 bg-red-600 text-white text-sm hover:bg-red-700"
+     style="height:36px">
+    <span>⚠ <span id="halted-banner-text">Agents are halted</span> — click to manage.</span>
+    <span class="text-[11px] opacity-80">/agents/ →</span>
+  </a>
+
   <!-- Version banner (pushes layout down when shown) -->
   <div id="version-banner" tabindex="-1"
        class="hidden fixed top-0 inset-x-0 z-[60] flex items-center justify-between p-3 bg-blue-600 text-white"
@@ -334,10 +344,15 @@
             try {
               const r = await fetch('/api/translate/', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: el.dataset.originalText || el.textContent, lang, aud }),
               });
-              if (!r.ok) throw new Error('HTTP ' + r.status);
+              if (!r.ok) {
+                let msg = 'HTTP ' + r.status;
+                try { const e = await r.json(); if (e && e.detail) msg += ' — ' + e.detail; } catch {}
+                throw new Error(msg);
+              }
               const j = await r.json();
               if (j.text) {
                 el.textContent = j.text;
@@ -355,6 +370,30 @@
       }
       document.addEventListener('DOMContentLoaded', () => decorate());
       document.body.addEventListener('htmx:afterSwap', e => decorate(e.target));
+    })();
+
+    // ---------- Halted-agents banner ----------
+    (function () {
+      const banner = document.getElementById('halted-banner');
+      const txt = document.getElementById('halted-banner-text');
+      function showWithCount(n, names) {
+        if (n <= 0) { banner.classList.add('hidden'); return; }
+        txt.textContent = (n === 1)
+          ? `Agent "${names[0]}" is halted`
+          : `${n} agents halted: ${names.slice(0, 4).join(', ')}${n > 4 ? '…' : ''}`;
+        banner.classList.remove('hidden');
+      }
+      async function poll() {
+        try {
+          const r = await fetch('/api/agents/halted', { cache: 'no-store' });
+          if (!r.ok) return;
+          const j = await r.json();
+          showWithCount(j.count || 0, j.names || []);
+        } catch {}
+      }
+      poll(); setInterval(poll, 10000);
+      // Also react to SSE system-state events for immediate feedback.
+      document.addEventListener('plata:system_state', poll);
     })();
 
     // ---------- Server-Sent Events (live updates from agents) ----------
@@ -397,6 +436,7 @@
                   ? 'bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-red-900 dark:text-red-300'
                   : 'bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300';
               });
+              document.dispatchEvent(new CustomEvent('plata:system_state'));
               break;
           }
         });
@@ -414,9 +454,12 @@
       const overlays = document.querySelectorAll('.fixed.inset-0');
       let closedAny = false;
       overlays.forEach(o => {
-        const visible = !o.classList.contains('hidden') && o.offsetParent !== null;
-        // Skip elements that aren't true modal overlays (e.g. theme-bootstrap script outputs).
-        const looksLikeModal = (o.className || '').includes('bg-black/50') || o.querySelector('[data-card-close], [data-plata-cancel], [data-modal-hide], [data-changelog-close]');
+        // `position: fixed` returns offsetParent=null, so we can't use that.
+        // Use the `hidden` class + computed display instead.
+        const visible = !o.classList.contains('hidden')
+                        && window.getComputedStyle(o).display !== 'none';
+        const looksLikeModal = (o.className || '').includes('bg-black/50')
+          || o.querySelector('[data-card-close], [data-plata-cancel], [data-modal-hide], [data-changelog-close]');
         if (visible && looksLikeModal) {
           o.classList.add('hidden');
           closedAny = true;

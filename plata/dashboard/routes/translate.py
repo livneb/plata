@@ -27,6 +27,7 @@ Output ONLY the rewritten text. No preamble, no quotes."""
 
 
 @router.post("/")
+@router.post("")
 async def translate(request: Request) -> JSONResponse:
     user = current_user_email(request)
     if not user:

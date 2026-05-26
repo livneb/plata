@@ -16,6 +16,50 @@ _log = get_logger("error_reporter")
 
 VALID_SEVERITIES = {"DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"}
 
+# Known external providers + dashboard URLs the user can click to remedy a limit.
+PROVIDER_INFO = {
+    "openrouter": {"label": "OpenRouter", "url": "https://openrouter.ai/settings/credits"},
+    "voyage":     {"label": "Voyage",     "url": "https://dashboard.voyageai.com/"},
+    "alpaca":     {"label": "Alpaca",     "url": "https://app.alpaca.markets/"},
+    "bybit":      {"label": "Bybit",      "url": "https://www.bybit.com/"},
+    "telegram":   {"label": "Telegram",   "url": "https://core.telegram.org/bots"},
+    "langfuse":   {"label": "Langfuse",   "url": "https://cloud.langfuse.com/"},
+}
+
+
+def _provider_from(error_type: str, message: str) -> str | None:
+    m = (message or "").lower()
+    if "openrouter" in m or "openrouter.ai" in m: return "openrouter"
+    if "voyage" in m or "voyageai" in m or error_type == "EmbeddingRateLimited": return "voyage"
+    if "alpaca" in m: return "alpaca"
+    if "bybit" in m: return "bybit"
+    if "telegram" in m: return "telegram"
+    if "langfuse" in m: return "langfuse"
+    return None
+
+
+async def flag_api_limit(provider: str, message: str, *, ttl_s: int = 6 * 3600) -> None:
+    """Record that an upstream provider is rate-limited / out-of-credits. The Activity
+    page surfaces this next to the provider card with a link to fix it."""
+    try:
+        from plata.core.bus import get_redis
+        info = PROVIDER_INFO.get(provider) or {"label": provider, "url": ""}
+        import json as _json
+        from datetime import datetime, timezone
+        await get_redis().set(
+            f"api_limit:{provider}",
+            _json.dumps({
+                "provider": provider,
+                "label": info["label"],
+                "url": info["url"],
+                "message": (message or "")[:200],
+                "at": datetime.now(timezone.utc).isoformat(),
+            }),
+            ex=ttl_s,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
 
 def humanize(error_type: str, message: str) -> tuple[str, str]:
     """Map noisy upstream errors to short, actionable messages.
@@ -69,6 +113,16 @@ class ErrorReporter:
         if override_severity:
             severity = override_severity
         message = friendly
+
+        # If the error looks like a credit / rate-limit problem, flag the provider
+        # so the Activity page can surface a "limit reached" badge with a fix link.
+        provider = _provider_from(error_type, message)
+        if provider:
+            low = (message or "").lower()
+            if any(k in low for k in ("rate limit", "rate-limit", "rate_limit",
+                                       "credit", "402", "429", "billing", "payment",
+                                       "quota", "max_tokens")):
+                await flag_api_limit(provider, message)
 
         container = os.environ.get("SERVICE_ENTRYPOINT", "unknown")
         context = context or {}

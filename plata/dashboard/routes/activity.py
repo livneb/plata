@@ -29,7 +29,6 @@ def _api_statuses() -> list[dict[str, Any]]:
 
     def ok(value) -> bool:
         return bool(value)
-
     return [
         {"name": "Reddit", "desc": "Polls finance/crypto subreddits for new posts.",
          "configured": ok(s.reddit_client_id) and ok(s.reddit_client_secret)},
@@ -166,6 +165,27 @@ async def _signal_stats() -> dict[str, Any]:
     }
 
 
+async def _api_statuses_with_limits() -> list[dict[str, Any]]:
+    """Merge `_api_statuses()` with any active `api_limit:<provider>` flags."""
+    import json as _json
+    rows = _api_statuses()
+    redis = get_redis()
+    flags: dict[str, dict[str, Any]] = {}
+    async for k in redis.scan_iter(match="api_limit:*", count=200):
+        try:
+            raw = await redis.get(k)
+            if raw:
+                d = _json.loads(raw)
+                flags[(d.get("provider") or "").lower()] = d
+        except Exception:  # noqa: BLE001
+            continue
+    for r in rows:
+        prov = (r.get("name") or "").lower()
+        if prov in flags:
+            r["limit_flag"] = flags[prov]
+    return rows
+
+
 async def _gather() -> dict[str, Any]:
     depths = await _pipeline_depths()
     stats = await _signal_stats()
@@ -175,7 +195,7 @@ async def _gather() -> dict[str, Any]:
     return {
         "pipeline": depths,
         "agents": agents,
-        "apis": _api_statuses(),
+        "apis": await _api_statuses_with_limits(),
         "spend": spend,
         "system": system,
         "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),

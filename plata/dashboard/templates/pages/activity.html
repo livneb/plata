@@ -23,16 +23,28 @@
     <h2 class="text-lg font-semibold mb-3">External API status</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
       {% for api in apis %}
-      <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+      <div class="border {% if api.limit_flag %}border-amber-400 dark:border-amber-600{% else %}border-gray-200 dark:border-gray-700{% endif %} rounded-lg p-3">
         <div class="flex items-center justify-between">
           <span class="font-semibold">{{ api.name }}</span>
-          {% if api.configured %}
-          <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">CONFIGURED</span>
-          {% else %}
-          <span class="bg-gray-200 text-gray-700 text-xs font-medium px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">NOT SET</span>
-          {% endif %}
+          <div class="flex items-center gap-1">
+            {% if api.limit_flag %}
+            <span class="bg-amber-100 text-amber-800 text-[10px] font-medium px-2 py-0.5 rounded dark:bg-amber-900 dark:text-amber-200">LIMIT REACHED</span>
+            {% endif %}
+            {% if api.configured %}
+            <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded dark:bg-green-900 dark:text-green-300">CONFIGURED</span>
+            {% else %}
+            <span class="bg-gray-200 text-gray-700 text-xs font-medium px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">NOT SET</span>
+            {% endif %}
+          </div>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ api.desc }}</p>
+        {% if api.limit_flag %}
+        <div class="text-[11px] mt-2 p-2 rounded bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800">
+          ⚠ {{ api.limit_flag.message[:120] }}{% if api.limit_flag.url %}<br>
+          <a href="{{ api.limit_flag.url }}" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-300 hover:underline font-medium">→ Add credits / increase limit at {{ api.limit_flag.label }}</a>
+          {% endif %}
+        </div>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
