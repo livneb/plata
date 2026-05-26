@@ -137,6 +137,28 @@
       <tr id="detail-{{ p.ulid }}" class="hidden border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
         <td colspan="7" class="px-6 py-4">
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+            <!-- Re-submit chain — visible from BOTH sides -->
+            {% if p.extras.children or p.extras.source_proposal_ulid %}
+            <div class="lg:col-span-2 mb-2 p-2 rounded border border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/20 text-[11px]">
+              {% if p.extras.source_proposal_ulid %}
+              <div>↩ <b>This row is a manual re-submit</b> of
+                <a href="/proposals/?symbol={{ p.symbol }}#detail-{{ p.extras.source_proposal_ulid }}"
+                   class="font-mono text-blue-500 hover:underline">{{ p.extras.source_proposal_ulid[:10] }}…</a>
+                (the original system decision is preserved as a separate row for the audit trail).
+              </div>
+              {% endif %}
+              {% if p.extras.children %}
+              <div>
+                ↪ <b>This row was re-submitted {{ p.extras.children | length }} time(s)</b>:
+                {% for c in p.extras.children %}
+                  <a href="/proposals/?symbol={{ p.symbol }}#detail-{{ c.ulid }}"
+                     class="font-mono text-blue-500 hover:underline">{{ c.ulid[:10] }}…</a>
+                  <span class="text-[10px] text-gray-500">({{ c.state }}{% if c.actor %}, by {{ c.actor }}{% endif %})</span>{% if not loop.last %} ·{% endif %}
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+            {% endif %}
             <!-- Reasoning + analogs -->
             <div>
               {% if p.event %}
@@ -266,5 +288,17 @@
       if (row) row.classList.toggle('hidden');
     });
   });
+  // If the URL hash points at a specific detail row, expand it + scroll.
+  // Used by the in-page chain links (↩ source / ↪ children).
+  function _openHash() {
+    if (!location.hash.startsWith('#detail-')) return;
+    const row = document.getElementById(location.hash.slice(1));
+    if (row) {
+      row.classList.remove('hidden');
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+  window.addEventListener('DOMContentLoaded', _openHash);
+  window.addEventListener('hashchange', _openHash);
 </script>
 {% endblock %}

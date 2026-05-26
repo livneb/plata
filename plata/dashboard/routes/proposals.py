@@ -277,6 +277,7 @@ async def resubmit(
                                 "notional_usd": str(default_notional),
                                 "price_at_manual": str(last_price),
                             })
+        await _append_child(proposal_ulid, cloned.ulid, "manual_override", actor)
         await publish(Streams.APPROVED_TRADES, decision)
     else:
         await publish(Streams.TRADING_PROPOSALS, cloned)
@@ -285,5 +286,28 @@ async def resubmit(
                             reason=f"manual re-submit of {proposal_ulid}",
                             actor=f"user:{actor}",
                             extras={"source_proposal_ulid": proposal_ulid})
+        await _append_child(proposal_ulid, cloned.ulid, "published", actor)
 
     return RedirectResponse(url=f"/proposals/?symbol={cloned.symbol}", status_code=303)
+
+
+async def _append_child(parent_ulid: str, child_ulid: str, child_state: str, actor: str) -> None:
+    """Append a child re-submission entry to the parent proposal's extras.children list.
+    Keeps the audit chain visible from the parent's side too (one-way → two-way)."""
+    try:
+        from datetime import datetime, timezone
+        from plata.core.proposals import get as proposal_get, update_state
+        parent = await proposal_get(parent_ulid)
+        if not parent:
+            return
+        children = list((parent.extras or {}).get("children") or [])
+        children.append({
+            "ulid": child_ulid,
+            "state": child_state,
+            "actor": actor,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+        # Idempotent: update_state will merge with existing extras.
+        await update_state(parent_ulid, state=parent.state, extras={"children": children})
+    except Exception:  # noqa: BLE001
+        pass

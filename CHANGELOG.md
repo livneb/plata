@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.100 — 2026-05-26
+- **Re-submit chain is now visible from both sides.** Previously: clone-and-edit created a new `manual_override` proposal row linking back to the original via `extras.source_proposal_ulid`, but the original `dropped`/`rejected` row had no idea its rescued version existed. So on the proposals page it looked abandoned.
+  - Now: when you Re-submit a row, we also append the new ULID to the parent's `extras.children` list. So:
+    - The **child** row (the manual one) shows `↩ This row is a manual re-submit of <parent>` with a clickable link.
+    - The **parent** row (the rejected/dropped one) shows `↪ This row was re-submitted N time(s)` listing each child with its state.
+  - Clicking either link opens the linked row in the same page (the URL hash auto-expands the target detail row and scrolls to it).
+- Original rationale for keeping them as separate rows (not state-updating the rejected one): **audit integrity** — the original was a system decision, the re-submit is a user decision with possibly-edited values. Squashing them would lose history, conflict with `_load_proposal()` ULID lookups, and break multi-resubmit flows. Now both views are linked, so nothing's hidden.
+
 ## 2.24.099 — 2026-05-26
 - **Graph node weight is no longer just "edge count".** Per-node weight is now a composite:
   ```
