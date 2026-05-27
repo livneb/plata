@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.112 — 2026-05-26
+- **Positions: Group-by + Sort-by controls.** Above the table:
+  - **Group by** — `none` (default) / Status / Symbol / Side / Venue / Mode. When grouped, a sticky-styled group header row appears between sections showing `<group name> · N position(s) · ΣPnL` (green/red).
+  - **Sort by** — Started (default) / PnL / % move / Held duration / Symbol A→Z / Conviction.
+  - **Direction toggle** — `↓ desc` ↔ `↑ asc`.
+  - **Summary** at the right shows total row count + ΣPnL across the entire view.
+  - All client-side (no round-trip) — every row carries `data-symbol / data-side / data-venue / data-mode / data-status / data-started / data-held / data-pnl / data-pct / data-conviction`, the JS just resorts/regroups. **Choice persists in `localStorage`** so navigating away and back keeps your view.
+
 ## 2.24.111 — 2026-05-26
 - **🐛 Sparkline on `/positions/` overflowed its card.** ApexCharts in sparkline mode renders at its default width (~600 px) on first paint until the layout settles, which spilled past the right edge of the card. Three fixes: `overflow-hidden` on the card, `w-full overflow-hidden` on the `.spark` div, explicit `chart.width: '100%'` in the ApexCharts config, plus a `ResizeObserver` that calls `updateOptions({ chart: { width: el.clientWidth } })` whenever the card resizes (window resize, sidebar collapse, htmx-boost swap). Sparkline now always fits.
 

@@ -1,12 +1,42 @@
 {% extends "base.html" %}
 {% block title %}Positions · Plata{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-3">
+<div class="flex items-start justify-between mb-3 gap-3 flex-wrap">
   <div>
     <h1 class="text-2xl font-semibold">Positions</h1>
     <p class="text-xs text-gray-500 mt-1">Open positions show live unrealized PnL from the per-symbol watch (5-min refresh). Hover the symbol for the strategist's reasoning, the status badge for what closed it, and click any row for the full decision chain + actions.</p>
   </div>
-  <a href="/trades/watch" class="text-xs text-blue-500 hover:underline">📡 Symbol watch list →</a>
+  <a href="/trades/watch" class="text-xs text-blue-500 hover:underline whitespace-nowrap">📡 Symbol watch list →</a>
+</div>
+
+<!-- Group + sort controls. Client-side reorder; no round-trip. -->
+<div class="flex flex-wrap items-end gap-3 mb-3 text-xs">
+  <label class="block">
+    <span class="block text-[10px] uppercase text-gray-500">Group by</span>
+    <select id="trades-group" class="p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+      <option value="">— none —</option>
+      <option value="status">Status</option>
+      <option value="symbol">Symbol</option>
+      <option value="side">Side (long / short)</option>
+      <option value="venue">Venue</option>
+      <option value="mode">Mode (paper / live)</option>
+    </select>
+  </label>
+  <label class="block">
+    <span class="block text-[10px] uppercase text-gray-500">Sort by</span>
+    <select id="trades-sort" class="p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+      <option value="started">Started</option>
+      <option value="pnl">PnL</option>
+      <option value="pct">% move</option>
+      <option value="held">Held duration</option>
+      <option value="symbol">Symbol A→Z</option>
+      <option value="conviction">Conviction</option>
+    </select>
+  </label>
+  <button id="trades-dir" type="button"
+          class="px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+          data-dir="desc" title="Toggle ascending / descending">↓ desc</button>
+  <span id="trades-summary" class="text-[10px] text-gray-500 ml-2 self-center"></span>
 </div>
 
 {% macro _human_secs(s) -%}
@@ -40,8 +70,20 @@
     <tbody>
       {% for e in trades %}
       {% set t = e.row %}
-      <tr class="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
-          onclick="location.href='/trades/{{ t.trade_ulid }}?from=trades'">
+      <tr class="trade-row border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
+          onclick="location.href='/trades/{{ t.trade_ulid }}?from=trades'"
+          data-symbol="{{ t.symbol }}"
+          data-side="{{ t.side or '' }}"
+          data-venue="{{ e.venue or '' }}"
+          data-mode="{{ t.mode or '' }}"
+          data-status="{{ e.status.label }}"
+          data-status-color="{{ e.status.color }}"
+          data-status-icon="{{ e.status.icon }}"
+          data-started="{{ t.opened_at.timestamp() if t.opened_at else 0 }}"
+          data-held="{{ e.held_sec or 0 }}"
+          data-pnl="{{ (t.net_pnl if t.net_pnl is not none else (e.unrealized if e.unrealized is not none else 0)) }}"
+          data-pct="{{ (e.realized_pct if t.exit_price else e.pct) if (e.realized_pct is not none or e.pct is not none) else 0 }}"
+          data-conviction="{{ e.conviction or 0 }}">
         <td class="px-3 py-2">
           <div class="font-mono font-semibold" title="{{ e.reasoning_preview or 'No strategist reasoning available.' }}">{{ t.symbol }}</div>
           <div class="flex items-center gap-2 text-[10px] text-gray-400">
@@ -110,4 +152,107 @@
     </tbody>
   </table>
 </div>
+
+<script>
+  // Client-side group + sort for the positions table. Persists user choice
+  // in localStorage so it survives page nav. No backend round-trip — all
+  // data is already in data-* attributes on each row.
+  (function () {
+    const tbody = document.querySelector('table tbody');
+    if (!tbody) return;
+    const $group = document.getElementById('trades-group');
+    const $sort  = document.getElementById('trades-sort');
+    const $dir   = document.getElementById('trades-dir');
+    const $summary = document.getElementById('trades-summary');
+    if (!$group || !$sort || !$dir) return;
+
+    // Restore last selection.
+    const LS = {
+      group: localStorage.getItem('plata.trades.group') || '',
+      sort:  localStorage.getItem('plata.trades.sort')  || 'started',
+      dir:   localStorage.getItem('plata.trades.dir')   || 'desc',
+    };
+    $group.value = LS.group; $sort.value = LS.sort;
+    $dir.dataset.dir = LS.dir;
+    $dir.textContent = LS.dir === 'asc' ? '↑ asc' : '↓ desc';
+
+    function rowVal(row, key) {
+      switch (key) {
+        case 'started':    return parseFloat(row.dataset.started)   || 0;
+        case 'held':       return parseFloat(row.dataset.held)      || 0;
+        case 'pnl':        return parseFloat(row.dataset.pnl)       || 0;
+        case 'pct':        return parseFloat(row.dataset.pct)       || 0;
+        case 'conviction': return parseFloat(row.dataset.conviction)|| 0;
+        case 'symbol':     return row.dataset.symbol || '';
+      }
+      return 0;
+    }
+    function reorder() {
+      const groupKey = $group.value;
+      const sortKey  = $sort.value;
+      const dir      = $dir.dataset.dir === 'asc' ? 1 : -1;
+      // Snapshot real data rows (skip any existing group headers).
+      const rows = Array.from(tbody.querySelectorAll('tr.trade-row'));
+      // Sort all rows.
+      rows.sort((a, b) => {
+        const va = rowVal(a, sortKey), vb = rowVal(b, sortKey);
+        if (typeof va === 'string') return dir * va.localeCompare(vb);
+        return dir * (va - vb);
+      });
+      // Remove old group-header rows.
+      tbody.querySelectorAll('tr.trade-group').forEach(r => r.remove());
+      // If grouping: sort by group label first, then by sort key within group.
+      if (groupKey) {
+        rows.sort((a, b) => {
+          const ga = (a.dataset[groupKey] || '').toLowerCase();
+          const gb = (b.dataset[groupKey] || '').toLowerCase();
+          if (ga !== gb) return ga < gb ? -1 : 1;
+          const va = rowVal(a, sortKey), vb = rowVal(b, sortKey);
+          if (typeof va === 'string') return dir * va.localeCompare(vb);
+          return dir * (va - vb);
+        });
+        // Re-insert with group headers.
+        let lastGroup = null;
+        rows.forEach(r => {
+          const g = r.dataset[groupKey] || '(none)';
+          if (g !== lastGroup) {
+            const header = document.createElement('tr');
+            header.className = 'trade-group bg-gray-100 dark:bg-gray-900 text-[10px] uppercase text-gray-500';
+            const td = document.createElement('td');
+            td.colSpan = 13;
+            td.className = 'px-3 py-1.5 font-semibold';
+            // Tiny per-group PnL aggregate for context.
+            const groupRows = rows.filter(rr => (rr.dataset[groupKey] || '(none)') === g);
+            const sumPnl = groupRows.reduce((s, rr) => s + (parseFloat(rr.dataset.pnl) || 0), 0);
+            const pnlLabel = (sumPnl >= 0 ? '+' : '') + sumPnl.toFixed(2);
+            const pnlClass = sumPnl > 0 ? 'text-green-500' : sumPnl < 0 ? 'text-red-500' : 'text-gray-500';
+            td.innerHTML = `${g} <span class="ml-2 text-gray-400">${groupRows.length} position(s)</span> · <span class="${pnlClass} font-mono">${pnlLabel}</span>`;
+            header.appendChild(td);
+            tbody.appendChild(header);
+            lastGroup = g;
+          }
+          tbody.appendChild(r);
+        });
+      } else {
+        rows.forEach(r => tbody.appendChild(r));
+      }
+      // Persist + summary.
+      localStorage.setItem('plata.trades.group', $group.value);
+      localStorage.setItem('plata.trades.sort',  $sort.value);
+      localStorage.setItem('plata.trades.dir',   $dir.dataset.dir);
+      const totalPnl = rows.reduce((s, r) => s + (parseFloat(r.dataset.pnl) || 0), 0);
+      const pnlLabel = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2);
+      const pnlClass = totalPnl > 0 ? 'text-green-500' : totalPnl < 0 ? 'text-red-500' : '';
+      $summary.innerHTML = `${rows.length} row(s) · Σ PnL <span class="${pnlClass} font-mono">${pnlLabel}</span>`;
+    }
+    $group.addEventListener('change', reorder);
+    $sort.addEventListener('change', reorder);
+    $dir.addEventListener('click', () => {
+      $dir.dataset.dir = $dir.dataset.dir === 'asc' ? 'desc' : 'asc';
+      $dir.textContent = $dir.dataset.dir === 'asc' ? '↑ asc' : '↓ desc';
+      reorder();
+    });
+    reorder();
+  })();
+</script>
 {% endblock %}
