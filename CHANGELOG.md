@@ -2,12 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
-## 2.24.107 — 2026-05-26
-- **App-like navigation (PWA-ish) via htmx-boost.** Sidebar + topbar links now fetch their target page in the background and swap just the `#main-content` area instead of doing a full page reload. The sidebar stays mounted, drawers don't collapse, the topbar KPIs don't flicker, and the browser back/forward buttons work normally. A 2-pixel blue progress bar appears across the top while a boosted request is in flight.
-  - On boost: mobile drawer auto-closes after nav, Flowbite widgets (dropdowns / modals / tabs) re-bind, scroll resets to top of new content.
-  - Page-level `<script>` tags inside swapped content are re-evaluated by htmx; existing `htmx:afterSwap` listeners for tabs / dates / SSE / KPIs continue to work.
-- **🐛 `/activity/` Bybit + Alpaca (and the other API-key providers) said NOT SET even when configured via the UI.** Settings → Environment got fixed in v2.24.077 but the Activity page check (`_api_statuses()`) was still only consulting `settings.bybit_api_key` etc. — env vars. Keys saved via the 🔑 API Keys tab live in Postgres only. Activity now also consults `credentials.get_sync(<provider>)` for OpenRouter, Voyage, Bybit, Alpaca, Telegram, Langfuse, CryptoPanic, NewsAPI, CryptoNews, LunarCrush, WhaleAlert. **Single source of truth across the dashboard.**
-- **What to test:** click between sidebar items — sidebar stays put, only main content changes, URL updates. Open `/activity/` — Bybit and Alpaca now show `CONFIGURED` matching the Settings → Environment tab.
+## 2.24.108 — 2026-05-26
+- **Actions on an open position.** Trade detail page (`/trades/<ulid>`) gets a new **Actions** block visible only while the trade is open, with three side-by-side cards:
+  - 🛑 **Close now (red).** Fetches the current ticker via the venue router, synthesizes a `TradeClosure` with `close_reason=manual`, publishes to `trade_closures:stream` — same path SL/TP/timeout closures take, so the reviewer updates the ledger + emits an SSE `trade_closed` event. Confirms with `plataConfirm` before firing. Falls back to the per-symbol watch cache if the venue ticker call fails.
+  - 🎯 **Adjust SL / TP (amber).** Updates `sl_price` / `tp_price` on the ledger row. Reviewer reads these on every price sample for auto-exit. Either field can be blank to leave it unchanged.
+  - 📝 **Add note (blue).** Pin a free-text thought to this trade. Stored in `raw_bybit_response.notes` with timestamp + actor email; rendered as a list at the bottom of the Actions block.
+- New endpoints (POST, audited): `/trades/<ulid>/close`, `/trades/<ulid>/sl_tp`, `/trades/<ulid>/note`.
 
 ## 2.24.107 — 2026-05-26
 - **🐛 Agent grid was hiding ~$4 of LLM spend** (sum of visible agents < total at the top of `/agents/`). The grid listed only agents with a live `agent_status:<name>` heartbeat hash; agents that crashed / were renamed / had their heartbeat key expire vanished from the grid even though their historical `cost:daily:<date>:agent:<name>` keys were still rolling into the daily totals. Likely candidates: enricher, historian, translator. **Now the grid takes the union** of `agent_status:*` keys + a Redis SCAN of `cost:daily:*:agent:*` so any agent that ever spent money appears as a row with a grey `STOPPED` badge (hover tooltip explains: *"Agent has historical LLM spend but no live heartbeat — service may have been removed, renamed, or its heartbeat key expired. Its past spend still contributes to the daily totals at the top."*). Math should now reconcile: Σ visible agents = total.

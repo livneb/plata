@@ -110,6 +110,123 @@ async def watch_list(request: Request):
     )
 
 
+@router.post("/{trade_ulid}/close")
+async def manual_close(trade_ulid: str, request: Request):
+    """Close an open position at the current market price (paper or live).
+    Synthesizes a TradeClosure event so the reviewer pipeline picks it up
+    (same path SL/TP/timeout closures take)."""
+    from datetime import datetime, timezone
+    from decimal import Decimal
+    from fastapi.responses import JSONResponse
+    from plata.core.bus import Streams, publish, publish_channel
+    from plata.core.schemas import CloseReason, Side, TradeClosure, TradeMode
+    from plata.execution.router import client_for, venue_for
+
+    async with session_scope() as session:
+        trade = (await session.execute(
+            select(TradeLedger).where(TradeLedger.trade_ulid == trade_ulid)
+        )).scalar_one_or_none()
+    if not trade or trade.exit_price is not None:
+        return JSONResponse({"ok": False, "reason": "not_open"}, status_code=400)
+
+    venue = venue_for(trade.symbol)
+    exit_price = Decimal("0")
+    try:
+        c = client_for(agent="manual_close", venue=venue)
+        t = await c.fetch_ticker(trade.symbol)
+        lp = float(t.get("last") or t.get("close") or 0)
+        if lp > 0:
+            exit_price = Decimal(str(lp))
+    except Exception:  # noqa: BLE001
+        pass
+    if exit_price <= 0:
+        # Fall back to last sampled price.
+        redis = get_redis()
+        sym_latest = await redis.hgetall(f"symbol:latest:{trade.symbol}")
+        if sym_latest.get("price"):
+            exit_price = Decimal(str(sym_latest["price"]))
+    if exit_price <= 0:
+        return JSONResponse({"ok": False, "reason": "no_price_available"}, status_code=502)
+
+    sign = Decimal("1") if (trade.side or "").lower() == "long" else Decimal("-1")
+    qty = Decimal(str(trade.qty or 0))
+    entry = Decimal(str(trade.entry_price or 0))
+    gross = sign * (exit_price - entry) * qty
+    fees = Decimal(str(trade.fees or 0))
+    net = gross - fees
+
+    closure = TradeClosure(
+        trade_ulid=trade_ulid, proposal_ulid=trade.proposal_id or "",
+        symbol=trade.symbol, venue=venue,
+        mode=TradeMode.PAPER, side=Side(trade.side),
+        qty=qty, entry_price=entry, exit_price=exit_price,
+        fees=fees, gross_pnl=gross, net_pnl=net,
+        close_reason=CloseReason.MANUAL,
+        opened_at=trade.opened_at, closed_at=datetime.now(timezone.utc),
+    )
+    await publish(Streams.TRADE_CLOSURES, closure)
+    await publish_channel("dashboard:events", {
+        "kind": "trade_closed", "trade_ulid": trade_ulid,
+        "symbol": trade.symbol, "net_pnl": float(net),
+        "close_reason": "manual",
+    })
+    return JSONResponse({"ok": True, "exit_price": str(exit_price), "net_pnl": str(net)})
+
+
+@router.post("/{trade_ulid}/sl_tp")
+async def manual_sl_tp(trade_ulid: str, request: Request):
+    """Update the stored SL / TP prices on an open trade. The reviewer reads
+    these on every sample; updating here adjusts the auto-exit triggers
+    without closing the position."""
+    from decimal import Decimal, InvalidOperation
+    from fastapi.responses import JSONResponse
+    form = await request.form()
+    def _dec(v: str | None) -> Decimal | None:
+        if not v: return None
+        try: return Decimal(v.strip())
+        except (InvalidOperation, ValueError): return None
+    sl = _dec(form.get("sl_price"))
+    tp = _dec(form.get("tp_price"))
+    async with session_scope() as session:
+        trade = (await session.execute(
+            select(TradeLedger).where(TradeLedger.trade_ulid == trade_ulid)
+        )).scalar_one_or_none()
+        if not trade or trade.exit_price is not None:
+            return JSONResponse({"ok": False, "reason": "not_open"}, status_code=400)
+        if sl is not None: trade.sl_price = sl
+        if tp is not None: trade.tp_price = tp
+    return RedirectResponse(url=f"/trades/{trade_ulid}", status_code=303)
+
+
+@router.post("/{trade_ulid}/note")
+async def manual_note(trade_ulid: str, request: Request):
+    """Append a free-text note to the trade's raw_bybit_response JSONB under
+    a `notes` list. Visible on the trade detail page audit section."""
+    from datetime import datetime, timezone
+    from fastapi.responses import JSONResponse
+    from plata.dashboard.auth import current_user_email
+    form = await request.form()
+    note = (form.get("note") or "").strip()[:1000]
+    if not note:
+        return RedirectResponse(url=f"/trades/{trade_ulid}", status_code=303)
+    async with session_scope() as session:
+        trade = (await session.execute(
+            select(TradeLedger).where(TradeLedger.trade_ulid == trade_ulid)
+        )).scalar_one_or_none()
+        if not trade:
+            return JSONResponse({"ok": False, "reason": "not_found"}, status_code=404)
+        raw = dict(trade.raw_bybit_response or {})
+        notes = list(raw.get("notes") or [])
+        notes.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "by": current_user_email(request) or "manual",
+            "text": note,
+        })
+        raw["notes"] = notes
+        trade.raw_bybit_response = raw
+    return RedirectResponse(url=f"/trades/{trade_ulid}", status_code=303)
+
+
 @router.get("/{trade_ulid}/samples")
 async def samples(trade_ulid: str):
     """Return recorded price samples + a diagnostic block explaining
