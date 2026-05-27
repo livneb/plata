@@ -118,7 +118,7 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             {% for row in risk_grouped[group_key] %}
               {% set m = row.meta %}
-              <form method="post" action="/risk_config/{{ row.key }}/update"
+              <form method="post" action="/risk_config/{{ row.key }}/update?next=/settings/%3Ftab%3Drisk"
                     class="rc-form bg-white dark:bg-gray-800 rounded-lg border {% if m.danger %}border-red-200 dark:border-red-800{% else %}border-gray-200 dark:border-gray-700{% endif %} p-3">
                 <div class="flex items-start justify-between gap-2 mb-1">
                   <div>
@@ -200,7 +200,7 @@
                 <button type="button"
                         data-modal-target="edit-{{ loop.index }}" data-modal-toggle="edit-{{ loop.index }}"
                         class="text-blue-500 hover:underline mr-3">Edit</button>
-                <form method="post" action="/risk_config/{{ row.key }}/delete" class="inline"
+                <form method="post" action="/risk_config/{{ row.key }}/delete?next=/settings/%3Ftab%3Drisk" class="inline"
                       data-confirm="Delete config key '{{ row.key }}'?"
                       data-confirm-title="Delete key" data-confirm-label="Delete" data-confirm-danger>
                   <button type="submit" class="text-red-500 hover:underline">Delete</button>
@@ -215,7 +215,7 @@
                     <h3 class="text-lg font-semibold">Edit <span class="font-mono">{{ row.key }}</span></h3>
                     <button type="button" data-modal-hide="edit-{{ loop.index }}" class="text-gray-400 hover:text-gray-200">✕</button>
                   </div>
-                  <form method="post" action="/risk_config/{{ row.key }}/update" class="space-y-3"
+                  <form method="post" action="/risk_config/{{ row.key }}/update?next=/settings/%3Ftab%3Drisk" class="space-y-3"
                         data-persist="risk-config-edit-{{ row.key }}">
                     <div>
                       <label class="block text-sm font-medium mb-1">Value (JSON or plain text)</label>
@@ -246,7 +246,7 @@
             <h3 class="text-lg font-semibold">New config key</h3>
             <button type="button" data-modal-hide="create-modal" class="text-gray-400 hover:text-gray-200">✕</button>
           </div>
-          <form method="post" action="/risk_config/create" class="space-y-3" data-persist="risk-config-create">
+          <form method="post" action="/risk_config/create?next=/settings/%3Ftab%3Drisk" class="space-y-3" data-persist="risk-config-create">
             <div>
               <label class="block text-sm font-medium mb-1">Key</label>
               <input name="key" required placeholder="e.g. max_open_positions"

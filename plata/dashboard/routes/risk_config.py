@@ -80,21 +80,40 @@ async def index(request: Request):
     )
 
 
+def _next_url(request: Request, fallback: str = "/risk_config/") -> str:
+    """Pick the URL to redirect to after a save. Priority:
+      1. ?next=<path> query param
+      2. Referer header (if same-origin and relative-ish)
+      3. fallback
+    Lets the friendly /settings/?tab=risk sliders post here without dumping
+    the user on the legacy table view after every change."""
+    nxt = (request.query_params.get("next") or "").strip()
+    if nxt.startswith("/"):
+        return nxt
+    ref = (request.headers.get("referer") or "")
+    # Strip scheme + host; only keep the path+query to avoid open-redirect.
+    if "://" in ref:
+        ref = "/" + ref.split("://", 1)[1].split("/", 1)[1] if "/" in ref.split("://", 1)[1] else ""
+    if ref.startswith("/"):
+        return ref
+    return fallback
+
+
 @router.post("/create")
-async def create(key: str = Form(...), value: str = Form(...)):
+async def create(request: Request, key: str = Form(...), value: str = Form(...)):
     await _write(key.strip(), value)
-    return RedirectResponse(url="/risk_config/", status_code=303)
+    return RedirectResponse(url=_next_url(request), status_code=303)
 
 
 @router.post("/{key}/update")
-async def update(key: str, value: str = Form(...)):
+async def update(request: Request, key: str, value: str = Form(...)):
     await _write(key, value)
-    return RedirectResponse(url="/risk_config/", status_code=303)
+    return RedirectResponse(url=_next_url(request), status_code=303)
 
 
 @router.post("/{key}/delete")
-async def delete(key: str):
+async def delete(request: Request, key: str):
     redis = get_redis()
     await redis.hdel("risk_config", key)
     await publish_channel(Channels.CONFIG_UPDATED, {"key": key, "value": None})
-    return RedirectResponse(url="/risk_config/", status_code=303)
+    return RedirectResponse(url=_next_url(request), status_code=303)

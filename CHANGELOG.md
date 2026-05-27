@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.106 — 2026-05-26
+- **🐛 Sliders/toggles disappeared after Save.** The friendly grouped form on `/settings/?tab=risk` posted to `/risk_config/<key>/update`, which hardcoded a redirect to the legacy `/risk_config/` table view. So every Save threw you out of the nice UI and onto the raw key/value table.
+- Fix: the `/risk_config/{key}/update`, `/create`, and `/delete` endpoints now redirect to a `?next=<path>` query param if provided, falling back to the `Referer` header, falling back to `/risk_config/` for back-compat. All four forms on the settings page now pass `?next=/settings/?tab=risk`. **Slider Save / toggle flip stays on the same screen.**
+
 ## 2.24.105 — 2026-05-26
 - **🐛 Topbar `PAPER` badge is now dynamic** — was hardcoded as `PAPER` in the template, so toggling `paper_trading_mode` off in Settings → Risk flipped the underlying value in Redis (and the executor *was* going live to Bybit/Alpaca) but the badge kept lying. Now `/api/header_stats` returns `paper_mode`, the badge reads it on every refresh and flips to a **red `LIVE`** when off.
 - **Why no new positions from the system in the last ~10 h with 6 open**: `max_open_positions` defaults to 3 in `risk_config`; every new strategist proposal hit the `max_open_positions_reached` gate (visible on `/proposals/?state=rejected` after v2.24.102). Either raise the cap on `/settings/?tab=risk` → *Portfolio limits → Max simultaneous positions*, or close some trades — the strategist will start filling slots again automatically.
