@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.111 — 2026-05-26
+- **🐛 Sparkline on `/positions/` overflowed its card.** ApexCharts in sparkline mode renders at its default width (~600 px) on first paint until the layout settles, which spilled past the right edge of the card. Three fixes: `overflow-hidden` on the card, `w-full overflow-hidden` on the `.spark` div, explicit `chart.width: '100%'` in the ApexCharts config, plus a `ResizeObserver` that calls `updateOptions({ chart: { width: el.clientWidth } })` whenever the card resizes (window resize, sidebar collapse, htmx-boost swap). Sparkline now always fits.
+
 ## 2.24.110 — 2026-05-26
 - **More context on every positions row.** Beyond the live PnL added in v2.24.109:
   - **Status** column with proper labels + tooltips:

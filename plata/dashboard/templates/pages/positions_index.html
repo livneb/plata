@@ -14,7 +14,7 @@
 
 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
   {% for c in cards %}
-  <a href="/positions/{{ c.symbol }}?from=positions" class="block bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-blue-500 transition">
+  <a href="/positions/{{ c.symbol }}?from=positions" class="block bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-blue-500 transition overflow-hidden">
     <div class="flex items-center justify-between mb-1">
       <div class="flex items-center gap-2">
         <span class="font-mono font-semibold text-lg">{{ c.symbol }}</span>
@@ -31,7 +31,7 @@
         </div>
       </div>
     </div>
-    <div class="spark h-12 -mx-1" data-points='{{ c.spark | tojson }}'></div>
+    <div class="spark h-12 w-full overflow-hidden" data-points='{{ c.spark | tojson }}'></div>
     <div class="flex items-center justify-between text-xs mt-1">
       <span class="text-gray-500">{{ c.trade_count }} trade(s) · L {{ '%.3f' % c.net_long if c.net_long else '·' }} / S {{ '%.3f' % c.net_short if c.net_short else '·' }}</span>
       <span class="font-mono font-semibold {% if c.unrealized > 0 %}text-green-500{% elif c.unrealized < 0 %}text-red-500{% else %}text-gray-400{% endif %}">
@@ -45,22 +45,44 @@
 </div>
 
 <script>
-  // Sparklines (ApexCharts area, no axes, no toolbar)
+  // Sparklines (ApexCharts area, no axes, no toolbar).
+  // Pin width to the parent card and re-render on resize / boost-swap so
+  // the chart never overflows past its container.
+  const _sparkCharts = [];
   document.querySelectorAll('.spark').forEach(el => {
     let pts = [];
     try { pts = JSON.parse(el.dataset.points || '[]'); } catch (e) { return; }
     if (!pts.length || !window.ApexCharts) return;
     const last = pts[pts.length - 1], first = pts[0];
     const up = last >= first;
-    new ApexCharts(el, {
-      chart: { type: 'area', height: 48, sparkline: { enabled: true }, animations: { enabled: false } },
+    const chart = new ApexCharts(el, {
+      chart: {
+        type: 'area', height: 48,
+        width: '100%',                  // explicit so ApexCharts doesn't pick its 600px default
+        sparkline: { enabled: true },
+        animations: { enabled: false },
+        parentHeightOffset: 0,
+        toolbar: { show: false },
+      },
       stroke: { curve: 'smooth', width: 1.5 },
       series: [{ data: pts }],
       colors: [up ? '#10b981' : '#ef4444'],
       fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0 } },
       tooltip: { enabled: false },
-    }).render();
+    });
+    chart.render();
+    _sparkCharts.push({ chart, el });
   });
+  // ResizeObserver: when the card width changes (window resize, sidebar
+  // collapse, htmx boost swap), poke each chart to recompute width.
+  if (window.ResizeObserver && _sparkCharts.length) {
+    const ro = new ResizeObserver(() => {
+      _sparkCharts.forEach(({ chart, el }) => {
+        try { chart.updateOptions({ chart: { width: el.clientWidth } }, false, false); } catch {}
+      });
+    });
+    _sparkCharts.forEach(({ el }) => ro.observe(el));
+  }
   // Background refresh every 60s.
   setTimeout(() => location.reload(), 60000);
 </script>
