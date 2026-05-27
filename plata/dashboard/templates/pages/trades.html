@@ -4,26 +4,37 @@
 <div class="flex items-center justify-between mb-3">
   <div>
     <h1 class="text-2xl font-semibold">Positions</h1>
-    <p class="text-xs text-gray-500 mt-1">Open positions show live unrealized PnL from the per-symbol watch (refreshed every 5 min). Click any row for the full decision chain + actions.</p>
+    <p class="text-xs text-gray-500 mt-1">Open positions show live unrealized PnL from the per-symbol watch (5-min refresh). Hover the symbol for the strategist's reasoning, the status badge for what closed it, and click any row for the full decision chain + actions.</p>
   </div>
   <a href="/trades/watch" class="text-xs text-blue-500 hover:underline">📡 Symbol watch list →</a>
 </div>
+
+{% macro _human_secs(s) -%}
+  {% if s is none %}—
+  {% elif s < 60 %}{{ s }}s
+  {% elif s < 3600 %}{{ (s // 60) }}m
+  {% elif s < 86400 %}{{ (s // 3600) }}h {{ ((s % 3600) // 60) }}m
+  {% else %}{{ (s // 86400) }}d {{ ((s % 86400) // 3600) }}h
+  {% endif %}
+{%- endmacro %}
 
 <div class="relative overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
   <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
     <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
       <tr>
         <th class="px-3 py-2">Symbol</th>
+        <th class="px-3 py-2">Status</th>
         <th class="px-3 py-2">Side</th>
         <th class="px-3 py-2 text-right">Qty</th>
         <th class="px-3 py-2 text-right">Entry</th>
-        <th class="px-3 py-2 text-right" title="Current market price (open) or exit price (closed). Open rows use the per-symbol watch cache.">Current / Exit</th>
-        <th class="px-3 py-2 text-right" title="% move from entry, signed for the side (long: positive = up, short: positive = down).">%&nbsp;move</th>
+        <th class="px-3 py-2 text-right" title="Current market price (open) or final exit price (closed).">Current / Exit</th>
+        <th class="px-3 py-2 text-right" title="% move from entry, signed for the side.">%&nbsp;move</th>
         <th class="px-3 py-2 text-right">PnL</th>
-        <th class="px-3 py-2 text-right hidden lg:table-cell" title="Stop-loss / take-profit prices set on this trade. — = unset.">SL / TP</th>
+        <th class="px-3 py-2 text-right hidden lg:table-cell" title="Stop-loss / take-profit prices. Updated automatically when reviewer auto-exits; editable on each trade's detail page.">SL / TP</th>
         <th class="px-3 py-2 hidden md:table-cell">Venue · Mode</th>
-        <th class="px-3 py-2">Opened</th>
-        <th class="px-3 py-2 hidden xl:table-cell">Closed</th>
+        <th class="px-3 py-2 whitespace-nowrap" title="When the trade opened.">Started</th>
+        <th class="px-3 py-2 whitespace-nowrap" title="How long the position has been (or was) held.">Held</th>
+        <th class="px-3 py-2 whitespace-nowrap hidden xl:table-cell" title="When the trade closed. — = still open.">Closed</th>
       </tr>
     </thead>
     <tbody>
@@ -32,8 +43,15 @@
       <tr class="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
           onclick="location.href='/trades/{{ t.trade_ulid }}?from=trades'">
         <td class="px-3 py-2">
-          <div class="font-mono font-semibold">{{ t.symbol }}</div>
-          <div class="font-mono text-[10px] text-gray-400">{{ t.trade_ulid[:8] }}…</div>
+          <div class="font-mono font-semibold" title="{{ e.reasoning_preview or 'No strategist reasoning available.' }}">{{ t.symbol }}</div>
+          <div class="flex items-center gap-2 text-[10px] text-gray-400">
+            <span class="font-mono">{{ t.trade_ulid[:8] }}…</span>
+            {% if e.conviction is not none %}<span title="Strategist conviction when this trade was proposed.">conv&nbsp;<b>{{ '%.2f' % e.conviction }}</b></span>{% endif %}
+          </div>
+        </td>
+        <td class="px-3 py-2 whitespace-nowrap">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] {{ e.status.color }}"
+                title="{{ e.status.tooltip }}">{{ e.status.icon }} {{ e.status.label }}</span>
         </td>
         <td class="px-3 py-2">
           {% if t.side == 'long' %}<span class="text-green-500">↑ long</span>
@@ -76,15 +94,18 @@
         <td class="px-3 py-2 whitespace-nowrap text-xs">
           {% if t.opened_at %}<time data-utc="{{ t.opened_at.isoformat() }}">{{ t.opened_at | time_ago }}</time>{% endif %}
         </td>
+        <td class="px-3 py-2 whitespace-nowrap text-xs font-mono text-gray-500"
+            title="{% if t.closed_at %}From start to close.{% else %}Live — since opened.{% endif %}">
+          {{ _human_secs(e.held_sec) }}
+        </td>
         <td class="px-3 py-2 hidden xl:table-cell whitespace-nowrap text-xs">
           {% if t.closed_at %}
             <time data-utc="{{ t.closed_at.isoformat() }}">{{ t.closed_at | time_ago }}</time>
-            {% if t.close_reason %}<div class="text-[10px] text-gray-400">{{ t.close_reason }}</div>{% endif %}
-          {% else %}<span class="text-emerald-500 text-[10px]">● open</span>{% endif %}
+          {% else %}<span class="text-gray-300">—</span>{% endif %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="11" class="px-6 py-12 text-center text-gray-400">No positions yet.</td></tr>
+      <tr><td colspan="13" class="px-6 py-12 text-center text-gray-400">No positions yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -18,6 +18,7 @@ router = APIRouter(prefix="/trades", tags=["trades"])
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    from plata.core.db import Proposal
     from plata.execution.router import venue_for
     redis = get_redis()
     async with session_scope() as session:
@@ -25,6 +26,19 @@ async def index(request: Request):
             select(TradeLedger).order_by(TradeLedger.opened_at.desc()).limit(100)
         )
         rows = result.scalars().all()
+        # Bulk-fetch the originating proposal for each trade in ONE query so
+        # we can show conviction + a reasoning preview without N round-trips.
+        prop_by_ulid: dict[str, Proposal] = {}
+        prop_ulids = [r.proposal_id for r in rows if r.proposal_id]
+        if prop_ulids:
+            try:
+                pres = await session.execute(
+                    select(Proposal).where(Proposal.proposal_ulid.in_(prop_ulids))
+                )
+                for p in pres.scalars().all():
+                    prop_by_ulid[p.proposal_ulid] = p
+            except Exception:  # noqa: BLE001
+                pass
     # Enrich each row with current price + unrealized PnL + venue.
     # Open trades use the symbol watch cache (refreshed every 5 min by the
     # sampler) so the page paints with up-to-date numbers without doing N
@@ -67,11 +81,42 @@ async def index(request: Request):
                 realized_pct = sign * (float(r.exit_price) - entry) / entry * 100.0
             except Exception:  # noqa: BLE001
                 pass
+        # Holding duration (for the Held column).
+        from datetime import datetime as _dt, timezone as _tz
+        held_sec: int | None = None
+        if r.opened_at:
+            end = r.closed_at or _dt.now(_tz.utc)
+            try:
+                held_sec = max(0, int((end - r.opened_at).total_seconds()))
+            except Exception:  # noqa: BLE001
+                pass
+        # Status: open / closed-with-reason. Title + colour combo.
+        STATUS_META = {
+            "sl":          {"label": "SL hit",      "icon": "🛑", "color": "bg-red-100 text-red-800"},
+            "tp":          {"label": "TP hit",      "icon": "🎯", "color": "bg-emerald-100 text-emerald-800"},
+            "manual":      {"label": "Closed by you","icon": "✋", "color": "bg-blue-100 text-blue-800"},
+            "timeout":     {"label": "Timed out",   "icon": "⏱",  "color": "bg-amber-100 text-amber-800"},
+            "kill_switch": {"label": "Kill switch", "icon": "⚠",  "color": "bg-red-200 text-red-900"},
+        }
+        if r.exit_price is None:
+            status = {"label": "Open", "icon": "●", "color": "bg-emerald-100 text-emerald-800 animate-pulse",
+                      "tooltip": "Position still open — live mark-to-market shown."}
+        else:
+            cr = (str(r.close_reason) if r.close_reason else "").lower() or "—"
+            meta = STATUS_META.get(cr, {"label": cr, "icon": "✓", "color": "bg-gray-200 text-gray-700"})
+            status = {**meta, "tooltip": f"Closed automatically by rule: {cr}" if cr in ("sl", "tp", "timeout", "kill_switch") else ("Closed manually" if cr == "manual" else "Closed")}
+
+        prop = prop_by_ulid.get(r.proposal_id or "")
         enriched.append({
             "row": r, "venue": venue,
             "cur_price": cur_price, "cur_ts": cur_ts,
             "unrealized": unrealized, "pct": pct,
             "realized_pct": realized_pct,
+            "held_sec": held_sec,
+            "status": status,
+            "conviction": float(prop.conviction) if (prop and prop.conviction is not None) else None,
+            "reasoning_preview": (prop.reasoning[:280] if (prop and prop.reasoning) else None),
+            "event_ulid": (prop.triggering_event_ulid if prop else None),
         })
     return templates.TemplateResponse(
         request, "pages/trades.html", {"trades": enriched, "active": "trades"}

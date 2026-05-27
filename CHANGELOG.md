@@ -2,6 +2,21 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.110 — 2026-05-26
+- **More context on every positions row.** Beyond the live PnL added in v2.24.109:
+  - **Status** column with proper labels + tooltips:
+    - 🟢 `Open` (pulsing) — "Position still open — live mark-to-market shown."
+    - 🛑 `SL hit` — "Closed automatically by rule: sl"
+    - 🎯 `TP hit` — "Closed automatically by rule: tp"
+    - ✋ `Closed by you` — "Closed manually"
+    - ⏱ `Timed out` — "Closed automatically by rule: timeout"
+    - ⚠ `Kill switch` — "Closed automatically by rule: kill_switch"
+  - **Started** + **Held** columns split out the timeline: when the trade opened, and how long it has been (or was) held (`12m` / `3h 14m` / `2d 5h`). Held ticks live for open positions.
+  - **Conviction** of the originating strategist proposal shown under the ULID (`conv 0.78`).
+  - **Symbol cell tooltip** = the strategist's reasoning preview (first 280 chars) — hover to remind yourself why this trade was even taken.
+  - Bulk-loads `Proposal` rows in a single query keyed by `proposal_id` so adding these columns didn't add N round-trips.
+- Closed column now just shows the relative timestamp; the reason is properly merged into the Status badge instead of duplicated.
+
 ## 2.24.109 — 2026-05-26
 - **Positions table is now actually useful.** Was just ULIDs + raw prices. Now each row shows live market data + computed metrics:
   - **Symbol** (font-mono header + short ULID below).
