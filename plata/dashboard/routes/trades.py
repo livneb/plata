@@ -18,13 +18,63 @@ router = APIRouter(prefix="/trades", tags=["trades"])
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    from plata.execution.router import venue_for
+    redis = get_redis()
     async with session_scope() as session:
         result = await session.execute(
             select(TradeLedger).order_by(TradeLedger.opened_at.desc()).limit(100)
         )
         rows = result.scalars().all()
+    # Enrich each row with current price + unrealized PnL + venue.
+    # Open trades use the symbol watch cache (refreshed every 5 min by the
+    # sampler) so the page paints with up-to-date numbers without doing N
+    # network calls. Closed trades just echo their stored exit fields.
+    enriched: list[dict] = []
+    for r in rows:
+        entry = float(r.entry_price or 0)
+        qty = float(r.qty or 0)
+        sign = 1.0 if (r.side or "").lower() == "long" else -1.0
+        venue = venue_for(r.symbol)
+        cur_price = None
+        unrealized = None
+        pct = None
+        cur_ts = None
+        if r.exit_price is None and entry > 0 and qty > 0:
+            sym = await redis.hgetall(f"symbol:latest:{r.symbol}")
+            if sym.get("price"):
+                try:
+                    cur_price = float(sym["price"])
+                    cur_ts = sym.get("ts")
+                    unrealized = sign * (cur_price - entry) * qty
+                    pct = sign * (cur_price - entry) / entry * 100.0
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                # Fall back to per-trade latest sample.
+                lt = await redis.hgetall(f"trade:latest:{r.trade_ulid}")
+                if lt.get("price"):
+                    try:
+                        cur_price = float(lt["price"])
+                        cur_ts = lt.get("ts")
+                        unrealized = sign * (cur_price - entry) * qty
+                        pct = sign * (cur_price - entry) / entry * 100.0
+                    except Exception:  # noqa: BLE001
+                        pass
+        # Realized pct for closed trades — same formula but exit_price.
+        realized_pct = None
+        if r.exit_price is not None and entry > 0:
+            try:
+                realized_pct = sign * (float(r.exit_price) - entry) / entry * 100.0
+            except Exception:  # noqa: BLE001
+                pass
+        enriched.append({
+            "row": r, "venue": venue,
+            "cur_price": cur_price, "cur_ts": cur_ts,
+            "unrealized": unrealized, "pct": pct,
+            "realized_pct": realized_pct,
+        })
     return templates.TemplateResponse(
-        request, "pages/trades.html", {"trades": rows, "active": "trades"}
+        request, "pages/trades.html", {"trades": enriched, "active": "trades"}
     )
 
 

@@ -2,50 +2,89 @@
 {% block title %}Positions · Plata{% endblock %}
 {% block content %}
 <div class="flex items-center justify-between mb-3">
-  <h1 class="text-2xl font-semibold">Positions</h1>
+  <div>
+    <h1 class="text-2xl font-semibold">Positions</h1>
+    <p class="text-xs text-gray-500 mt-1">Open positions show live unrealized PnL from the per-symbol watch (refreshed every 5 min). Click any row for the full decision chain + actions.</p>
+  </div>
   <a href="/trades/watch" class="text-xs text-blue-500 hover:underline">📡 Symbol watch list →</a>
 </div>
-<div class="relative overflow-x-auto shadow-md sm:rounded-lg">
+
+<div class="relative overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
   <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
     <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
       <tr>
-        <th class="px-6 py-3">ULID</th>
-        <th class="px-6 py-3">Mode</th>
-        <th class="px-6 py-3">Symbol</th>
-        <th class="px-6 py-3">Side</th>
-        <th class="px-6 py-3">Qty</th>
-        <th class="px-6 py-3">Entry</th>
-        <th class="px-6 py-3">Exit</th>
-        <th class="px-6 py-3">Net PnL</th>
-        <th class="px-6 py-3">Opened</th>
-        <th class="px-6 py-3">Closed</th>
+        <th class="px-3 py-2">Symbol</th>
+        <th class="px-3 py-2">Side</th>
+        <th class="px-3 py-2 text-right">Qty</th>
+        <th class="px-3 py-2 text-right">Entry</th>
+        <th class="px-3 py-2 text-right" title="Current market price (open) or exit price (closed). Open rows use the per-symbol watch cache.">Current / Exit</th>
+        <th class="px-3 py-2 text-right" title="% move from entry, signed for the side (long: positive = up, short: positive = down).">%&nbsp;move</th>
+        <th class="px-3 py-2 text-right">PnL</th>
+        <th class="px-3 py-2 text-right hidden lg:table-cell" title="Stop-loss / take-profit prices set on this trade. — = unset.">SL / TP</th>
+        <th class="px-3 py-2 hidden md:table-cell">Venue · Mode</th>
+        <th class="px-3 py-2">Opened</th>
+        <th class="px-3 py-2 hidden xl:table-cell">Closed</th>
       </tr>
     </thead>
     <tbody>
-      {% for t in trades %}
-      <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
+      {% for e in trades %}
+      {% set t = e.row %}
+      <tr class="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
           onclick="location.href='/trades/{{ t.trade_ulid }}?from=trades'">
-        <td class="px-6 py-3 font-mono text-xs">{{ t.trade_ulid[:10] }}…</td>
-        <td class="px-6 py-3">
-          <span class="px-2 py-0.5 rounded text-xs
-            {% if t.mode == 'paper' %}bg-yellow-100 text-yellow-800{% else %}bg-green-100 text-green-800{% endif %}">
-            {{ t.mode }}
-          </span>
+        <td class="px-3 py-2">
+          <div class="font-mono font-semibold">{{ t.symbol }}</div>
+          <div class="font-mono text-[10px] text-gray-400">{{ t.trade_ulid[:8] }}…</div>
         </td>
-        <td class="px-6 py-3">{{ t.symbol }}</td>
-        <td class="px-6 py-3">{{ t.side }}</td>
-        <td class="px-6 py-3">{{ t.qty }}</td>
-        <td class="px-6 py-3">{{ t.entry_price }}</td>
-        <td class="px-6 py-3">{{ t.exit_price or '—' }}</td>
-        <td class="px-6 py-3 font-medium
-          {% if t.net_pnl and t.net_pnl > 0 %}text-green-500{% elif t.net_pnl and t.net_pnl < 0 %}text-red-500{% endif %}">
-          {{ t.net_pnl or '—' }}
+        <td class="px-3 py-2">
+          {% if t.side == 'long' %}<span class="text-green-500">↑ long</span>
+          {% else %}<span class="text-red-500">↓ short</span>{% endif %}
         </td>
-        <td class="px-6 py-3">{% if t.opened_at %}<time data-utc="{{ t.opened_at.isoformat() }}">{{ t.opened_at | time_ago }}</time>{% endif %}</td>
-        <td class="px-6 py-3">{% if t.closed_at %}<time data-utc="{{ t.closed_at.isoformat() }}">{{ t.closed_at | time_ago }}</time>{% else %}—{% endif %}</td>
+        <td class="px-3 py-2 text-right font-mono text-xs">{{ '%.4f' % (t.qty | float) if t.qty else '—' }}</td>
+        <td class="px-3 py-2 text-right font-mono text-xs">{{ '%.4f' % (t.entry_price | float) if t.entry_price else '—' }}</td>
+        <td class="px-3 py-2 text-right font-mono text-xs">
+          {% if t.exit_price %}<span class="text-gray-500">{{ '%.4f' % (t.exit_price | float) }}</span>
+          {% elif e.cur_price is not none %}
+            <span title="Last sampled {{ e.cur_ts or 'recently' }}">{{ '%.4f' % e.cur_price }}</span>
+          {% else %}<span class="text-gray-300">—</span>{% endif %}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-xs
+          {% set p = e.realized_pct if t.exit_price else e.pct %}
+          {% if p is not none and p > 0 %}text-green-500{% elif p is not none and p < 0 %}text-red-500{% else %}text-gray-400{% endif %}">
+          {% if p is not none %}{{ '%+.2f' % p }}%{% else %}—{% endif %}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-xs font-semibold
+          {% if t.net_pnl is not none and t.net_pnl > 0 %}text-green-500
+          {% elif t.net_pnl is not none and t.net_pnl < 0 %}text-red-500
+          {% elif e.unrealized is not none and e.unrealized > 0 %}text-green-500
+          {% elif e.unrealized is not none and e.unrealized < 0 %}text-red-500
+          {% else %}text-gray-400{% endif %}">
+          {% if t.net_pnl is not none %}{{ '%+.4f' % (t.net_pnl | float) }}
+          {% elif e.unrealized is not none %}<span title="Unrealized — mark-to-market, not yet realized">{{ '%+.4f' % e.unrealized }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-[10px] hidden lg:table-cell">
+          <span class="text-red-500">{{ '%.4f' % (t.sl_price | float) if t.sl_price else '—' }}</span>
+          <span class="text-gray-400">/</span>
+          <span class="text-green-500">{{ '%.4f' % (t.tp_price | float) if t.tp_price else '—' }}</span>
+        </td>
+        <td class="px-3 py-2 hidden md:table-cell text-[10px]">
+          {% if e.venue == 'alpaca' %}<span class="bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">📈 alpaca</span>
+          {% else %}<span class="bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded">🪙 bybit</span>{% endif %}
+          <span class="px-1.5 py-0.5 rounded ml-1
+            {% if t.mode == 'paper' %}bg-yellow-100 text-yellow-800{% else %}bg-red-100 text-red-800{% endif %}">{{ t.mode }}</span>
+        </td>
+        <td class="px-3 py-2 whitespace-nowrap text-xs">
+          {% if t.opened_at %}<time data-utc="{{ t.opened_at.isoformat() }}">{{ t.opened_at | time_ago }}</time>{% endif %}
+        </td>
+        <td class="px-3 py-2 hidden xl:table-cell whitespace-nowrap text-xs">
+          {% if t.closed_at %}
+            <time data-utc="{{ t.closed_at.isoformat() }}">{{ t.closed_at | time_ago }}</time>
+            {% if t.close_reason %}<div class="text-[10px] text-gray-400">{{ t.close_reason }}</div>{% endif %}
+          {% else %}<span class="text-emerald-500 text-[10px]">● open</span>{% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="10" class="px-6 py-12 text-center text-gray-400">No trades yet.</td></tr>
+      <tr><td colspan="11" class="px-6 py-12 text-center text-gray-400">No positions yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

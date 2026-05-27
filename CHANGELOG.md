@@ -2,6 +2,18 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.109 — 2026-05-26
+- **Positions table is now actually useful.** Was just ULIDs + raw prices. Now each row shows live market data + computed metrics:
+  - **Symbol** (font-mono header + short ULID below).
+  - **Side** as a coloured arrow (`↑ long` green / `↓ short` red).
+  - **Qty** + **Entry** — same as before but right-aligned and trimmed to 4 decimal places.
+  - **Current / Exit** — for open positions: live market price from the per-symbol watch cache (refreshed every 5 min). For closed: the exit price. Hover shows the cache timestamp.
+  - **% move** — signed for the side (long: positive = up, short: positive = down). Green / red / gray.
+  - **PnL** — realized for closed, **unrealized mark-to-market for open** (was always `—` before, now you can actually see how each position is doing without clicking in). Tooltip clarifies "unrealized" when relevant.
+  - **SL / TP** — both threshold prices side-by-side (red SL / green TP) on lg+. `—` when unset.
+  - **Venue · Mode** — `📈 alpaca` or `🪙 bybit` chip + paper/live chip (md+).
+  - **Closed** column now includes the close reason (`sl` / `tp` / `manual` / `timeout` / `kill_switch`) underneath the timestamp. Open positions show a green `● open` indicator.
+
 ## 2.24.108 — 2026-05-26
 - **Actions on an open position.** Trade detail page (`/trades/<ulid>`) gets a new **Actions** block visible only while the trade is open, with three side-by-side cards:
   - 🛑 **Close now (red).** Fetches the current ticker via the venue router, synthesizes a `TradeClosure` with `close_reason=manual`, publishes to `trade_closures:stream` — same path SL/TP/timeout closures take, so the reviewer updates the ledger + emits an SSE `trade_closed` event. Confirms with `plataConfirm` before firing. Falls back to the per-symbol watch cache if the venue ticker call fails.
