@@ -2,6 +2,28 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.114 — 2026-05-27
+- **🐛 Bybit regulatory block (PermissionDenied, retCode 10024) no longer DLQ's trades.** The venue refused live orders due to your account's KYC / region (`Dear User, The product or service you are seeking to access is not available to you due to regulatory restrictions`). Executor used to capture this as an ERROR and skip — every blocked proposal hit the dead-letter queue. Now: on detecting `PermissionDenied` / `retCode 10024` / `regulatory` keywords, the executor **transparently falls back to a paper-mode fill** for that trade (records it in the ledger with `raw_response.regulatory_fallback=true`), stores a venue-wide block flag in Redis `venue:blocked:bybit`, and continues. The health watchdog picks that up and writes a `VenueRegulatoryBlock` WARN to `/errors/` once per 10-minute window so you know live trading on Bybit is currently unavailable.
+- **Proposals page: friendlier names + tooltips on every state badge.** "Dropped" was technically correct but vague. Renamed:
+  - **Dropped → Not traded** 🛑 — strategist saw the event but didn't open a trade. Sub-reasons explain why.
+  - Below threshold → **Too quiet** 📉
+  - LLM said don't trade → **Strategist declined** 🤔
+  - Event missing → **Event expired** ❓
+  - No embedding → **Couldn't analyze** 🧬
+  - Rejected → **Blocked by risk** 🛡️
+  - Pending HITL → **Awaiting you** ⏳
+  - HITL approved/rejected → **You approved / You rejected** 👤
+  - Approved → **Risk OK** ✅
+  - Executed → **Filled** 📈
+  - Failed execution → **Venue error** 💥
+  - Manual override → **Your override** ✋
+  - Every chip + badge now has a hover tooltip explaining what the state actually means (what triggered it, what to do).
+- **More filters on `/proposals/`:**
+  - **Symbol** text input (was URL-only).
+  - **Side** picker (long / short / any).
+  - **Search** free-text box matching against `reasoning`, `state_reason`, and `symbol` simultaneously — useful for finding e.g. "every proposal that mentioned 'rate cut'".
+  - Reset button appears when any are active. All filters preserve through paging via the querystring.
+
 ## 2.24.113 — 2026-05-26
 - **Pagination on `/proposals/`.** With strategist drops being persisted (and 1000+ events flowing through some days) the page was bottlenecking on a 200-row dump. Now: 25 per page by default, with `Prev / 1 … N / Next` controls + a `Per page` selector (10 / 25 / 50 / 100 / 200). The footer shows `1–25 of 1,205 · filtered` when filters are active. All filter chips (state / reason / symbol) preserve via querystring through page navigation.
 - Backend: new `count_recent()` helper in `core.proposals` for the `total` math, and `list_recent()` now takes an `offset` param so paging is true OFFSET/LIMIT against Postgres (not a slice in Python). The drop-reason filter (which lives in JSON, not a column) still uses a fetch-then-filter strategy, but only when a reason chip is active.

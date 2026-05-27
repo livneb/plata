@@ -17,17 +17,31 @@ router = APIRouter(prefix="/proposals", tags=["proposals"])
 
 
 STATE_META: dict[str, dict[str, str]] = {
-    "dropped":          {"label": "Dropped",       "color": "bg-gray-200 text-gray-700",     "icon": "🚫"},
-    "published":        {"label": "Published",     "color": "bg-blue-100 text-blue-800",     "icon": "📨"},
-    "rejected":         {"label": "Rejected",      "color": "bg-red-100 text-red-800",       "icon": "🛡️"},
-    "pending_hitl":     {"label": "Pending HITL",  "color": "bg-amber-100 text-amber-800",   "icon": "⏳"},
-    "hitl_approved":    {"label": "HITL approved", "color": "bg-emerald-100 text-emerald-800","icon": "👤"},
-    "hitl_rejected":    {"label": "HITL rejected", "color": "bg-red-100 text-red-800",       "icon": "👤"},
-    "hitl_timeout":     {"label": "HITL timeout",  "color": "bg-gray-200 text-gray-700",     "icon": "⌛"},
-    "approved":         {"label": "Approved",      "color": "bg-emerald-100 text-emerald-800","icon": "✅"},
-    "executed":         {"label": "Executed",      "color": "bg-green-100 text-green-800",   "icon": "📈"},
-    "failed_execution": {"label": "Exec failed",   "color": "bg-red-100 text-red-800",       "icon": "💥"},
-    "manual_override":  {"label": "Manual",        "color": "bg-purple-100 text-purple-800", "icon": "✋"},
+    # Friendly labels — the DB column stays as `state` ("dropped", "rejected",
+    # etc.) for back-compat; only the UI strings change. Each `hint` shows up
+    # as a tooltip on the chip + badge so the user always sees what it means.
+    "dropped":          {"label": "Not traded",    "color": "bg-gray-200 text-gray-700",      "icon": "🛑",
+                          "hint": "Strategist saw the event but didn't open a trade — either the sentiment was too quiet, the LLM said no, or upstream data was missing. Click a drop-reason chip below to see why."},
+    "published":        {"label": "Awaiting risk", "color": "bg-blue-100 text-blue-800",      "icon": "📨",
+                          "hint": "Strategist published a real proposal; risk_manager hasn't decided yet. Usually transient (sub-second)."},
+    "rejected":         {"label": "Blocked by risk","color": "bg-red-100 text-red-800",       "icon": "🛡️",
+                          "hint": "Risk_manager refused the trade — typical reasons: max open positions, cooldown, dedup, opposing side. See state_reason for the exact gate."},
+    "pending_hitl":     {"label": "Awaiting you",  "color": "bg-amber-100 text-amber-800",    "icon": "⏳",
+                          "hint": "Proposal exceeds the auto-approve $ threshold and needs your explicit approval (Telegram or this page)."},
+    "hitl_approved":    {"label": "You approved",  "color": "bg-emerald-100 text-emerald-800","icon": "👤",
+                          "hint": "You said yes via HITL. Passes to executor next."},
+    "hitl_rejected":    {"label": "You rejected",  "color": "bg-red-100 text-red-800",        "icon": "👤",
+                          "hint": "You said no via HITL. No trade opened."},
+    "hitl_timeout":     {"label": "HITL timeout",  "color": "bg-gray-200 text-gray-700",      "icon": "⌛",
+                          "hint": "60-minute HITL window expired without a decision. Treated as a reject."},
+    "approved":         {"label": "Risk OK",       "color": "bg-emerald-100 text-emerald-800","icon": "✅",
+                          "hint": "Risk gates passed, sized, sent to executor. Usually transient — flips to Filled in seconds."},
+    "executed":         {"label": "Filled",        "color": "bg-green-100 text-green-800",    "icon": "📈",
+                          "hint": "Trade is open at the venue. Click the row to jump to the live position page."},
+    "failed_execution": {"label": "Venue error",   "color": "bg-red-100 text-red-800",        "icon": "💥",
+                          "hint": "The venue API rejected the order (e.g. min-qty, regulatory block). Investigate before re-submitting."},
+    "manual_override":  {"label": "Your override", "color": "bg-purple-100 text-purple-800",  "icon": "✋",
+                          "hint": "You re-submitted a clone of an earlier proposal, bypassing the risk gates."},
 }
 
 
@@ -58,14 +72,14 @@ def _row(p) -> dict[str, Any]:
 
 
 DROP_REASON_META: dict[str, dict[str, str]] = {
-    "below_threshold":      {"label": "Below magnitude threshold", "icon": "📉",
-                              "hint": "sentiment_magnitude < 0.5 — event wasn't dramatic enough to consider"},
-    "event_missing_in_graph": {"label": "Event missing in graph",   "icon": "❓",
-                              "hint": "EnrichedEvent passed magnitude gate but its document is no longer in Redis JSON"},
-    "no_embedding":         {"label": "No embedding",                "icon": "🧬",
-                              "hint": "Voyage didn't return a vector — probably rate-limited or budget capped"},
-    "llm_no_trade":         {"label": "LLM said don't trade",        "icon": "🤔",
-                              "hint": "Strategist LLM looked at the analogs and decided conviction < 0.6 OR no analog moved the same direction"},
+    "below_threshold":      {"label": "Too quiet",          "icon": "📉",
+                              "hint": "Event's sentiment magnitude was below the strategist threshold (default 0.5). Not dramatic enough to spend an LLM call on. Adjust on Settings → Risk → Sentiment magnitude gate."},
+    "event_missing_in_graph": {"label": "Event expired",     "icon": "❓",
+                              "hint": "By the time the strategist saw this event, its document was already evicted from Redis JSON (7-day TTL or a crash). Rare."},
+    "no_embedding":         {"label": "Couldn't analyze",    "icon": "🧬",
+                              "hint": "Voyage didn't return an embedding vector — usually rate-limited or daily budget cap reached. Check /activity/ → Voyage status."},
+    "llm_no_trade":         {"label": "Strategist declined", "icon": "🤔",
+                              "hint": "LLM looked at the event and its 8 historical analogs and explicitly decided not to trade — either conviction too low or analogs disagreed on direction. The reasoning is in the row's expandable detail."},
 }
 
 
@@ -109,6 +123,8 @@ async def index(
     state: str | None = None,
     symbol: str | None = None,
     reason: str | None = None,
+    side: str | None = None,
+    q: str | None = None,
     page: int = 1,
     per_page: int = 25,
 ):
@@ -130,8 +146,18 @@ async def index(
     rows = [_row(r) for r in rows_db]
     if reason:
         rows = [r for r in rows if (r["extras"] or {}).get("drop_reason_code") == reason]
+    # Side filter (client-side — small col, low cardinality, not worth a DB rebuild).
+    if side in ("long", "short"):
+        rows = [r for r in rows if (r["side"] or "").lower() == side]
+    # Free-text search across reasoning + state_reason + symbol.
+    if q:
+        needle = q.lower().strip()
+        rows = [r for r in rows if needle in (r.get("reasoning") or "").lower()
+                or needle in (r.get("state_reason") or "").lower()
+                or needle in (r.get("symbol") or "").lower()]
+    if reason or side or q:
         # Now apply page window client-side on the filtered set.
-        total = len(rows) + fetch_offset  # best-effort; reason filter has no native count
+        total = len(rows) + fetch_offset  # best-effort; client-side filters have no native count
         rows = rows[(page - 1) * per_page : page * per_page]
     # Enrich each row with the triggering event's headline / summary / sentiment
     # so the user sees WHY the proposal existed in the first place (not just what
@@ -182,6 +208,8 @@ async def index(
             "active_state": state,
             "active_symbol": symbol,
             "active_reason": reason,
+            "active_side": side,
+            "active_q": q or "",
             "legacy_pending": legacy_pending,
             "pipeline": pipeline,
             "page": page,

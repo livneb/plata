@@ -92,11 +92,44 @@ class Executor(BaseAgent):
                 if order.get("average") or order.get("price"):
                     entry_price = Decimal(str(order.get("average") or order.get("price")))
             except Exception as e:
-                await self.error_reporter.capture_exception(
-                    e, agent=self.name, severity="ERROR",
-                    context={"symbol": symbol, "decision_ulid": decision.ulid},
-                )
-                return
+                # Special-case: Bybit (and other venues) return PermissionDenied
+                # / KYC-block errors based on IP / account region. That's not a
+                # bug — it's a venue policy. Fall back to a paper-mode fill so
+                # the trade lands in the ledger with a clear `regulatory_fallback`
+                # flag, surface a venue-wide warning, and don't DLQ the message.
+                msg = str(e) or repr(e)
+                is_regulatory = (
+                    "retCode" in msg and "10024" in msg
+                ) or "PermissionDenied" in type(e).__name__ or "regulatory" in msg.lower()
+                if is_regulatory:
+                    try:
+                        venue_key = "alpaca" if "alpaca" in type(client).__name__.lower() else "bybit"
+                        await redis.hset(f"venue:blocked:{venue_key}", mapping={
+                            "reason": "regulatory",
+                            "code": "10024",
+                            "message": msg[:400],
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        })
+                        await redis.expire(f"venue:blocked:{venue_key}", 7 * 24 * 60 * 60)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self.log.warning(
+                        "venue_regulatory_fallback_to_paper",
+                        symbol=symbol, decision_ulid=decision.ulid,
+                    )
+                    mode = TradeMode.PAPER
+                    raw_response = {
+                        "regulatory_fallback": True,
+                        "blocked_venue_code": "10024",
+                        "blocked_venue_message": msg[:400],
+                    }
+                    # entry_price stays at the current ticker; trade still recorded.
+                else:
+                    await self.error_reporter.capture_exception(
+                        e, agent=self.name, severity="ERROR",
+                        context={"symbol": symbol, "decision_ulid": decision.ulid},
+                    )
+                    return
 
         executed = ExecutedTrade(
             decision_ulid=decision.ulid,

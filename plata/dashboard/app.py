@@ -227,6 +227,23 @@ async def _lifespan(_app: FastAPI):
                                 f"Service may be wedged.",
                                 {"agent": agent_name, "age_sec": str(int(age))},
                             )
+
+                # 3. Venue regulatory blocks (Bybit / Alpaca returned 10024 etc.).
+                #    Executor falls back to paper for those trades but the user
+                #    should know live trading on that venue is unavailable.
+                for venue in ("bybit", "alpaca"):
+                    blocked = await redis.hgetall(f"venue:blocked:{venue}")
+                    if blocked:
+                        await _maybe_warn(
+                            f"venue_blocked:{venue}",
+                            "VenueRegulatoryBlock",
+                            f"{venue.capitalize()} returned a regulatory / KYC "
+                            f"block ({blocked.get('code', '?')}). New live "
+                            f"trades on this venue are silently falling back "
+                            f"to paper fills. To restore live: contact the "
+                            f"venue's support or switch IP region.",
+                            {"venue": venue, "msg": (blocked.get("message") or "")[:200]},
+                        )
             except Exception as exc:  # noqa: BLE001
                 _log.warning("health_watchdog_failed", error=str(exc)[:160])
             await _asyncio.sleep(60)

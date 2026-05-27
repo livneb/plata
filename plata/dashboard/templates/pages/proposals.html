@@ -56,13 +56,42 @@
   </a>
   {% for key, meta in state_meta.items() %}
     {% if counts.get(key, 0) > 0 %}
-    <a href="/proposals/?state={{ key }}"
+    <a href="/proposals/?state={{ key }}" title="{{ meta.hint or meta.label }}"
        class="px-2.5 py-1 rounded text-xs border {{ 'bg-blue-700 text-white border-blue-700' if active_state == key else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
       {{ meta.icon }} {{ meta.label }} <span class="text-[10px] opacity-70">· {{ counts.get(key, 0) }}</span>
     </a>
     {% endif %}
   {% endfor %}
 </div>
+
+<!-- Extra filters: side + free-text search. Preserves state/reason via hidden inputs. -->
+<form method="get" action="/proposals/" class="flex flex-wrap items-end gap-2 mb-3 text-xs">
+  {% if active_state %}<input type="hidden" name="state" value="{{ active_state }}" />{% endif %}
+  {% if active_reason %}<input type="hidden" name="reason" value="{{ active_reason }}" />{% endif %}
+  <label class="block">
+    <span class="block text-[10px] uppercase text-gray-500">Symbol</span>
+    <input type="text" name="symbol" value="{{ active_symbol or '' }}" placeholder="BTCUSDT, SPY…"
+           class="p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono w-32" />
+  </label>
+  <label class="block">
+    <span class="block text-[10px] uppercase text-gray-500">Side</span>
+    <select name="side" class="p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+      <option value="">— any —</option>
+      <option value="long"  {% if active_side == 'long'  %}selected{% endif %}>↑ long</option>
+      <option value="short" {% if active_side == 'short' %}selected{% endif %}>↓ short</option>
+    </select>
+  </label>
+  <label class="block flex-1 min-w-[180px]">
+    <span class="block text-[10px] uppercase text-gray-500" title="Matches strategist reasoning, state_reason, and symbol.">Search&nbsp;ⓘ</span>
+    <input type="text" name="q" value="{{ active_q or '' }}" placeholder="text in reasoning / reason / symbol…"
+           class="w-full p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
+  </label>
+  <button type="submit" class="px-3 py-1.5 rounded text-white bg-blue-700 hover:bg-blue-800">Apply</button>
+  {% if active_symbol or active_side or active_q %}
+  <a href="/proposals/{% if active_state %}?state={{ active_state }}{% endif %}{% if active_reason %}{% if active_state %}&{% else %}?{% endif %}reason={{ active_reason }}{% endif %}"
+     class="px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600">Reset</a>
+  {% endif %}
+</form>
 
 {% if reason_counts %}
 <!-- Drop-reason chips — only visible when there are any drops to filter -->
@@ -111,7 +140,8 @@
         </td>
         <td class="px-4 py-3 font-mono text-xs">{{ '%.2f' % p.conviction if p.conviction is not none else '—' }}</td>
         <td class="px-4 py-3">
-          <span class="text-[10px] font-medium px-2 py-0.5 rounded {{ p.state_color }}">{{ p.state_icon }} {{ p.state_label }}</span>
+          <span class="text-[10px] font-medium px-2 py-0.5 rounded {{ p.state_color }}"
+                title="{{ state_meta.get(p.state, {}).get('hint', p.state_label) }}">{{ p.state_icon }} {{ p.state_label }}</span>
         </td>
         <td class="px-4 py-3 text-xs">
           {% if p.state_reason %}<span class="font-mono">{{ p.state_reason }}</span>{% endif %}
@@ -285,12 +315,14 @@
 {% if active_state %}{% set _ = qs_base.append('state=' ~ active_state) %}{% endif %}
 {% if active_symbol %}{% set _ = qs_base.append('symbol=' ~ active_symbol) %}{% endif %}
 {% if active_reason %}{% set _ = qs_base.append('reason=' ~ active_reason) %}{% endif %}
+{% if active_side %}{% set _ = qs_base.append('side=' ~ active_side) %}{% endif %}
+{% if active_q %}{% set _ = qs_base.append('q=' ~ active_q) %}{% endif %}
 {% if per_page != 25 %}{% set _ = qs_base.append('per_page=' ~ per_page) %}{% endif %}
 {% set qs = (qs_base | join('&')) %}
 <nav class="flex flex-wrap items-center justify-between gap-2 mt-3 text-xs" aria-label="Pagination">
   <div class="text-gray-500">
     {{ ((page - 1) * per_page) + 1 }}–{{ [page * per_page, total] | min }} of <b>{{ total }}</b>
-    {% if active_state or active_symbol or active_reason %}<span class="ml-1">(filtered)</span>{% endif %}
+    {% if active_state or active_symbol or active_reason or active_side or active_q %}<span class="ml-1">(filtered)</span>{% endif %}
   </div>
   <ul class="inline-flex items-center -space-x-px">
     {% set prev_p = (page - 1) if page > 1 else None %}
