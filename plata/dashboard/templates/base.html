@@ -103,7 +103,12 @@
             <span id="kpi-budget" class="font-mono text-gray-400">—</span>
           </a>
         </div>
-        <span id="mode-badge" class="bg-yellow-100 text-yellow-800 text-[10px] sm:text-xs font-medium px-2 sm:px-2.5 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300">
+        <!-- Mode badge: yellow PAPER when paper_trading_mode=true, red LIVE when off.
+             Reads the live setting from /api/header_stats so it stays in sync
+             after a toggle from Settings → Risk without a page reload. -->
+        <span id="mode-badge"
+              class="bg-yellow-100 text-yellow-800 text-[10px] sm:text-xs font-medium px-2 sm:px-2.5 py-0.5 rounded dark:bg-yellow-900 dark:text-yellow-300"
+              title="Trading mode — toggle on Settings → Risk → Paper trading mode.">
           PAPER
         </span>
         <button id="theme-toggle" type="button" aria-label="Toggle theme"
@@ -712,6 +717,7 @@
         } catch (e) { /* quota etc — ignore */ }
       }
       const $totalMobile = document.getElementById('kpi-total-mobile');
+      const $modeBadge = document.getElementById('mode-badge');
       function render(s) {
         $kpis.classList.remove('hidden');
         $pnl.textContent = fmt(s.daily_pnl, true);
@@ -727,6 +733,14 @@
         if ($totalMobile) {
           $totalMobile.textContent = fmt(total, true);
           $totalMobile.className = totalCls + ' text-xs';
+        }
+        if ($modeBadge) {
+          const paper = s.paper_mode !== false;  // default to paper if undefined
+          $modeBadge.textContent = paper ? 'PAPER' : 'LIVE';
+          $modeBadge.className = (paper
+            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
+            : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300')
+            + ' text-[10px] sm:text-xs font-medium px-2 sm:px-2.5 py-0.5 rounded';
         }
         if (s.pending_hitl > 0) {
           $hitlLink.classList.remove('hidden');

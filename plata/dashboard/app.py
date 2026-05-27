@@ -393,7 +393,13 @@ def create_app() -> FastAPI:
         stats: dict = {
             "daily_pnl": 0.0, "open_count": 0, "unrealized_pnl": 0.0,
             "pending_hitl": 0, "llm_spend_today": 0.0, "llm_budget": 0.0,
+            "paper_mode": True,
         }
+        try:
+            v = await redis.hget("risk_config", "paper_trading_mode")
+            stats["paper_mode"] = (v or "true").lower() in ("true", "1", "yes", "on")
+        except Exception:  # noqa: BLE001
+            pass
         try:
             today_utc = datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc)
             async with session_scope() as session:

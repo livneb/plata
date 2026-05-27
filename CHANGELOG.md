@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.105 — 2026-05-26
+- **🐛 Topbar `PAPER` badge is now dynamic** — was hardcoded as `PAPER` in the template, so toggling `paper_trading_mode` off in Settings → Risk flipped the underlying value in Redis (and the executor *was* going live to Bybit/Alpaca) but the badge kept lying. Now `/api/header_stats` returns `paper_mode`, the badge reads it on every refresh and flips to a **red `LIVE`** when off.
+- **Why no new positions from the system in the last ~10 h with 6 open**: `max_open_positions` defaults to 3 in `risk_config`; every new strategist proposal hit the `max_open_positions_reached` gate (visible on `/proposals/?state=rejected` after v2.24.102). Either raise the cap on `/settings/?tab=risk` → *Portfolio limits → Max simultaneous positions*, or close some trades — the strategist will start filling slots again automatically.
+
 ## 2.24.104 — 2026-05-26
 - **🐛 Fix `AttributeError: 'str' object has no attribute 'value'` in risk_manager.** The opposing-side guard read `proposal.side.value.lower()` — assumes `.side` is the `Side` StrEnum. In some serialization paths (in particular manual-override re-submits round-tripping through the Redis stream) it deserialized as a plain string, no `.value`. Switched to `str(proposal.side).lower()` which works for both — `Side` is a `StrEnum`, so `str(Side.LONG) == "long"`.
 
