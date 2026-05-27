@@ -109,12 +109,30 @@ async def index(
     state: str | None = None,
     symbol: str | None = None,
     reason: str | None = None,
+    page: int = 1,
+    per_page: int = 25,
 ):
-    rows_db = await list_recent(state=state, symbol=symbol, limit=200)
+    # Clamp params so a bad URL doesn't crash the route.
+    page = max(1, int(page or 1))
+    per_page = max(10, min(int(per_page or 25), 200))
+
+    # Reason filter is applied AFTER fetch (it lives in extras JSON, not a column),
+    # so when one is active we have to fetch more aggressively to keep the page
+    # full. With state=dropped + reason filter most rows match, so this is fine.
+    fetch_limit = per_page if not reason else max(per_page * 10, 500)
+    fetch_offset = (page - 1) * per_page if not reason else 0
+
+    from plata.core.proposals import count_recent
+    total = await count_recent(state=state, symbol=symbol)
+    rows_db = await list_recent(
+        state=state, symbol=symbol, limit=fetch_limit, offset=fetch_offset,
+    )
     rows = [_row(r) for r in rows_db]
-    # Apply reason filter client-side (it lives in extras.drop_reason_code).
     if reason:
         rows = [r for r in rows if (r["extras"] or {}).get("drop_reason_code") == reason]
+        # Now apply page window client-side on the filtered set.
+        total = len(rows) + fetch_offset  # best-effort; reason filter has no native count
+        rows = rows[(page - 1) * per_page : page * per_page]
     # Enrich each row with the triggering event's headline / summary / sentiment
     # so the user sees WHY the proposal existed in the first place (not just what
     # the LLM said about it). Falls back gracefully when the event TTL has expired.
@@ -149,6 +167,8 @@ async def index(
             reason_counts[code] = reason_counts.get(code, 0) + 1
     legacy_pending = await list_pending()
     pipeline = await _strategist_pipeline_stats()
+    import math
+    pages = max(1, math.ceil(total / per_page)) if per_page else 1
     return templates.TemplateResponse(
         request,
         "pages/proposals.html",
@@ -164,6 +184,10 @@ async def index(
             "active_reason": reason,
             "legacy_pending": legacy_pending,
             "pipeline": pipeline,
+            "page": page,
+            "per_page": per_page,
+            "pages": pages,
+            "total": total,
         },
     )
 

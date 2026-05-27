@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.113 — 2026-05-26
+- **Pagination on `/proposals/`.** With strategist drops being persisted (and 1000+ events flowing through some days) the page was bottlenecking on a 200-row dump. Now: 25 per page by default, with `Prev / 1 … N / Next` controls + a `Per page` selector (10 / 25 / 50 / 100 / 200). The footer shows `1–25 of 1,205 · filtered` when filters are active. All filter chips (state / reason / symbol) preserve via querystring through page navigation.
+- Backend: new `count_recent()` helper in `core.proposals` for the `total` math, and `list_recent()` now takes an `offset` param so paging is true OFFSET/LIMIT against Postgres (not a slice in Python). The drop-reason filter (which lives in JSON, not a column) still uses a fetch-then-filter strategy, but only when a reason chip is active.
+
 ## 2.24.112 — 2026-05-26
 - **Positions: Group-by + Sort-by controls.** Above the table:
   - **Group by** — `none` (default) / Status / Symbol / Side / Venue / Mode. When grouped, a sticky-styled group header row appears between sections showing `<group name> · N position(s) · ΣPnL` (green/red).

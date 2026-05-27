@@ -279,6 +279,72 @@
   </table>
 </div>
 
+{# Pagination footer. Preserves all active filters via querystring. #}
+{% if total > per_page %}
+{% set qs_base = [] %}
+{% if active_state %}{% set _ = qs_base.append('state=' ~ active_state) %}{% endif %}
+{% if active_symbol %}{% set _ = qs_base.append('symbol=' ~ active_symbol) %}{% endif %}
+{% if active_reason %}{% set _ = qs_base.append('reason=' ~ active_reason) %}{% endif %}
+{% if per_page != 25 %}{% set _ = qs_base.append('per_page=' ~ per_page) %}{% endif %}
+{% set qs = (qs_base | join('&')) %}
+<nav class="flex flex-wrap items-center justify-between gap-2 mt-3 text-xs" aria-label="Pagination">
+  <div class="text-gray-500">
+    {{ ((page - 1) * per_page) + 1 }}–{{ [page * per_page, total] | min }} of <b>{{ total }}</b>
+    {% if active_state or active_symbol or active_reason %}<span class="ml-1">(filtered)</span>{% endif %}
+  </div>
+  <ul class="inline-flex items-center -space-x-px">
+    {% set prev_p = (page - 1) if page > 1 else None %}
+    {% set next_p = (page + 1) if page < pages else None %}
+    <li>
+      {% if prev_p %}
+      <a href="?{{ qs }}{% if qs %}&{% endif %}page={{ prev_p }}"
+         class="px-3 h-8 inline-flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-l-lg hover:bg-gray-100 dark:hover:bg-gray-700">‹ Prev</a>
+      {% else %}
+      <span class="px-3 h-8 inline-flex items-center justify-center border border-gray-200 dark:border-gray-700 rounded-l-lg text-gray-300 dark:text-gray-600 cursor-not-allowed">‹ Prev</span>
+      {% endif %}
+    </li>
+    {# Show first / last + a window of 5 around current — same algorithm Flowbite + Bootstrap use #}
+    {% set window_lo = [page - 2, 2] | max %}
+    {% set window_hi = [page + 2, pages - 1] | min %}
+    <li>
+      <a href="?{{ qs }}{% if qs %}&{% endif %}page=1"
+         class="px-3 h-8 inline-flex items-center justify-center border border-gray-300 dark:border-gray-600 {% if page == 1 %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">1</a>
+    </li>
+    {% if window_lo > 2 %}<li><span class="px-2 text-gray-400">…</span></li>{% endif %}
+    {% for p in range(window_lo, window_hi + 1) %}
+    <li>
+      <a href="?{{ qs }}{% if qs %}&{% endif %}page={{ p }}"
+         class="px-3 h-8 inline-flex items-center justify-center border border-gray-300 dark:border-gray-600 {% if page == p %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">{{ p }}</a>
+    </li>
+    {% endfor %}
+    {% if pages > 1 %}
+      {% if window_hi < pages - 1 %}<li><span class="px-2 text-gray-400">…</span></li>{% endif %}
+      <li>
+        <a href="?{{ qs }}{% if qs %}&{% endif %}page={{ pages }}"
+           class="px-3 h-8 inline-flex items-center justify-center border border-gray-300 dark:border-gray-600 {% if page == pages %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">{{ pages }}</a>
+      </li>
+    {% endif %}
+    <li>
+      {% if next_p %}
+      <a href="?{{ qs }}{% if qs %}&{% endif %}page={{ next_p }}"
+         class="px-3 h-8 inline-flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-r-lg hover:bg-gray-100 dark:hover:bg-gray-700">Next ›</a>
+      {% else %}
+      <span class="px-3 h-8 inline-flex items-center justify-center border border-gray-200 dark:border-gray-700 rounded-r-lg text-gray-300 dark:text-gray-600 cursor-not-allowed">Next ›</span>
+      {% endif %}
+    </li>
+  </ul>
+  <label class="text-gray-500 flex items-center gap-1">
+    Per page
+    <select onchange="location.href='?{{ qs }}{% if qs %}&{% endif %}per_page=' + this.value + '&page=1'"
+            class="p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+      {% for n in [10, 25, 50, 100, 200] %}
+      <option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </label>
+</nav>
+{% endif %}
+
 <script>
   // Expand/collapse detail row.
   document.querySelectorAll('.detail-btn').forEach(btn => {

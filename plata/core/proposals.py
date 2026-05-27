@@ -150,19 +150,42 @@ async def list_recent(
     state: str | None = None,
     symbol: str | None = None,
     limit: int = 100,
+    offset: int = 0,
 ) -> list[Proposal]:
-    """List proposals newest-first, optionally filtered."""
+    """List proposals newest-first, optionally filtered + paginated."""
     try:
         async with session_scope() as session:
-            q = select(Proposal).order_by(Proposal.created_at.desc()).limit(limit)
+            q = select(Proposal).order_by(Proposal.created_at.desc())
             if state:
                 q = q.where(Proposal.state == state)
             if symbol:
                 q = q.where(Proposal.symbol == symbol)
+            q = q.offset(max(0, offset)).limit(limit)
             return (await session.execute(q)).scalars().all()
     except Exception as exc:  # noqa: BLE001
         _log.warning("list_recent_failed", error=str(exc)[:160])
         return []
+
+
+async def count_recent(
+    *,
+    state: str | None = None,
+    symbol: str | None = None,
+) -> int:
+    """Total row count matching the same filters as list_recent — used for
+    pagination's `total`/`pages` math."""
+    from sqlalchemy import func as _func
+    try:
+        async with session_scope() as session:
+            q = select(_func.count()).select_from(Proposal)
+            if state:
+                q = q.where(Proposal.state == state)
+            if symbol:
+                q = q.where(Proposal.symbol == symbol)
+            return int((await session.execute(q)).scalar() or 0)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("count_recent_failed", error=str(exc)[:160])
+        return 0
 
 
 async def _record_drop_attempt(values: dict) -> Exception | None:
