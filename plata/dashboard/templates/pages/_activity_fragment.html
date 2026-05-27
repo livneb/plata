@@ -127,31 +127,67 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
     <div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
       <h3 class="font-semibold">Recent signals</h3>
+      <p class="text-[10px] text-gray-500 hidden sm:block">
+        Every raw scraper post.
+        <span class="font-mono">dup</span> = already seen, collapsed onto a master signal (no enrichment ran).
+        <span class="font-mono">enriched</span> = passed dedup → ran through the enricher LLM → became a graph event.
+      </p>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full text-sm text-left">
         <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
           <tr>
-            <th class="px-3 py-2">Time</th>
+            <th class="px-3 py-2">Fetched</th>
+            <th class="px-3 py-2 hidden md:table-cell" title="How stale the post was when the scraper picked it up (source publish time → our fetch time). Big gaps mean the scraper cadence is too slow for that source.">Lag</th>
             <th class="px-3 py-2">Source</th>
             <th class="px-3 py-2">Title</th>
-            <th class="px-3 py-2">Dup</th>
+            <th class="px-3 py-2 text-center" title="`dup` = the dedup pass found an earlier signal with identical/near-identical content; this one was collapsed onto it and skipped enrichment (saves LLM $). Hover the badge to see the master signal ULID.">Dup&nbsp;ⓘ</th>
+            <th class="px-3 py-2 text-center" title="`✓` = enricher ran, sentiment/category extracted, event written to the graph. Click to jump to the event's neighbourhood. `—` = pending or dropped (enricher rate-limited / budget capped).">Enriched&nbsp;ⓘ</th>
           </tr>
         </thead>
         <tbody>
           {% for row in recent_rows %}
-          <tr class="border-t border-gray-100 dark:border-gray-700">
-            <td class="px-3 py-2 text-gray-500 whitespace-nowrap" title="{{ row.fetched_at or '' }}">{{ row.fetched_at | time_ago }}</td>
-            <td class="px-3 py-2">{{ row.source }}</td>
+          <tr class="border-t border-gray-100 dark:border-gray-700 {% if row.is_duplicate %}opacity-60{% endif %}">
+            <td class="px-3 py-2 text-gray-500 whitespace-nowrap text-xs">
+              <time data-utc="{{ row.fetched_at.isoformat() if row.fetched_at else '' }}">{{ row.fetched_at | time_ago }}</time>
+            </td>
+            <td class="px-3 py-2 hidden md:table-cell text-xs text-gray-500 font-mono whitespace-nowrap">
+              {% if row.source_published_at and row.fetched_at %}
+                {% set lag = ((row.fetched_at - row.source_published_at).total_seconds()) | int %}
+                {% if lag < 60 %}{{ lag }}s
+                {% elif lag < 3600 %}{{ (lag // 60) }}m
+                {% elif lag < 86400 %}{{ (lag // 3600) }}h
+                {% else %}{{ (lag // 86400) }}d{% endif %}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">{{ row.source }}</span>
+            </td>
             <td class="px-3 py-2">
               {% if row.url %}
-              <a href="{{ row.url }}" target="_blank" rel="noopener" class="hover:underline">{{ (row.title or row.body or '')[:140] }}</a>
-              {% else %}{{ (row.title or row.body or '')[:140] }}{% endif %}
+              <a href="{{ row.url }}" target="_blank" rel="noopener" class="hover:underline" title="{{ row.body[:400] if row.body else '' }}">{{ (row.title or row.body or '')[:140] }}</a>
+              {% else %}
+              <span title="{{ row.body[:400] if row.body else '' }}">{{ (row.title or row.body or '')[:140] }}</span>
+              {% endif %}
             </td>
-            <td class="px-3 py-2">{% if row.is_duplicate %}<span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">dup</span>{% endif %}</td>
+            <td class="px-3 py-2 text-center">
+              {% if row.is_duplicate %}
+              <span class="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded dark:bg-amber-900 dark:text-amber-300"
+                    title="{% if row.dedup_master_ulid %}Duplicate of signal {{ row.dedup_master_ulid }} — that one was enriched, this one was skipped to save LLM cost.{% else %}Same content as a recent signal; collapsed by dedup pass.{% endif %}">dup</span>
+              {% else %}<span class="text-gray-300">—</span>{% endif %}
+            </td>
+            <td class="px-3 py-2 text-center">
+              {% if row.ingested_to_graph and row.graph_event_ulid %}
+              <a href="/graph/?focus={{ row.graph_event_ulid }}"
+                 class="text-emerald-600 hover:underline text-xs"
+                 title="Click to jump to this event's neighbourhood in the knowledge graph.">✓ event</a>
+              {% elif row.ingested_to_graph %}
+              <span class="text-emerald-600 text-xs">✓</span>
+              {% else %}<span class="text-gray-300">—</span>{% endif %}
+            </td>
           </tr>
           {% else %}
-          <tr><td colspan="4" class="px-3 py-6 text-center text-gray-400">No signals archived yet.</td></tr>
+          <tr><td colspan="6" class="px-3 py-6 text-center text-gray-400">No signals archived yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>

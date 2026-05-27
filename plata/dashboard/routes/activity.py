@@ -26,38 +26,52 @@ PIPELINE = [
 
 def _api_statuses() -> list[dict[str, Any]]:
     s = get_settings()
-
-    def ok(value) -> bool:
-        return bool(value)
+    # Also consult the DB-managed credentials store (Settings → 🔑 API Keys).
+    # Without this, anything saved via the UI shows up as NOT SET here even
+    # though the agents are happily using it.
+    try:
+        from plata.config import credentials as _creds
+        def ok(value, provider: str | None = None) -> bool:
+            if value:
+                return True
+            if provider:
+                return bool(_creds.get_sync(provider))
+            return False
+    except Exception:  # noqa: BLE001
+        def ok(value, provider: str | None = None) -> bool:  # type: ignore[no-redef]
+            return bool(value)
     return [
         {"name": "Reddit", "desc": "Polls finance/crypto subreddits for new posts.",
          "configured": ok(s.reddit_client_id) and ok(s.reddit_client_secret)},
         {"name": "CryptoPanic", "desc": "Aggregated crypto news headlines.",
-         "configured": ok(s.cryptopanic_api_key)},
+         "configured": ok(s.cryptopanic_api_key, "cryptopanic")},
         {"name": "GDELT", "desc": "Global news/event database — no key (rate-limited).",
          "configured": True},
         {"name": "NewsAPI", "desc": "General news headlines (optional).",
-         "configured": ok(s.newsapi_key)},
+         "configured": ok(s.newsapi_key, "newsapi")},
         {"name": "CryptoNews", "desc": "Crypto-specific news aggregator (optional).",
-         "configured": ok(s.cryptonews_api_key)},
+         "configured": ok(s.cryptonews_api_key, "cryptonews")},
         {"name": "LunarCrush", "desc": "Social-sentiment metrics for crypto (optional).",
-         "configured": ok(s.lunarcrush_api_key)},
+         "configured": ok(s.lunarcrush_api_key, "lunarcrush")},
         {"name": "WhaleAlert", "desc": "Large on-chain transactions (optional).",
-         "configured": ok(s.whalealert_api_key)},
+         "configured": ok(s.whalealert_api_key, "whalealert")},
         {"name": "OpenRouter", "desc": "LLM gateway for all agents.",
-         "configured": ok(s.openrouter_api_key)},
+         "configured": ok(s.openrouter_api_key, "openrouter")},
         {"name": "Voyage", "desc": "Embeddings for semantic search of past events.",
-         "configured": ok(s.voyage_api_key)},
+         "configured": ok(s.voyage_api_key, "voyage")},
         {"name": "Langfuse", "desc": "LLM observability (traces, prompts, cost).",
-         "configured": ok(s.langfuse_public_key) and ok(s.langfuse_secret_key)},
+         "configured": (ok(s.langfuse_public_key, "langfuse_public")
+                        and ok(s.langfuse_secret_key, "langfuse_secret"))},
         {"name": "Telegram", "desc": "HITL approval channel for proposals.",
-         "configured": ok(s.telegram_bot_token)},
+         "configured": ok(s.telegram_bot_token, "telegram")},
         {"name": "Bybit",
          "desc": f"Crypto-perp exchange ({'TESTNET' if s.bybit_testnet else 'MAINNET'}).",
-         "configured": ok(s.bybit_api_key) and ok(s.bybit_api_secret)},
+         "configured": (ok(s.bybit_api_key, "bybit_key")
+                        and ok(s.bybit_api_secret, "bybit_secret"))},
         {"name": "Alpaca",
          "desc": f"US equities + ETFs broker ({'PAPER' if s.alpaca_paper else 'LIVE'}).",
-         "configured": ok(s.alpaca_api_key) and ok(s.alpaca_api_secret)},
+         "configured": (ok(s.alpaca_api_key, "alpaca_key")
+                        and ok(s.alpaca_api_secret, "alpaca_secret"))},
     ]
 
 

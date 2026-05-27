@@ -33,14 +33,34 @@ async def index(request: Request):
                 pass
         return total
 
-    keys = []
+    # Union of agents we know about:
+    #   • currently-running (have an `agent_status:<name>` heartbeat hash)
+    #   • have ever spent money (have any `cost:daily:*:agent:<name>` key)
+    # Without the cost-scan, agents that crashed or were renamed disappear
+    # from the grid but their historical spend stays in the daily totals,
+    # which is why "sum of visible agents < total" used to happen.
+    agent_names: set[str] = set()
+    status_by_name: dict[str, dict] = {}
     async for k in redis.scan_iter(match="agent_status:*", count=100):
-        keys.append(k)
-    agents_data = []
-    for k in keys:
-        data = await redis.hgetall(k)
         name = k.split(":")[-1]
+        agent_names.add(name)
+        status_by_name[name] = await redis.hgetall(k)
+    async for ck in redis.scan_iter(match="cost:daily:*:agent:*", count=500):
+        # cost:daily:<YYYY-MM-DD>:agent:<name>
+        try:
+            agent_names.add(ck.rsplit(":", 1)[-1])
+        except Exception:  # noqa: BLE001
+            pass
+
+    agents_data = []
+    for name in sorted(agent_names):
+        data = dict(status_by_name.get(name) or {})
         data["name"] = name
+        # If we only know this agent from cost keys, mark it as stopped so the
+        # UI can render it greyed out instead of falsely "RUNNING".
+        if not status_by_name.get(name):
+            data["last_heartbeat"] = None
+            data["halted"] = "stopped"
         async def _per_agent(days: list[str]) -> float:
             return await _sum([f"cost:daily:{d}:agent:{name}" for d in days])
         data["spend_today_usd"]      = await _per_agent([today.isoformat()])

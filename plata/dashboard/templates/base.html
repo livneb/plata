@@ -33,6 +33,23 @@
        scripts on subpages can call `new ApexCharts(...)` immediately. -->
   <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.49.1/dist/apexcharts.min.js"></script>
   <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+  <style>
+    /* Indeterminate progress bar across the top of the page while a
+       boosted navigation is fetching — makes the app feel responsive. */
+    html.htmx-loading::after {
+      content: '';
+      position: fixed; top: 0; left: 0; height: 2px; width: 100%;
+      background: linear-gradient(90deg, transparent 0%, #3b82f6 50%, transparent 100%);
+      background-size: 200% 100%;
+      animation: htmx-progress 1s linear infinite;
+      z-index: 100;
+      pointer-events: none;
+    }
+    @keyframes htmx-progress {
+      from { background-position: 200% 0; }
+      to   { background-position: -100% 0; }
+    }
+  </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
   <!-- Halted-agents banner -->
@@ -52,7 +69,13 @@
   </div>
 
   <!-- Topbar -->
-  <nav class="fixed top-0 z-50 w-full bg-white border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+  <nav
+    hx-boost="true"
+    hx-target="#main-content"
+    hx-select="#main-content"
+    hx-swap="outerHTML show:window:top"
+    hx-push-url="true"
+    class="fixed top-0 z-50 w-full bg-white border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
     <div class="px-4 py-3 flex items-center justify-between">
       <div class="flex items-center">
         <button data-drawer-target="sidebar" data-drawer-toggle="sidebar" type="button"
@@ -150,7 +173,16 @@
   </nav>
 
   <!-- Sidebar -->
+  <!-- hx-boost makes every <a> inside this aside fetch via AJAX and swap
+       only #main-content. Sidebar (and topbar) stay mounted across nav —
+       app-like experience: no flash, scroll position is reset to top of
+       content, history is pushed, browser back/forward work. -->
   <aside id="sidebar"
+    hx-boost="true"
+    hx-target="#main-content"
+    hx-select="#main-content"
+    hx-swap="outerHTML show:window:top"
+    hx-push-url="true"
     class="fixed top-0 left-0 z-40 w-64 h-screen pt-16 transition-transform -translate-x-full bg-white border-r border-gray-200 sm:translate-x-0 dark:bg-gray-800 dark:border-gray-700">
     <div class="h-full px-3 pb-4 overflow-y-auto bg-white dark:bg-gray-800">
       {% set groups = [
@@ -642,6 +674,37 @@
       document.addEventListener('DOMContentLoaded', () => init());
       document.body.addEventListener('htmx:afterSwap', e => init(e.target));
     })();
+
+    // ---------- htmx-boost helpers ----------
+    // After a boosted swap: close the mobile sidebar drawer, refresh
+    // Flowbite-bound widgets (dropdowns, modals, tooltips) on the new
+    // content, scroll to top of #main-content, and reset SR-focus to it.
+    document.body.addEventListener('htmx:afterSwap', (e) => {
+      try {
+        // Close mobile drawer if it was open (sidebar uses Flowbite Drawer)
+        const sb = document.getElementById('sidebar');
+        if (sb && sb.classList.contains('transform-none')) {
+          sb.classList.remove('transform-none');
+          sb.classList.add('-translate-x-full');
+          const backdrop = document.querySelector('[drawer-backdrop]');
+          if (backdrop) backdrop.remove();
+          document.body.classList.remove('overflow-hidden');
+        }
+        // Re-bind Flowbite widgets in the new fragment (dropdowns/modals/tabs).
+        if (window.initFlowbite) window.initFlowbite();
+        // Reset scroll for the new page (htmx 'show:window:top' helps, but
+        // some browsers need the explicit nudge once the layout settles).
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      } catch {}
+    });
+    // Show a tiny progress indicator on the topbar while a boosted request
+    // is in flight, so the page doesn't feel frozen on slow networks.
+    document.body.addEventListener('htmx:beforeRequest', () => {
+      document.documentElement.classList.add('htmx-loading');
+    });
+    document.body.addEventListener('htmx:afterRequest', () => {
+      document.documentElement.classList.remove('htmx-loading');
+    });
 
     // ---------- Header KPIs ----------
     // Polls /api/header_stats every 10s. Renders PnL today, open positions

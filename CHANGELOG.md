@@ -2,6 +2,27 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.107 — 2026-05-26
+- **App-like navigation (PWA-ish) via htmx-boost.** Sidebar + topbar links now fetch their target page in the background and swap just the `#main-content` area instead of doing a full page reload. The sidebar stays mounted, drawers don't collapse, the topbar KPIs don't flicker, and the browser back/forward buttons work normally. A 2-pixel blue progress bar appears across the top while a boosted request is in flight.
+  - On boost: mobile drawer auto-closes after nav, Flowbite widgets (dropdowns / modals / tabs) re-bind, scroll resets to top of new content.
+  - Page-level `<script>` tags inside swapped content are re-evaluated by htmx; existing `htmx:afterSwap` listeners for tabs / dates / SSE / KPIs continue to work.
+- **🐛 `/activity/` Bybit + Alpaca (and the other API-key providers) said NOT SET even when configured via the UI.** Settings → Environment got fixed in v2.24.077 but the Activity page check (`_api_statuses()`) was still only consulting `settings.bybit_api_key` etc. — env vars. Keys saved via the 🔑 API Keys tab live in Postgres only. Activity now also consults `credentials.get_sync(<provider>)` for OpenRouter, Voyage, Bybit, Alpaca, Telegram, Langfuse, CryptoPanic, NewsAPI, CryptoNews, LunarCrush, WhaleAlert. **Single source of truth across the dashboard.**
+- **What to test:** click between sidebar items — sidebar stays put, only main content changes, URL updates. Open `/activity/` — Bybit and Alpaca now show `CONFIGURED` matching the Settings → Environment tab.
+
+## 2.24.107 — 2026-05-26
+- **🐛 Agent grid was hiding ~$4 of LLM spend** (sum of visible agents < total at the top of `/agents/`). The grid listed only agents with a live `agent_status:<name>` heartbeat hash; agents that crashed / were renamed / had their heartbeat key expire vanished from the grid even though their historical `cost:daily:<date>:agent:<name>` keys were still rolling into the daily totals. Likely candidates: enricher, historian, translator. **Now the grid takes the union** of `agent_status:*` keys + a Redis SCAN of `cost:daily:*:agent:*` so any agent that ever spent money appears as a row with a grey `STOPPED` badge (hover tooltip explains: *"Agent has historical LLM spend but no live heartbeat — service may have been removed, renamed, or its heartbeat key expired. Its past spend still contributes to the daily totals at the top."*). Math should now reconcile: Σ visible agents = total.
+- **App-like nav (htmx-boost).** Sidebar + topbar links now swap only `#main-content` instead of full page reloads. Sidebar stays mounted, KPIs don't flicker, mobile drawer auto-closes after nav, history is pushed, browser back/forward work. A 2-pixel blue progress bar across the top during the swap. Flowbite widgets re-bind via `initFlowbite()` on `htmx:afterSwap`.
+- **🐛 `/activity/` Bybit/Alpaca said NOT SET even when configured via the UI.** v2.24.077 fixed Settings → Environment but the Activity page's `_api_statuses()` still only consulted `settings.bybit_api_key` env-vars. Keys saved via the 🔑 API Keys tab live in Postgres. Activity now also consults `credentials.get_sync(<provider>)` for OpenRouter, Voyage, Bybit, Alpaca, Telegram, Langfuse, CryptoPanic, NewsAPI, CryptoNews, LunarCrush, WhaleAlert. Same source of truth across the dashboard.
+- **Recent-signals table rebuilt** on `/activity/`:
+  - **Header explains `dup` and `enriched`** inline (`dup` = collapsed onto a master signal, skipped enrichment to save LLM $; `enriched` = ran through the enricher LLM and became a graph event).
+  - **`Lag` column** (md+) — source publish time → fetch time, formatted `Xs / Xm / Xh / Xd`. Surfaces scraper-cadence issues per source.
+  - **Source as a chip** for readability.
+  - **`Dup` column tooltip** on the badge: shows the master ULID when known (`Duplicate of signal 01J… — that one was enriched, this one was skipped`).
+  - **`Enriched` column** (new) — green `✓ event` when `ingested_to_graph=true`, clickable through to `/graph/?focus=<event_ulid>` to see the event's neighbourhood. `—` when pending or dropped.
+  - **Title shows body preview on hover** (first 400 chars in the tooltip), URL still opens in new tab.
+  - Duplicate rows get `opacity-60` to visually de-emphasise without hiding.
+- **What to test:** click sidebar items — content swaps, sidebar stays, URL updates, blue progress bar. `/activity/` external-API grid shows Bybit + Alpaca as `CONFIGURED` matching `/settings/?tab=env`. Hover any `dup` badge → see what it was deduplicated against. Click any green `✓ event` → graph page focused on the event.
+
 ## 2.24.106 — 2026-05-26
 - **🐛 Sliders/toggles disappeared after Save.** The friendly grouped form on `/settings/?tab=risk` posted to `/risk_config/<key>/update`, which hardcoded a redirect to the legacy `/risk_config/` table view. So every Save threw you out of the nice UI and onto the raw key/value table.
 - Fix: the `/risk_config/{key}/update`, `/create`, and `/delete` endpoints now redirect to a `?next=<path>` query param if provided, falling back to the `Referer` header, falling back to `/risk_config/` for back-compat. All four forms on the settings page now pass `?next=/settings/?tab=risk`. **Slider Save / toggle flip stays on the same screen.**
