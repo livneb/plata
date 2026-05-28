@@ -42,6 +42,9 @@ AGENT_MODELS: dict[str, str] = {
     "historian": "anthropic/claude-sonnet-4-6",
     "risk_manager": "openai/o3-mini",
     "scraper": "anthropic/claude-haiku-4-5",
+    # Position monitor — runs frequently across every open position, so
+    # we use Haiku to keep cost sane. Override on /settings/?tab=risk.
+    "position_monitor": "anthropic/claude-haiku-4-5",
 }
 
 

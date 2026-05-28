@@ -148,6 +148,40 @@
   </script>
   {% endif %}
 
+  {% if health or suggested_adjustment_ulid %}
+  <!-- Position monitor: health + suggested adjustment -->
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="font-semibold">Health <span class="text-[10px] text-gray-500 font-normal">— position monitor</span></h2>
+      {% set status = health.get('status') if health else None %}
+      {% if status == 'on_track' %}<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">✅ On track</span>
+      {% elif status == 'drifting' %}<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">⚠ Drifting</span>
+      {% elif status == 'off_track' %}<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">🛑 Off-track</span>
+      {% elif status == 'untracked' %}<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700" title="No strategist milestones to compare against — SL/TP and timeout still fire.">— Untracked</span>
+      {% else %}<span class="text-xs text-gray-400">No evaluation yet — will appear within a minute.</span>{% endif %}
+    </div>
+    {% if status in ('drifting', 'off_track', 'on_track') %}
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+      <div><dt class="text-[10px] uppercase text-gray-500">Predicted now</dt>
+        <dd class="font-mono">{{ '%+.2f' % (health.expected_pct | float) }}%</dd></div>
+      <div><dt class="text-[10px] uppercase text-gray-500">Actual now</dt>
+        <dd class="font-mono">{{ '%+.2f' % (health.actual_pct | float) }}%</dd></div>
+      <div><dt class="text-[10px] uppercase text-gray-500">Deviation</dt>
+        <dd class="font-mono">{{ '%.2f' % (health.deviation_pct | float) }}%</dd></div>
+      <div><dt class="text-[10px] uppercase text-gray-500">Last check</dt>
+        <dd>{% if health.evaluated_at %}<time data-utc="{{ health.evaluated_at }}">{{ health.evaluated_at }}</time>{% else %}—{% endif %}</dd></div>
+    </dl>
+    {% endif %}
+    {% if suggested_adjustment_ulid %}
+    <div class="mt-3 p-3 rounded border border-fuchsia-200 dark:border-fuchsia-700 bg-fuchsia-50 dark:bg-fuchsia-900/20 text-xs">
+      🔄 <b>The monitor suggests an adjustment to this position.</b>
+      <a href="/proposals/?symbol={{ trade.symbol }}#detail-{{ suggested_adjustment_ulid }}"
+         class="ml-1 text-fuchsia-700 dark:text-fuchsia-300 hover:underline font-medium">Review the suggestion →</a>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <!-- Strategist proposal -->
   <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
     <h2 class="font-semibold mb-2">Strategist proposal</h2>

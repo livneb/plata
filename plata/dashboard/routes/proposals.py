@@ -42,6 +42,12 @@ STATE_META: dict[str, dict[str, str]] = {
                           "hint": "The venue API rejected the order (e.g. min-qty, regulatory block). Investigate before re-submitting."},
     "manual_override":  {"label": "Your override", "color": "bg-purple-100 text-purple-800",  "icon": "✋",
                           "hint": "You re-submitted a clone of an earlier proposal, bypassing the risk gates."},
+    "adjustment_suggested": {"label": "Adjust?", "color": "bg-fuchsia-100 text-fuchsia-800", "icon": "🔄",
+                          "hint": "Position monitor suggests an adjustment to an open position (close, scale up, scale down). Awaiting your approval."},
+    "adjustment_executed": {"label": "Adjusted", "color": "bg-emerald-100 text-emerald-800", "icon": "🔁",
+                          "hint": "You approved a monitor-suggested adjustment; it has been applied to the position."},
+    "adjustment_rejected": {"label": "Skipped",  "color": "bg-gray-200 text-gray-700",        "icon": "⛔",
+                          "hint": "You rejected a monitor-suggested adjustment; the position is unchanged."},
 }
 
 
@@ -229,12 +235,172 @@ async def proposal_json(proposal_ulid: str):
 
 
 @router.post("/{proposal_ulid}/decide")
-async def decide(proposal_ulid: str, action: str = Form(...)):
-    """HITL approve / reject (back-compat with the original endpoint)."""
+async def decide(request: Request, proposal_ulid: str, action: str = Form(...)):
+    """HITL approve / reject. Handles both:
+      • Legacy HITL pending proposals (call resolve()).
+      • Position-monitor adjustment_suggested rows — apply the suggested
+        action (close / scale up / scale down) and flip the row state.
+    """
+    from plata.dashboard.auth import current_user_email
+    p = await proposal_get(proposal_ulid)
+    actor = current_user_email(request) or "dashboard"
+    if p and p.state == "adjustment_suggested":
+        from plata.core.proposals import update_state
+        if action != "approve":
+            await update_state(proposal_ulid, state="adjustment_rejected",
+                                reason="user rejected", actor=f"user:{actor}")
+            return RedirectResponse(url="/proposals/?state=adjustment_rejected", status_code=303)
+        extras = p.extras or {}
+        kind_action = (extras.get("adjustment_action") or "hold").lower()
+        target_ulid = extras.get("adjustment_target_trade_ulid")
+        scale_pct = float(extras.get("adjustment_scale_pct") or 1.0)
+        applied_ok = False
+        try:
+            if kind_action == "close" and target_ulid:
+                applied_ok = await _apply_monitor_close(target_ulid, actor)
+            elif kind_action in ("scale_up", "scale_down") and target_ulid:
+                applied_ok = await _apply_monitor_scale(target_ulid, kind_action,
+                                                         scale_pct, actor, p)
+        except Exception as exc:  # noqa: BLE001
+            await update_state(proposal_ulid, state="adjustment_rejected",
+                                reason=f"apply failed: {exc!s:.180s}",
+                                actor=f"user:{actor}")
+            return RedirectResponse(url=f"/proposals/?symbol={p.symbol}", status_code=303)
+        await update_state(
+            proposal_ulid,
+            state="adjustment_executed" if applied_ok else "adjustment_rejected",
+            reason=f"applied {kind_action}" if applied_ok else "no-op",
+            actor=f"user:{actor}",
+        )
+        return RedirectResponse(url=f"/proposals/?symbol={p.symbol}", status_code=303)
+    # Legacy HITL pending-proposal flow
     await resolve(
-        proposal_ulid, approved=(action == "approve"), actor="dashboard"
+        proposal_ulid, approved=(action == "approve"), actor=actor,
     )
     return RedirectResponse(url="/proposals/", status_code=303)
+
+
+async def _apply_monitor_close(trade_ulid: str, actor: str) -> bool:
+    """Publish a TradeClosure at current market price (same path as the
+    manual-close button on /trades/<ulid>)."""
+    from datetime import datetime as _dt, timezone as _tz
+    from decimal import Decimal
+    from plata.core.bus import Streams, publish, publish_channel, get_redis
+    from plata.core.db import TradeLedger, session_scope
+    from plata.core.schemas import CloseReason, Side, TradeClosure, TradeMode
+    from sqlalchemy import select as _select
+    async with session_scope() as session:
+        trade = (await session.execute(
+            _select(TradeLedger).where(TradeLedger.trade_ulid == trade_ulid)
+        )).scalar_one_or_none()
+    if not trade or trade.exit_price is not None:
+        return False
+    redis = get_redis()
+    sym = await redis.hgetall(f"symbol:latest:{trade.symbol}")
+    try:
+        price = float(sym.get("price") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    if price <= 0:
+        return False
+    sign = Decimal("1") if (trade.side or "").lower() == "long" else Decimal("-1")
+    qty = Decimal(str(trade.qty or 0))
+    entry = Decimal(str(trade.entry_price or 0))
+    exit_d = Decimal(str(price))
+    gross = sign * (exit_d - entry) * qty
+    fees = Decimal(str(trade.fees or 0))
+    closure = TradeClosure(
+        trade_ulid=trade_ulid, proposal_ulid=trade.proposal_id or "",
+        symbol=trade.symbol, venue=trade.venue,
+        mode=TradeMode(trade.mode) if trade.mode else TradeMode.PAPER,
+        side=Side(trade.side),
+        qty=qty, entry_price=entry, exit_price=exit_d,
+        fees=fees, gross_pnl=gross, net_pnl=gross - fees,
+        close_reason=CloseReason.MANUAL,
+        opened_at=trade.opened_at, closed_at=_dt.now(_tz.utc),
+    )
+    await publish(Streams.TRADE_CLOSURES, closure)
+    await publish_channel("dashboard:events", {
+        "kind": "trade_closed", "trade_ulid": trade_ulid,
+        "symbol": trade.symbol, "net_pnl": float(gross - fees),
+        "close_reason": "manual_adjustment", "actor": actor,
+    })
+    return True
+
+
+async def _apply_monitor_scale(trade_ulid: str, action: str,
+                                scale_pct: float, actor: str,
+                                proposal: Any) -> bool:
+    """Emit a NEW manual-override proposal for the scale action — uses the
+    existing clone-and-edit machinery. scale_up adds notional; scale_down
+    is approximated as a partial close (close+reopen smaller) for paper-mode."""
+    from decimal import Decimal
+    from plata.core.bus import Streams, publish
+    from plata.core.proposals import record_published, update_state
+    from plata.core.schemas import RiskDecision, Side, TradeProposal
+    from plata.core.db import TradeLedger, session_scope
+    from plata.execution.router import client_for, venue_for
+    from sqlalchemy import select as _select
+
+    async with session_scope() as session:
+        trade = (await session.execute(
+            _select(TradeLedger).where(TradeLedger.trade_ulid == trade_ulid)
+        )).scalar_one_or_none()
+    if not trade or trade.exit_price is not None:
+        return False
+
+    if action == "scale_down":
+        # Close the existing position fully — user can re-open smaller later.
+        # Keeps the implementation simple and venue-portable.
+        return await _apply_monitor_close(trade_ulid, actor)
+
+    # scale_up: emit a NEW proposal for the same side that bypasses risk.
+    target_notional = Decimal(str(scale_pct)) * (
+        Decimal(str(trade.qty or 0)) * Decimal(str(trade.entry_price or 0))
+    )
+    if target_notional <= 0:
+        target_notional = Decimal("100")
+    venue = venue_for(trade.symbol)
+    last_price = Decimal(str(trade.entry_price or 0))
+    try:
+        c = client_for(agent="monitor_scale", venue=venue)
+        t = await c.fetch_ticker(trade.symbol)
+        lp = float(t.get("last") or t.get("close") or 0)
+        if lp > 0:
+            last_price = Decimal(str(lp))
+    except Exception:  # noqa: BLE001
+        pass
+    if last_price <= 0:
+        last_price = Decimal("100") if venue == "alpaca" else Decimal("50000")
+    qty = (target_notional / last_price).quantize(Decimal("0.0001"))
+    if qty <= 0:
+        qty = Decimal("0.0001")
+
+    cloned = TradeProposal(
+        triggering_event_ulid=proposal.triggering_event_ulid,
+        symbol=trade.symbol,
+        side=Side(trade.side),
+        conviction=float(proposal.conviction) if proposal.conviction is not None else 0.7,
+        reasoning=(proposal.reasoning or f"Monitor scale_up x{scale_pct}")[:1500],
+        similar_events=[],
+        milestones=[],
+    )
+    decision = RiskDecision(
+        proposal_ulid=cloned.ulid, approved=True, requires_hitl=False,
+        final_qty=qty, final_notional_usd=target_notional,
+        final_sl_price=None, final_tp_price=None,
+        risk_snapshot={"monitor_scale_up": True, "actor": actor,
+                        "of_trade_ulid": trade_ulid, "scale_pct": str(scale_pct)},
+    )
+    await publish(Streams.TRADING_PROPOSALS, cloned)
+    await record_published(cloned)
+    await update_state(cloned.ulid, state="manual_override",
+                        reason=f"monitor scale_up of {trade_ulid} ×{scale_pct}",
+                        actor=f"user:{actor}",
+                        extras={"scale_of_trade_ulid": trade_ulid,
+                                 "scale_pct": str(scale_pct)})
+    await publish(Streams.APPROVED_TRADES, decision)
+    return True
 
 
 @router.post("/{proposal_ulid}/resubmit")

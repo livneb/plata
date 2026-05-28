@@ -131,7 +131,7 @@ async def _lifespan(_app: FastAPI):
         reporter = get_error_reporter()
         cooldown_key = "health_watchdog:last_warned"
         cooldown_sec = 10 * 60
-        CRITICAL_AGENTS = ("enricher", "strategist", "executor", "risk_manager")
+        CRITICAL_AGENTS = ("enricher", "strategist", "executor", "risk_manager", "position_monitor")
         while True:
             try:
                 state = await redis.get("system:state") or "RUNNING"

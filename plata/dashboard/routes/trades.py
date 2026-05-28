@@ -107,6 +107,13 @@ async def index(request: Request):
             status = {**meta, "tooltip": f"Closed automatically by rule: {cr}" if cr in ("sl", "tp", "timeout", "kill_switch") else ("Closed manually" if cr == "manual" else "Closed")}
 
         prop = prop_by_ulid.get(r.proposal_id or "")
+        # Cheap health lookup from position monitor (None when closed/untracked).
+        health: dict = {}
+        try:
+            if r.exit_price is None:
+                health = await redis.hgetall(f"position:health:{r.trade_ulid}") or {}
+        except Exception:  # noqa: BLE001
+            pass
         enriched.append({
             "row": r, "venue": venue,
             "cur_price": cur_price, "cur_ts": cur_ts,
@@ -117,6 +124,7 @@ async def index(request: Request):
             "conviction": float(prop.conviction) if (prop and prop.conviction is not None) else None,
             "reasoning_preview": (prop.reasoning[:280] if (prop and prop.reasoning) else None),
             "event_ulid": (prop.triggering_event_ulid if prop else None),
+            "health": health,
         })
     return templates.TemplateResponse(
         request, "pages/trades.html", {"trades": enriched, "active": "trades"}
@@ -424,6 +432,28 @@ async def detail(request: Request, trade_ulid: str):
                 event_doc = await redis.json().get(event_key(triggering))
                 if isinstance(event_doc, dict):
                     event_doc.pop("embedding", None)
+    # Position monitor health snapshot, if any
+    health: dict = {}
+    suggested_adjustment_ulid: str | None = None
+    if trade:
+        try:
+            health = await get_redis().hgetall(f"position:health:{trade.trade_ulid}") or {}
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from plata.core.db import Proposal
+            async with session_scope() as session:
+                row = (await session.execute(
+                    select(Proposal)
+                    .where(Proposal.state == "adjustment_suggested")
+                    .where(Proposal.extras["adjustment_target_trade_ulid"].astext == trade.trade_ulid)
+                    .order_by(Proposal.created_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+                if row:
+                    suggested_adjustment_ulid = row.proposal_ulid
+        except Exception:  # noqa: BLE001
+            pass
     return templates.TemplateResponse(
         request,
         "pages/trade_detail.html",
@@ -433,5 +463,7 @@ async def detail(request: Request, trade_ulid: str):
             "proposal": proposal,
             "event_doc": event_doc,
             "audits": audits,
+            "health": health,
+            "suggested_adjustment_ulid": suggested_adjustment_ulid,
         },
     )

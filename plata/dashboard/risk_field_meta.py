@@ -23,6 +23,7 @@ GROUPS: list[tuple[str, str, str]] = [
     ("portfolio",   "Portfolio limits",       "How many positions can be open at once."),
     ("guards",      "Behavioural guards",     "Per-proposal sanity checks that block obviously-bad trades."),
     ("strategist",  "Strategist tuning",      "Pre-LLM gates — what makes the strategist even consider an event."),
+    ("monitor",     "Position monitor",       "Watches every open position: auto-exits SL/TP/timeout, judges drift, reacts to new events."),
 ]
 
 FIELDS: dict[str, dict] = {
@@ -132,6 +133,82 @@ FIELDS: dict[str, dict] = {
         "type": "int",
         "min": 1, "max": 16, "step": 1,
         "help": "How many KNN-similar past events the strategist sees per call. More = better-grounded reasoning but more LLM tokens per event.",
+    },
+
+    "monitor_check_interval_sec": {
+        "label": "Check interval",
+        "group": "monitor",
+        "type": "int",
+        "min": 10, "max": 600, "step": 10,
+        "help": "How often (seconds) the monitor scans every open position. Drives SL/TP auto-exit speed too.",
+    },
+    "monitor_drift_threshold_pct": {
+        "label": "Drift threshold",
+        "group": "monitor",
+        "type": "percent",
+        "min": 5.0, "max": 50.0, "step": 1.0,
+        "help": "If actual % move deviates this much from the strategist's predicted trajectory, the trade is flagged ⚠ drifting.",
+    },
+    "monitor_off_track_threshold_pct": {
+        "label": "Off-track threshold",
+        "group": "monitor",
+        "type": "percent",
+        "min": 20.0, "max": 200.0, "step": 5.0,
+        "help": "Past this deviation (or if the trade moves OPPOSITE the prediction), the trade is 🛑 off-track and triggers an LLM re-evaluation.",
+    },
+    "monitor_max_hold_min": {
+        "label": "Max hold time",
+        "group": "monitor",
+        "type": "minutes",
+        "min": 60, "max": 43200, "step": 60,
+        "help": "If a trade is still open after this many minutes, auto-close with reason=timeout. 10080 = 7 days.",
+    },
+    "monitor_llm_cooldown_min": {
+        "label": "LLM re-eval cooldown",
+        "group": "monitor",
+        "type": "minutes",
+        "min": 5, "max": 240, "step": 5,
+        "help": "After the monitor LLM looks at an off-track trade, don't re-evaluate the same trade for this many minutes (saves LLM $).",
+    },
+    "monitor_event_sentiment_min": {
+        "label": "Event re-eval threshold",
+        "group": "monitor",
+        "type": "fraction",
+        "min": 0.0, "max": 1.0, "step": 0.05,
+        "help": "When a new event arrives on a symbol you already hold, only trigger an LLM re-evaluation if the event's sentiment_magnitude is at least this. 0.7 = only big news.",
+    },
+    "monitor_auto_close_sl_tp": {
+        "label": "Auto-exit on SL/TP",
+        "group": "monitor",
+        "type": "bool",
+        "help": "When ON, the monitor publishes a TradeClosure the moment price crosses SL or TP. Recommended ON — without this paper-mode trades never honour their stops.",
+    },
+    "monitor_auto_close_timeout": {
+        "label": "Auto-exit on timeout",
+        "group": "monitor",
+        "type": "bool",
+        "help": "When ON, trades open longer than Max hold time auto-close.",
+    },
+    "monitor_auto_close_offtrack": {
+        "label": "Auto-close off-track trades",
+        "group": "monitor",
+        "type": "bool",
+        "danger": True,
+        "help": "When ON, the monitor closes any trade its LLM judges off-track without your approval. Recommended OFF — the LLM suggestion goes to the Proposals page as adjustment_suggested for you to review.",
+    },
+    "monitor_auto_scale_up": {
+        "label": "Auto-scale up",
+        "group": "monitor",
+        "type": "bool",
+        "danger": True,
+        "help": "When ON, if a new event suggests increasing a position, the monitor places the extra trade automatically. Recommended OFF — too easy to compound errors.",
+    },
+    "monitor_auto_scale_down": {
+        "label": "Auto-scale down / close",
+        "group": "monitor",
+        "type": "bool",
+        "danger": True,
+        "help": "When ON, if a new event suggests reducing or closing a position, the monitor acts automatically. Recommended OFF.",
     },
 }
 

@@ -40,6 +40,20 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     # Number of historical analog events the strategist asks for via KNN. More
     # = more context per LLM call (more tokens) but better-grounded reasoning.
     "strategist_analog_k": "8",
+    # Position monitor — watches every open trade and reacts to SL/TP, timeouts,
+    # drift from the strategist's predicted milestones, and new high-magnitude
+    # events on held symbols.
+    "monitor_check_interval_sec": "60",
+    "monitor_drift_threshold_pct": "25.0",
+    "monitor_off_track_threshold_pct": "50.0",
+    "monitor_max_hold_min": "10080",          # 7 days
+    "monitor_llm_cooldown_min": "30",
+    "monitor_event_sentiment_min": "0.7",
+    "monitor_auto_close_sl_tp": "true",       # SL/TP hit → auto close
+    "monitor_auto_close_timeout": "true",     # Held > max_hold_min → auto close
+    "monitor_auto_close_offtrack": "false",   # Off-track LLM verdict → HITL
+    "monitor_auto_scale_up": "false",         # Event-driven scale up → HITL
+    "monitor_auto_scale_down": "false",       # Event-driven scale down → HITL
 }
 
 
