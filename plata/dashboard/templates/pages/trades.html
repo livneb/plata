@@ -106,7 +106,7 @@
         <td class="px-3 py-2 text-right font-mono text-xs">{{ '%.4f' % (t.entry_price | float) if t.entry_price else '—' }}</td>
         <td class="px-3 py-2 text-right font-mono text-xs">
           {% if t.qty and t.entry_price %}
-            ${{ '%,.2f' % ((t.qty | float) * (t.entry_price | float)) }}
+            ${{ '{:,.2f}'.format((t.qty | float) * (t.entry_price | float)) }}
           {% else %}<span class="text-gray-300">—</span>{% endif %}
         </td>
         <td class="px-3 py-2 text-right font-mono text-xs">

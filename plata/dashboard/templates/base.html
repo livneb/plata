@@ -704,9 +704,14 @@
         }
         // Re-bind Flowbite widgets in the new fragment (dropdowns/modals/tabs).
         if (window.initFlowbite) window.initFlowbite();
-        // Reset scroll for the new page (htmx 'show:window:top' helps, but
-        // some browsers need the explicit nudge once the layout settles).
-        window.scrollTo({ top: 0, behavior: 'instant' });
+        // Reset scroll ONLY on full-page boosted nav (target = #main-content).
+        // The activity feed + other sub-component polls (every 5s) also fire
+        // htmx:afterSwap but should NOT yank the page to the top — that's
+        // what was scrolling users away while they read.
+        const target = e.target;
+        if (target && target.id === 'main-content') {
+          window.scrollTo({ top: 0, behavior: 'instant' });
+        }
       } catch {}
     });
     // Show a tiny progress indicator on the topbar while a boosted request

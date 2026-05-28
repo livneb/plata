@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.118 — 2026-05-28
+- **🐛 `/trades/` 500 (`unsupported format character ','`)**. Python's `%` operator doesn't support the thousands-separator flag, only `str.format()` does. The new Notional column used `'%,.2f' % x` which works in f-strings but not in `%`-format. Switched to `'{:,.2f}'.format(x)` everywhere it was added (positions list + trade detail).
+- **🐛 Stock symbols (NVDA, GLD, SPY, …) were being routed to Bybit** because `_client_for(symbol)` silently fell back to `self._bybit` whenever Alpaca wasn't initialized — Bybit then raised `BadSymbol: bybit does not have market symbol GLD` and the trade hit the DLQ. Two-layer fix in `agents/executor.py`:
+  1. `_client_for` now returns `None` when the venue's client isn't configured (instead of returning the wrong venue).
+  2. Executor detects `client is None` before calling the venue + catches any `BadSymbol` exception that slips through — both paths now **fall back to a paper-mode fill** with a `bad_symbol_fallback=true` or `unconfigured_venue=alpaca` audit flag. Same self-healing as the regulatory block path from v2.24.114.
+  3. Sets `venue:blocked:<venue>` in Redis so the health watchdog writes a `VenueRegulatoryBlock`-style warning to `/errors/` (with `reason=unconfigured` or `reason=bad_symbol`).
+- **🐛 Activity page jumped to top every 5 seconds.** The htmx-boost scroll-reset handler in `base.html` (added in v2.24.107) ran on **every** `htmx:afterSwap` event — including the activity feed's 5s auto-poll into `#live-pane`. Now scroll-reset only fires when the swap target is `#main-content` (i.e. a real boosted page navigation), not sub-component polls. Reading the live feed no longer yanks you back to the top.
+
 ## 2.24.117 — 2026-05-27
 - **Proposals page: trigger info on every row.** New **Trigger** column shows the event title (2-line clamp), source (chip), category (chip), sentiment magnitude (color-coded chip: ≥0.7 red / ≥0.4 amber / else gray), signed polarity number, and inline ↗ source-link + ⌘ graph-link buttons. You can scan 50 rows and immediately see *what* triggered each proposal — no more "click Details to find out". If the event has expired from Redis (7-day TTL), shows a quiet "event expired (ulid…)" placeholder instead.
 - **Positions: notional column added.** Every position row now shows **Notional = qty × entry price** (in `$N,NNN.NN`). Visible in:

@@ -27,12 +27,12 @@
       <div><div class="text-[10px] uppercase text-gray-500">Proposal</div><div class="font-mono break-all">{{ trade.proposal_id or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Venue</div><div>{{ trade.venue }} ({{ trade.instrument_type }})</div></div>
       <div><div class="text-[10px] uppercase text-gray-500" title="Notional invested = qty × entry price (USD). What this position cost to open.">Notional invested</div>
-        <div class="font-mono font-semibold">{% if trade.qty and trade.entry_price %}${{ '%,.2f' % ((trade.qty | float) * (trade.entry_price | float)) }}{% else %}—{% endif %}</div></div>
+        <div class="font-mono font-semibold">{% if trade.qty and trade.entry_price %}${{ '{:,.2f}'.format((trade.qty | float) * (trade.entry_price | float)) }}{% else %}—{% endif %}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Opened</div><div><time data-utc="{{ trade.opened_at.isoformat() }}">{{ trade.opened_at.strftime('%Y-%m-%d %H:%M') }}</time></div></div>
       <div><div class="text-[10px] uppercase text-gray-500">SL{{ help_icon('sl') }} / TP{{ help_icon('tp') }}</div><div>{{ trade.sl_price or '—' }} / {{ trade.tp_price or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Exit</div><div>{{ trade.exit_price or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500" title="Exit notional = qty × exit price (USD). What the position was worth at close.">Notional at close</div>
-        <div class="font-mono">{% if trade.qty and trade.exit_price %}${{ '%,.2f' % ((trade.qty | float) * (trade.exit_price | float)) }}{% else %}—{% endif %}</div></div>
+        <div class="font-mono">{% if trade.qty and trade.exit_price %}${{ '{:,.2f}'.format((trade.qty | float) * (trade.exit_price | float)) }}{% else %}—{% endif %}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Net PnL{{ help_icon('net_pnl') }}</div><div>{{ trade.net_pnl or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Closed</div><div>{% if trade.closed_at %}<time data-utc="{{ trade.closed_at.isoformat() }}">{{ trade.closed_at | time_ago }}</time>{% else %}—{% endif %}</div></div>
     </div>

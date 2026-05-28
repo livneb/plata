@@ -39,12 +39,17 @@ class Executor(BaseAgent):
 
     def _client_for(self, symbol: str, hint_venue: str | None = None,
                     hint_class: str | None = None):
-        """Pick the right execution client for a symbol. Falls back to Bybit if Alpaca is unset."""
+        """Pick the right execution client for a symbol.
+        Returns None when the venue is determined but its client isn't
+        initialized — the caller falls back to a paper fill so a stock
+        symbol never gets sent to Bybit (where it'd raise BadSymbol)."""
         from plata.execution.router import venue_for
         venue = venue_for(symbol, hint_venue=hint_venue, hint_class=hint_class)
-        if venue == "alpaca" and self._alpaca is not None:
-            return self._alpaca
-        return self._bybit
+        if venue == "alpaca":
+            return self._alpaca  # may be None if Alpaca isn't configured
+        if venue == "bybit":
+            return self._bybit
+        return None
 
     async def handle(self, payload: dict[str, Any]) -> None:
         decision = RiskDecision(**payload)
@@ -79,6 +84,31 @@ class Executor(BaseAgent):
         # Pick the venue client based on the symbol (crypto → Bybit, stock → Alpaca).
         client = self._client_for(symbol, hint_venue=proposal.get("venue"),
                                   hint_class=proposal.get("instrument_type"))
+        # If we're LIVE but the required venue's client isn't configured (e.g.
+        # a stock symbol with no Alpaca keys), fall back to paper fill rather
+        # than route to the wrong venue (which would raise BadSymbol).
+        if mode == TradeMode.LIVE and client is None:
+            from plata.execution.router import venue_for as _vf
+            need_venue = _vf(symbol, hint_venue=proposal.get("venue"),
+                              hint_class=proposal.get("instrument_type"))
+            self.log.warning("venue_client_unconfigured_paper_fallback",
+                              symbol=symbol, need_venue=need_venue)
+            try:
+                await redis.hset(f"venue:blocked:{need_venue}", mapping={
+                    "reason": "unconfigured",
+                    "code": "no_client",
+                    "message": f"{need_venue} client not initialized — set API keys on /settings/?tab=api",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                })
+                await redis.expire(f"venue:blocked:{need_venue}", 7 * 24 * 60 * 60)
+            except Exception:  # noqa: BLE001
+                pass
+            mode = TradeMode.PAPER
+            raw_response = {
+                "regulatory_fallback": False,
+                "unconfigured_venue": need_venue,
+                "note": "Forced paper fill — required venue's API client is not configured.",
+            }
         if mode == TradeMode.LIVE and client:
             try:
                 order = await client.create_market_order(
@@ -101,7 +131,33 @@ class Executor(BaseAgent):
                 is_regulatory = (
                     "retCode" in msg and "10024" in msg
                 ) or "PermissionDenied" in type(e).__name__ or "regulatory" in msg.lower()
-                if is_regulatory:
+                # BadSymbol: venue rejected the symbol — same paper-fallback
+                # path, different label so the audit row says "wrong venue"
+                # not "regulatory". Means routing missed (e.g. stock symbol
+                # reached Bybit because Alpaca client wasn't init'd).
+                is_bad_symbol = "BadSymbol" in type(e).__name__ or "does not have market symbol" in msg
+                if is_bad_symbol and not is_regulatory:
+                    venue_key = "alpaca" if "alpaca" in type(client).__name__.lower() else "bybit"
+                    try:
+                        await redis.hset(f"venue:blocked:{venue_key}", mapping={
+                            "reason": "bad_symbol",
+                            "code": "BadSymbol",
+                            "message": f"{venue_key} rejected symbol {symbol} — likely a routing bug or missing other-venue keys",
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        })
+                        await redis.expire(f"venue:blocked:{venue_key}", 7 * 24 * 60 * 60)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self.log.warning("venue_bad_symbol_paper_fallback",
+                                      symbol=symbol, decision_ulid=decision.ulid)
+                    mode = TradeMode.PAPER
+                    raw_response = {
+                        "regulatory_fallback": False,
+                        "bad_symbol_fallback": True,
+                        "rejected_by": venue_key,
+                        "message": msg[:400],
+                    }
+                elif is_regulatory:
                     try:
                         venue_key = "alpaca" if "alpaca" in type(client).__name__.lower() else "bybit"
                         await redis.hset(f"venue:blocked:{venue_key}", mapping={
