@@ -162,6 +162,23 @@ class PositionMonitor(BaseAgent):
         v = (cfg.get(key) or str(default)).strip().lower()
         return v in ("1", "true", "yes", "on")
 
+    def _auto_by_conviction(self, cfg: dict[str, str], decision: dict) -> bool:
+        """Conviction-based auto-approval shortcut. Independent of the
+        per-action toggles — if the monitor LLM is at least N confident
+        (default 0.6), bypass HITL entirely. Set the threshold to 1.0 on
+        /settings/?tab=risk to disable."""
+        try:
+            threshold = float(cfg.get("monitor_auto_approve_conviction_threshold") or 0.6)
+        except (TypeError, ValueError):
+            threshold = 0.6
+        if threshold >= 1.0:
+            return False
+        try:
+            conv = float((decision or {}).get("conviction") or 0)
+        except (TypeError, ValueError):
+            conv = 0.0
+        return conv >= threshold
+
     # ------------------------------------------------------------------
     # Loop A — periodic per-trade health check
     # ------------------------------------------------------------------
@@ -369,7 +386,7 @@ class PositionMonitor(BaseAgent):
         if action == "hold":
             return
         # Auto vs HITL
-        auto = self._b(cfg, "monitor_auto_close_offtrack", False)
+        auto = self._b(cfg, "monitor_auto_close_offtrack", False) or self._auto_by_conviction(cfg, decision)
         await self._record_adjustment(
             trade=trade,
             decision=decision,
@@ -477,6 +494,7 @@ class PositionMonitor(BaseAgent):
             auto = self._b(cfg, "monitor_auto_scale_up", False)
         else:
             auto = self._b(cfg, "monitor_auto_scale_down", False)
+        auto = auto or self._auto_by_conviction(cfg, decision)
         await self._record_adjustment(
             trade=trade,
             decision=decision,

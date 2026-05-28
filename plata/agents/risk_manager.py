@@ -54,6 +54,11 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     "monitor_auto_close_offtrack": "false",   # Off-track LLM verdict → HITL
     "monitor_auto_scale_up": "false",         # Event-driven scale up → HITL
     "monitor_auto_scale_down": "false",       # Event-driven scale down → HITL
+    # Conviction-based auto-approval: if the monitor LLM is at least THIS
+    # confident in its recommendation, auto-execute regardless of the
+    # per-action toggles above. Set to 1.0 to disable. Default 0.6 = a
+    # confident "yes" trips it; a lukewarm 0.5 still goes HITL.
+    "monitor_auto_approve_conviction_threshold": "0.6",
 }
 
 

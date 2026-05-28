@@ -210,6 +210,13 @@ FIELDS: dict[str, dict] = {
         "danger": True,
         "help": "When ON, if a new event suggests reducing or closing a position, the monitor acts automatically. Recommended OFF.",
     },
+    "monitor_auto_approve_conviction_threshold": {
+        "label": "Auto-approve above conviction",
+        "group": "monitor",
+        "type": "fraction",
+        "min": 0.0, "max": 1.0, "step": 0.05,
+        "help": "Conviction-based auto-approval shortcut: any monitor adjustment (close / scale up / scale down) whose LLM conviction is ≥ this threshold gets auto-applied, bypassing the HITL toggles above. 0.6 = trip on confident verdicts; 1.0 = disable, every adjustment stays HITL.",
+    },
 }
 
 

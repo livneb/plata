@@ -711,9 +711,52 @@
         const target = e.target;
         if (target && target.id === 'main-content') {
           window.scrollTo({ top: 0, behavior: 'instant' });
+          // Sidebar isn't re-rendered by boosted swaps (we only swap
+          // #main-content), so the server-rendered "active" highlight
+          // sticks on whichever page last did a full reload. Re-derive
+          // it from the new URL.
+          updateSidebarActive(location.pathname);
         }
       } catch {}
     });
+    // Sidebar active-highlight reconciler. Knows which sidebar `<a>` should
+    // be marked active for a given URL prefix; called after every boosted
+    // nav swap above + once on initial load to be safe.
+    function updateSidebarActive(pathname) {
+      const aside = document.getElementById('sidebar');
+      if (!aside) return;
+      const ACTIVE = 'bg-gray-200 dark:bg-gray-700';
+      const HOVER = 'hover:bg-gray-100 dark:hover:bg-gray-700';
+      // Sort by href length desc so /trades/ doesn't beat /trades/watch.
+      const links = Array.from(aside.querySelectorAll('a[href]'))
+        .filter(a => {
+          const h = a.getAttribute('href') || '';
+          return h.startsWith('/') && h !== '#';
+        });
+      let winner = null, winnerLen = -1;
+      for (const a of links) {
+        const h = a.getAttribute('href');
+        const base = h.split('?')[0].split('#')[0];
+        // Exact match wins; else longest-prefix match (so /trades/<ulid> still
+        // highlights /trades/ even when there's no exact entry).
+        const matches = pathname === base
+          || (base !== '/' && pathname.startsWith(base));
+        if (matches && base.length > winnerLen) {
+          winner = a; winnerLen = base.length;
+        } else if (pathname === '/' && base === '/' && winnerLen < 1) {
+          winner = a; winnerLen = 1;
+        }
+      }
+      for (const a of links) {
+        a.classList.remove('bg-gray-200', 'dark:bg-gray-700');
+        if (!a.className.includes('hover:bg-gray-100')) a.classList.add('hover:bg-gray-100', 'dark:hover:bg-gray-700');
+      }
+      if (winner) {
+        winner.classList.remove('hover:bg-gray-100', 'dark:hover:bg-gray-700');
+        winner.classList.add('bg-gray-200', 'dark:bg-gray-700');
+      }
+    }
+    document.addEventListener('DOMContentLoaded', () => updateSidebarActive(location.pathname));
     // Show a tiny progress indicator on the topbar while a boosted request
     // is in flight, so the page doesn't feel frozen on slow networks.
     document.body.addEventListener('htmx:beforeRequest', () => {
