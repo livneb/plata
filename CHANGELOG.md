@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.115 — 2026-05-27
+- **🐛 Halted-agents banner overlayed the topbar instead of pushing it down.** The red `⚠ N agents halted` banner was `fixed top-0 z-[59]` — same layer as the topbar but a higher z-index, so it sat ON TOP of the PnL chips and obscured them. Now: when the banner is shown, `body` gets a `banner-visible` class, and CSS shifts the topbar's `top` from `0` to `36px`, the sidebar's `top` to `36px` (with matching `height: calc(100vh - 36px)`), and `#main-content`'s `padding-top` from `5rem` to `calc(5rem + 36px)`. The whole layout pushes down cleanly; no more overlap with the topbar KPIs.
+
 ## 2.24.114 — 2026-05-27
 - **🐛 Bybit regulatory block (PermissionDenied, retCode 10024) no longer DLQ's trades.** The venue refused live orders due to your account's KYC / region (`Dear User, The product or service you are seeking to access is not available to you due to regulatory restrictions`). Executor used to capture this as an ERROR and skip — every blocked proposal hit the dead-letter queue. Now: on detecting `PermissionDenied` / `retCode 10024` / `regulatory` keywords, the executor **transparently falls back to a paper-mode fill** for that trade (records it in the ledger with `raw_response.regulatory_fallback=true`), stores a venue-wide block flag in Redis `venue:blocked:bybit`, and continues. The health watchdog picks that up and writes a `VenueRegulatoryBlock` WARN to `/errors/` once per 10-minute window so you know live trading on Bybit is currently unavailable.
 - **Proposals page: friendlier names + tooltips on every state badge.** "Dropped" was technically correct but vague. Renamed:

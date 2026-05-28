@@ -49,6 +49,13 @@
       from { background-position: 200% 0; }
       to   { background-position: -100% 0; }
     }
+    /* Halted-agents banner: when visible (body.banner-visible) it sits at
+       top: 0 and pushes the fixed topbar + sidebar + main content down by
+       its own height (36 px). No more overlay. */
+    body.banner-visible > nav,
+    body.banner-visible > aside { top: 36px; }
+    body.banner-visible > aside { height: calc(100vh - 36px); }
+    body.banner-visible #main-content { padding-top: calc(5rem + 36px); }
   </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -480,11 +487,16 @@
       const banner = document.getElementById('halted-banner');
       const txt = document.getElementById('halted-banner-text');
       function showWithCount(n, names) {
-        if (n <= 0) { banner.classList.add('hidden'); return; }
+        if (n <= 0) {
+          banner.classList.add('hidden');
+          document.body.classList.remove('banner-visible');
+          return;
+        }
         txt.textContent = (n === 1)
           ? `Agent "${names[0]}" is halted`
           : `${n} agents halted: ${names.slice(0, 4).join(', ')}${n > 4 ? '…' : ''}`;
         banner.classList.remove('hidden');
+        document.body.classList.add('banner-visible');
       }
       async function poll() {
         try {
