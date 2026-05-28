@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.119 — 2026-05-28
+- **🐛 LLM spend under-counted vs OpenRouter dashboard.** Our local cost estimate was `prompt_tokens × $/M + completion_tokens × $/M` using hardcoded per-model prices. That **misses real OpenRouter charges** in three places:
+  1. **Cached input tokens** — OpenRouter discounts them but the `prompt_tokens` field doesn't split cached vs non-cached, so our math can drift either direction depending on cache-hit rate.
+  2. **Reasoning tokens** — thinking models (o1 / o3 / Sonnet with thinking) bill these separately, often at output-rate. Not in `completion_tokens`.
+  3. **Image / tool tokens** — billed at distinct rates we don't model.
+  - In your case OpenRouter shows $17.40 but Plata reported $11.47 → about a $6 gap concentrated on Sonnet 4.6.
+- **Fix:** the LLM client now sends `extra_body: {"usage": {"include": true}}` on every chat call, which makes OpenRouter return the **actual billed cost** in `response.usage.cost`. We use that real number when present and fall back to the local estimate only for non-OpenRouter responses. Every call also stashes both numbers in the Langfuse trace metadata (`cost_usd`, `cost_reported`, `cost_estimated`) so you can audit the delta after deploy.
+- **Effect:** after this deploy, the daily-total card on `/agents/` should reconcile to the OpenRouter dashboard within rounding. Existing historical rows aren't backfilled (we can't reconstruct the real billed cost from past calls) — only new calls will be exact.
+
 ## 2.24.118 — 2026-05-28
 - **🐛 `/trades/` 500 (`unsupported format character ','`)**. Python's `%` operator doesn't support the thousands-separator flag, only `str.format()` does. The new Notional column used `'%,.2f' % x` which works in f-strings but not in `%`-format. Switched to `'{:,.2f}'.format(x)` everywhere it was added (positions list + trade detail).
 - **🐛 Stock symbols (NVDA, GLD, SPY, …) were being routed to Bybit** because `_client_for(symbol)` silently fell back to `self._bybit` whenever Alpaca wasn't initialized — Bybit then raised `BadSymbol: bybit does not have market symbol GLD` and the trade hit the DLQ. Two-layer fix in `agents/executor.py`:

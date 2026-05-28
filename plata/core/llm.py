@@ -198,6 +198,13 @@ class LLMClient:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # Ask OpenRouter to include the actual billed cost in usage.
+            # Without this, we estimate cost from prompt/completion tokens ×
+            # local per-1M prices, which under-counts: cached input tokens,
+            # reasoning tokens (for thinking models), and image tokens are
+            # billed at different rates and the response's plain
+            # prompt_tokens / completion_tokens don't differentiate them.
+            "extra_body": {"usage": {"include": True}},
         }
         if response_format is not None:
             kwargs["response_format"] = response_format
@@ -240,13 +247,32 @@ class LLMClient:
 
         usage = response.usage
         if usage:
-            cost = _estimate_cost_usd(self.model, usage.prompt_tokens, usage.completion_tokens)
+            # Prefer OpenRouter's actual billed cost (returned when we ask via
+            # extra_body.usage.include=True). Falls back to the local estimate
+            # when the field is missing (other gateways / mock responses).
+            reported_cost: float | None = None
+            try:
+                # OpenAI SDK exposes unknown fields via .model_extra on Pydantic models.
+                extra = getattr(usage, "model_extra", None) or {}
+                if "cost" in extra:
+                    reported_cost = float(extra["cost"])
+                elif hasattr(usage, "cost") and getattr(usage, "cost") is not None:
+                    reported_cost = float(getattr(usage, "cost"))
+            except Exception:  # noqa: BLE001
+                reported_cost = None
+            estimated = _estimate_cost_usd(self.model, usage.prompt_tokens, usage.completion_tokens)
+            cost = reported_cost if (reported_cost is not None and reported_cost > 0) else estimated
             await _record_and_check(self.agent, cost)
             if trace is not None:
                 try:
                     trace.update(
-                        metadata={"cost_usd": cost, "prompt_tokens": usage.prompt_tokens,
-                                  "completion_tokens": usage.completion_tokens}
+                        metadata={
+                            "cost_usd": cost,
+                            "cost_reported": reported_cost,
+                            "cost_estimated": estimated,
+                            "prompt_tokens": usage.prompt_tokens,
+                            "completion_tokens": usage.completion_tokens,
+                        }
                     )
                 except Exception:  # noqa: BLE001
                     pass
