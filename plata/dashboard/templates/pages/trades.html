@@ -27,6 +27,7 @@
     <select id="trades-sort" class="p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
       <option value="started">Started</option>
       <option value="pnl">PnL</option>
+      <option value="notional">Notional ($)</option>
       <option value="pct">% move</option>
       <option value="held">Held duration</option>
       <option value="symbol">Symbol A→Z</option>
@@ -57,6 +58,7 @@
         <th class="px-3 py-2">Side</th>
         <th class="px-3 py-2 text-right">Qty</th>
         <th class="px-3 py-2 text-right">Entry</th>
+        <th class="px-3 py-2 text-right" title="Notional invested = qty × entry price (USD). What the position cost to open.">Notional</th>
         <th class="px-3 py-2 text-right" title="Current market price (open) or final exit price (closed).">Current / Exit</th>
         <th class="px-3 py-2 text-right" title="% move from entry, signed for the side.">%&nbsp;move</th>
         <th class="px-3 py-2 text-right">PnL</th>
@@ -82,6 +84,7 @@
           data-started="{{ t.opened_at.timestamp() if t.opened_at else 0 }}"
           data-held="{{ e.held_sec or 0 }}"
           data-pnl="{{ (t.net_pnl if t.net_pnl is not none else (e.unrealized if e.unrealized is not none else 0)) }}"
+          data-notional="{{ ((t.qty | float) * (t.entry_price | float)) if (t.qty and t.entry_price) else 0 }}"
           data-pct="{{ (e.realized_pct if t.exit_price else e.pct) if (e.realized_pct is not none or e.pct is not none) else 0 }}"
           data-conviction="{{ e.conviction or 0 }}">
         <td class="px-3 py-2">
@@ -101,6 +104,11 @@
         </td>
         <td class="px-3 py-2 text-right font-mono text-xs">{{ '%.4f' % (t.qty | float) if t.qty else '—' }}</td>
         <td class="px-3 py-2 text-right font-mono text-xs">{{ '%.4f' % (t.entry_price | float) if t.entry_price else '—' }}</td>
+        <td class="px-3 py-2 text-right font-mono text-xs">
+          {% if t.qty and t.entry_price %}
+            ${{ '%,.2f' % ((t.qty | float) * (t.entry_price | float)) }}
+          {% else %}<span class="text-gray-300">—</span>{% endif %}
+        </td>
         <td class="px-3 py-2 text-right font-mono text-xs">
           {% if t.exit_price %}<span class="text-gray-500">{{ '%.4f' % (t.exit_price | float) }}</span>
           {% elif e.cur_price is not none %}
@@ -147,7 +155,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="13" class="px-6 py-12 text-center text-gray-400">No positions yet.</td></tr>
+      <tr><td colspan="14" class="px-6 py-12 text-center text-gray-400">No positions yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -181,6 +189,7 @@
         case 'started':    return parseFloat(row.dataset.started)   || 0;
         case 'held':       return parseFloat(row.dataset.held)      || 0;
         case 'pnl':        return parseFloat(row.dataset.pnl)       || 0;
+        case 'notional':   return parseFloat(row.dataset.notional)  || 0;
         case 'pct':        return parseFloat(row.dataset.pct)       || 0;
         case 'conviction': return parseFloat(row.dataset.conviction)|| 0;
         case 'symbol':     return row.dataset.symbol || '';

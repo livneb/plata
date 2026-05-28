@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.117 — 2026-05-27
+- **Proposals page: trigger info on every row.** New **Trigger** column shows the event title (2-line clamp), source (chip), category (chip), sentiment magnitude (color-coded chip: ≥0.7 red / ≥0.4 amber / else gray), signed polarity number, and inline ↗ source-link + ⌘ graph-link buttons. You can scan 50 rows and immediately see *what* triggered each proposal — no more "click Details to find out". If the event has expired from Redis (7-day TTL), shows a quiet "event expired (ulid…)" placeholder instead.
+- **Positions: notional column added.** Every position row now shows **Notional = qty × entry price** (in `$N,NNN.NN`). Visible in:
+  - `/trades/` table — new column between Entry and Current.
+  - `/trades/<ulid>` detail header — two cards: **Notional invested** (at entry) and **Notional at close** (at exit, when closed).
+  - Sortable: new `Notional ($)` option in the Sort-by dropdown.
+
 ## 2.24.116 — 2026-05-27
 - **Proposals page rebuilt around the Flowbite advanced-table pattern** (per <https://flowbite.com/blocks/application/advanced-tables/>). Everything is now contained in a single bordered card:
   - **Header toolbar inside the card** — state filter pills + symbol/side/search form + drop-reason sub-row. No more loose chip strips floating above the table.

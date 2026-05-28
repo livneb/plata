@@ -130,6 +130,7 @@
       <thead class="text-[10px] uppercase tracking-wider text-gray-500 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
         <tr>
           <th scope="col" class="px-4 py-3 font-medium">When</th>
+          <th scope="col" class="px-4 py-3 font-medium">Trigger</th>
           <th scope="col" class="px-4 py-3 font-medium">Symbol</th>
           <th scope="col" class="px-4 py-3 font-medium">Side</th>
           <th scope="col" class="px-4 py-3 font-medium text-right">Conv.</th>
@@ -143,6 +144,28 @@
         <tr class="hover:bg-blue-50/40 dark:hover:bg-gray-700/40 transition">
           <td class="px-4 py-3 text-xs whitespace-nowrap text-gray-500">
             <time data-utc="{{ p.created_at.isoformat() }}">{{ p.created_at.strftime('%m-%d %H:%M') }}</time>
+          </td>
+          <td class="px-4 py-3 text-xs max-w-md">
+            {% if p.event %}
+            <div class="text-gray-900 dark:text-gray-100 leading-tight line-clamp-2"
+                 title="{{ p.event.title or p.event.summary or '' }}">{{ (p.event.title or p.event.summary or '')[:140] }}</div>
+            <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[10px] text-gray-500">
+              {% if p.event.source %}<span class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 font-mono">{{ p.event.source }}</span>{% endif %}
+              {% if p.event.category %}<span class="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">{{ p.event.category }}</span>{% endif %}
+              {% if p.event.sentiment_magnitude is not none %}
+                {% set mag = p.event.sentiment_magnitude %}
+                {% set mag_class = 'bg-red-50 text-red-700 dark:bg-red-900/40 dark:text-red-300' if mag >= 0.7 else ('bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' if mag >= 0.4 else 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400') %}
+                <span class="px-1.5 py-0.5 rounded {{ mag_class }}" title="Sentiment magnitude — how dramatic the event is, 0=dull → 1=explosive.">mag {{ '%.2f' % mag }}</span>
+              {% endif %}
+              {% if p.event.sentiment is not none and p.event.sentiment != 0 %}
+                <span class="{% if p.event.sentiment > 0 %}text-green-600 dark:text-green-400{% else %}text-red-600 dark:text-red-400{% endif %}" title="Sentiment polarity (signed)">{{ '%+.2f' % p.event.sentiment }}</span>
+              {% endif %}
+              {% if p.event.url %}<a href="{{ p.event.url }}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">↗</a>{% endif %}
+              {% if p.event_ulid %}<a href="/graph/?focus={{ p.event_ulid }}" class="text-blue-600 hover:underline" title="Open this event in the knowledge graph">⌘ graph</a>{% endif %}
+            </div>
+            {% elif p.event_ulid %}
+            <div class="text-gray-400 italic text-xs" title="Event was 7+ days old — TTL'd out of Redis">event expired (<span class="font-mono">{{ p.event_ulid[:8] }}…</span>)</div>
+            {% else %}<span class="text-gray-300">—</span>{% endif %}
           </td>
           <td class="px-4 py-3 whitespace-nowrap">
             {% if p.symbol and p.symbol != '—' %}
@@ -190,7 +213,7 @@
           </td>
         </tr>
       <tr id="detail-{{ p.ulid }}" class="hidden border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-        <td colspan="7" class="px-6 py-4">
+        <td colspan="8" class="px-6 py-4">
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
             <!-- Re-submit chain — visible from BOTH sides -->
             {% if p.extras.children or p.extras.source_proposal_ulid %}
@@ -328,7 +351,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="px-6 py-16 text-center">
+      <tr><td colspan="8" class="px-6 py-16 text-center">
         <div class="text-gray-400">
           <svg class="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/></svg>
           <div class="text-sm">No proposals match this filter.</div>
