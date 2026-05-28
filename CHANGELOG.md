@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.116 — 2026-05-27
+- **Proposals page rebuilt around the Flowbite advanced-table pattern** (per <https://flowbite.com/blocks/application/advanced-tables/>). Everything is now contained in a single bordered card:
+  - **Header toolbar inside the card** — state filter pills + symbol/side/search form + drop-reason sub-row. No more loose chip strips floating above the table.
+  - **Pill-style state chips** (rounded-full, blue when active, gray neutral) with icon + label + count, matching the Flowbite reference.
+  - **Search input** with an inline magnifying-glass icon; symbol + side dropdowns sit beside it. Apply / Reset buttons styled as proper Flowbite primary / outline buttons.
+  - **Table** uses `divide-y` rows, `hover:bg-blue-50/40` accent, smaller tracked-uppercase headers, conviction color-graded (≥0.7 green / ≥0.5 amber / else gray), state badge is now a rounded pill.
+  - **Empty state**: friendly icon + "No proposals match this filter" + "Clear filters →" link when any filters are active.
+
 ## 2.24.115 — 2026-05-27
 - **🐛 Halted-agents banner overlayed the topbar instead of pushing it down.** The red `⚠ N agents halted` banner was `fixed top-0 z-[59]` — same layer as the topbar but a higher z-index, so it sat ON TOP of the PnL chips and obscured them. Now: when the banner is shown, `body` gets a `banner-visible` class, and CSS shifts the topbar's `top` from `0` to `36px`, the sidebar's `top` to `36px` (with matching `height: calc(100vh - 36px)`), and `#main-content`'s `padding-top` from `5rem` to `calc(5rem + 36px)`. The whole layout pushes down cleanly; no more overlap with the topbar KPIs.
 

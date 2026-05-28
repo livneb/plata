@@ -48,122 +48,147 @@
 </div>
 {% endif %}
 
-<!-- State filter chips -->
-<div class="flex flex-wrap gap-2 mb-2">
-  <span class="text-[10px] uppercase text-gray-500 self-center mr-1">state</span>
-  <a href="/proposals/" class="px-2.5 py-1 rounded text-xs border {{ 'bg-blue-700 text-white border-blue-700' if not active_state else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-    All <span class="text-[10px] opacity-70">· {{ counts.values() | sum }}</span>
-  </a>
-  {% for key, meta in state_meta.items() %}
-    {% if counts.get(key, 0) > 0 %}
-    <a href="/proposals/?state={{ key }}" title="{{ meta.hint or meta.label }}"
-       class="px-2.5 py-1 rounded text-xs border {{ 'bg-blue-700 text-white border-blue-700' if active_state == key else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-      {{ meta.icon }} {{ meta.label }} <span class="text-[10px] opacity-70">· {{ counts.get(key, 0) }}</span>
-    </a>
+<!-- Flowbite advanced-table — single bordered card containing filter
+     header + table body. Toolbar at top with state pills + search bar,
+     drop-reason secondary row when active. Striped, sticky header, hover. -->
+<div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+
+  <!-- Toolbar: state filter pills + symbol/side/search -->
+  <div class="border-b border-gray-200 dark:border-gray-700 p-3 space-y-3">
+    <!-- Row 1: state pills -->
+    <div class="flex flex-wrap items-center gap-1.5">
+      <span class="text-[10px] font-medium uppercase text-gray-500 mr-2">State</span>
+      <a href="/proposals/" title="Show all proposals across every state."
+         class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition
+           {{ 'bg-blue-600 text-white' if not active_state else 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600' }}">
+        All <span class="text-[10px] opacity-70">{{ counts.values() | sum }}</span>
+      </a>
+      {% for key, meta in state_meta.items() %}
+        {% if counts.get(key, 0) > 0 %}
+        <a href="/proposals/?state={{ key }}" title="{{ meta.hint or meta.label }}"
+           class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition
+             {{ 'bg-blue-600 text-white' if active_state == key else 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600' }}">
+          <span>{{ meta.icon }}</span><span>{{ meta.label }}</span>
+          <span class="text-[10px] opacity-70">{{ counts.get(key, 0) }}</span>
+        </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <!-- Row 2: text filters -->
+    <form method="get" action="/proposals/" class="flex flex-wrap items-center gap-2 text-xs">
+      {% if active_state %}<input type="hidden" name="state" value="{{ active_state }}" />{% endif %}
+      {% if active_reason %}<input type="hidden" name="reason" value="{{ active_reason }}" />{% endif %}
+      <div class="relative flex-1 min-w-[220px]">
+        <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+          <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-3.5-3.5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>
+        </div>
+        <input type="text" name="q" value="{{ active_q or '' }}"
+               placeholder="Search text in reasoning, reason, or symbol…"
+               class="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+      </div>
+      <input type="text" name="symbol" value="{{ active_symbol or '' }}" placeholder="Symbol"
+             class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono w-28 focus:ring-2 focus:ring-blue-500" />
+      <select name="side"
+              class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-blue-500">
+        <option value="">Any side</option>
+        <option value="long"  {% if active_side == 'long'  %}selected{% endif %}>↑ long</option>
+        <option value="short" {% if active_side == 'short' %}selected{% endif %}>↓ short</option>
+      </select>
+      <button type="submit" class="px-4 py-2 rounded-lg text-white bg-blue-600 hover:bg-blue-700 font-medium">Apply</button>
+      {% if active_symbol or active_side or active_q %}
+      <a href="/proposals/{% if active_state %}?state={{ active_state }}{% endif %}{% if active_reason %}{% if active_state %}&{% else %}?{% endif %}reason={{ active_reason }}{% endif %}"
+         class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">Reset</a>
+      {% endif %}
+    </form>
+
+    {% if reason_counts %}
+    <!-- Row 3: drop-reason sub-filter (only when there's something to filter) -->
+    <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-gray-100 dark:border-gray-700">
+      <span class="text-[10px] font-medium uppercase text-gray-500 mr-2">Why not traded</span>
+      <a href="/proposals/?state=dropped"
+         class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition
+           {{ 'bg-gray-700 text-white' if (active_state == 'dropped' and not active_reason) else 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600' }}">
+        Any drop <span class="text-[10px] opacity-70">{{ reason_counts.values() | sum }}</span>
+      </a>
+      {% for code, n in reason_counts.items() %}
+        {% set rm = reason_meta.get(code, {'label': code, 'icon': '?', 'hint': ''}) %}
+        <a href="/proposals/?state=dropped&reason={{ code }}" title="{{ rm.hint }}"
+           class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition
+             {{ 'bg-gray-700 text-white' if active_reason == code else 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600' }}">
+          <span>{{ rm.icon }}</span><span>{{ rm.label }}</span>
+          <span class="text-[10px] opacity-70">{{ n }}</span>
+        </a>
+      {% endfor %}
+    </div>
     {% endif %}
-  {% endfor %}
-</div>
+  </div>
 
-<!-- Extra filters: side + free-text search. Preserves state/reason via hidden inputs. -->
-<form method="get" action="/proposals/" class="flex flex-wrap items-end gap-2 mb-3 text-xs">
-  {% if active_state %}<input type="hidden" name="state" value="{{ active_state }}" />{% endif %}
-  {% if active_reason %}<input type="hidden" name="reason" value="{{ active_reason }}" />{% endif %}
-  <label class="block">
-    <span class="block text-[10px] uppercase text-gray-500">Symbol</span>
-    <input type="text" name="symbol" value="{{ active_symbol or '' }}" placeholder="BTCUSDT, SPY…"
-           class="p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono w-32" />
-  </label>
-  <label class="block">
-    <span class="block text-[10px] uppercase text-gray-500">Side</span>
-    <select name="side" class="p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
-      <option value="">— any —</option>
-      <option value="long"  {% if active_side == 'long'  %}selected{% endif %}>↑ long</option>
-      <option value="short" {% if active_side == 'short' %}selected{% endif %}>↓ short</option>
-    </select>
-  </label>
-  <label class="block flex-1 min-w-[180px]">
-    <span class="block text-[10px] uppercase text-gray-500" title="Matches strategist reasoning, state_reason, and symbol.">Search&nbsp;ⓘ</span>
-    <input type="text" name="q" value="{{ active_q or '' }}" placeholder="text in reasoning / reason / symbol…"
-           class="w-full p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700" />
-  </label>
-  <button type="submit" class="px-3 py-1.5 rounded text-white bg-blue-700 hover:bg-blue-800">Apply</button>
-  {% if active_symbol or active_side or active_q %}
-  <a href="/proposals/{% if active_state %}?state={{ active_state }}{% endif %}{% if active_reason %}{% if active_state %}&{% else %}?{% endif %}reason={{ active_reason }}{% endif %}"
-     class="px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600">Reset</a>
-  {% endif %}
-</form>
-
-{% if reason_counts %}
-<!-- Drop-reason chips — only visible when there are any drops to filter -->
-<div class="flex flex-wrap gap-2 mb-3">
-  <span class="text-[10px] uppercase text-gray-500 self-center mr-1">drop reason</span>
-  <a href="/proposals/?state=dropped"
-     class="px-2.5 py-1 rounded text-xs border {{ 'bg-gray-700 text-white border-gray-700' if (active_state == 'dropped' and not active_reason) else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-    Any drop <span class="text-[10px] opacity-70">· {{ reason_counts.values() | sum }}</span>
-  </a>
-  {% for code, n in reason_counts.items() %}
-    {% set rm = reason_meta.get(code, {'label': code, 'icon': '?', 'hint': ''}) %}
-    <a href="/proposals/?state=dropped&reason={{ code }}"
-       title="{{ rm.hint }}"
-       class="px-2.5 py-1 rounded text-xs border {{ 'bg-gray-700 text-white border-gray-700' if active_reason == code else 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-      {{ rm.icon }} {{ rm.label }} <span class="text-[10px] opacity-70">· {{ n }}</span>
-    </a>
-  {% endfor %}
-</div>
-{% endif %}
-
-<div class="relative overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-  <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
-    <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-      <tr>
-        <th class="px-4 py-3">Created</th>
-        <th class="px-4 py-3">Symbol</th>
-        <th class="px-4 py-3">Side</th>
-        <th class="px-4 py-3">Conv.</th>
-        <th class="px-4 py-3">State</th>
-        <th class="px-4 py-3">Reason / outcome</th>
-        <th class="px-4 py-3 text-right">Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for p in rows %}
-      <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
-        <td class="px-4 py-3 text-xs whitespace-nowrap">
-          <time data-utc="{{ p.created_at.isoformat() }}">{{ p.created_at.strftime('%m-%d %H:%M') }}</time>
-        </td>
-        <td class="px-4 py-3">
-          <a href="/proposals/?symbol={{ p.symbol }}" class="font-mono font-semibold hover:text-blue-500">{{ p.symbol }}</a>
-        </td>
-        <td class="px-4 py-3">
-          {% if p.side == 'long' %}<span class="text-green-500">↑ long</span>
-          {% else %}<span class="text-red-500">↓ short</span>{% endif %}
-        </td>
-        <td class="px-4 py-3 font-mono text-xs">{{ '%.2f' % p.conviction if p.conviction is not none else '—' }}</td>
-        <td class="px-4 py-3">
-          <span class="text-[10px] font-medium px-2 py-0.5 rounded {{ p.state_color }}"
-                title="{{ state_meta.get(p.state, {}).get('hint', p.state_label) }}">{{ p.state_icon }} {{ p.state_label }}</span>
-        </td>
-        <td class="px-4 py-3 text-xs">
-          {% if p.state_reason %}<span class="font-mono">{{ p.state_reason }}</span>{% endif %}
-          {% if p.trade_ulid %}
-            <a href="/trades/{{ p.trade_ulid }}" class="ml-2 text-blue-500 hover:underline">→ trade</a>
-          {% endif %}
-        </td>
-        <td class="px-4 py-3 text-right whitespace-nowrap">
-          <button type="button" class="text-xs text-blue-500 hover:underline detail-btn"
-                  data-ulid="{{ p.ulid }}">Details ▾</button>
-          {% if p.state == 'pending_hitl' %}
-          <form method="post" action="/proposals/{{ p.ulid }}/decide" class="inline ml-2">
-            <input type="hidden" name="action" value="approve" />
-            <button class="text-xs text-green-600 hover:underline">✅</button>
-          </form>
-          <form method="post" action="/proposals/{{ p.ulid }}/decide" class="inline">
-            <input type="hidden" name="action" value="reject" />
-            <button class="text-xs text-red-600 hover:underline">❌</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
+  <!-- Table -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+      <thead class="text-[10px] uppercase tracking-wider text-gray-500 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+        <tr>
+          <th scope="col" class="px-4 py-3 font-medium">When</th>
+          <th scope="col" class="px-4 py-3 font-medium">Symbol</th>
+          <th scope="col" class="px-4 py-3 font-medium">Side</th>
+          <th scope="col" class="px-4 py-3 font-medium text-right">Conv.</th>
+          <th scope="col" class="px-4 py-3 font-medium">State</th>
+          <th scope="col" class="px-4 py-3 font-medium">Reason / outcome</th>
+          <th scope="col" class="px-4 py-3 font-medium text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+        {% for p in rows %}
+        <tr class="hover:bg-blue-50/40 dark:hover:bg-gray-700/40 transition">
+          <td class="px-4 py-3 text-xs whitespace-nowrap text-gray-500">
+            <time data-utc="{{ p.created_at.isoformat() }}">{{ p.created_at.strftime('%m-%d %H:%M') }}</time>
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            {% if p.symbol and p.symbol != '—' %}
+            <a href="/proposals/?symbol={{ p.symbol }}" class="font-mono font-semibold text-gray-900 dark:text-white hover:text-blue-600">{{ p.symbol }}</a>
+            {% else %}
+            <span class="text-gray-300">—</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            {% if p.side == 'long' %}<span class="inline-flex items-center gap-0.5 text-green-600 dark:text-green-400 text-xs font-medium">↑ long</span>
+            {% elif p.side == 'short' %}<span class="inline-flex items-center gap-0.5 text-red-600 dark:text-red-400 text-xs font-medium">↓ short</span>
+            {% else %}<span class="text-gray-300 text-xs">—</span>{% endif %}
+          </td>
+          <td class="px-4 py-3 text-right font-mono text-xs">
+            {% if p.conviction is not none %}
+              {% set conv_class = 'text-emerald-600 dark:text-emerald-400 font-semibold' if p.conviction >= 0.7 else ('text-amber-600 dark:text-amber-400' if p.conviction >= 0.5 else 'text-gray-400') %}
+              <span class="{{ conv_class }}">{{ '%.2f' % p.conviction }}</span>
+            {% else %}<span class="text-gray-300">—</span>{% endif %}
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            <span class="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-full {{ p.state_color }}"
+                  title="{{ state_meta.get(p.state, {}).get('hint', p.state_label) }}">
+              <span>{{ p.state_icon }}</span><span>{{ p.state_label }}</span>
+            </span>
+          </td>
+          <td class="px-4 py-3 text-xs">
+            {% if p.state_reason %}<span class="font-mono text-gray-600 dark:text-gray-300">{{ p.state_reason[:120] }}{% if p.state_reason|length > 120 %}…{% endif %}</span>{% endif %}
+            {% if p.trade_ulid %}
+              <a href="/trades/{{ p.trade_ulid }}" class="ml-2 inline-flex items-center gap-0.5 text-blue-600 hover:underline font-medium">→ trade</a>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-right whitespace-nowrap">
+            <button type="button" class="text-xs text-blue-600 hover:text-blue-800 font-medium detail-btn"
+                    data-ulid="{{ p.ulid }}">Details</button>
+            {% if p.state == 'pending_hitl' %}
+            <form method="post" action="/proposals/{{ p.ulid }}/decide" class="inline ml-2">
+              <input type="hidden" name="action" value="approve" />
+              <button class="text-xs text-green-600 hover:text-green-800" title="Approve">✅</button>
+            </form>
+            <form method="post" action="/proposals/{{ p.ulid }}/decide" class="inline">
+              <input type="hidden" name="action" value="reject" />
+              <button class="text-xs text-red-600 hover:text-red-800" title="Reject">❌</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
       <tr id="detail-{{ p.ulid }}" class="hidden border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
         <td colspan="7" class="px-6 py-4">
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
@@ -303,10 +328,19 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="px-6 py-12 text-center text-gray-400">No proposals yet for this filter.</td></tr>
+      <tr><td colspan="7" class="px-6 py-16 text-center">
+        <div class="text-gray-400">
+          <svg class="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/></svg>
+          <div class="text-sm">No proposals match this filter.</div>
+          {% if active_state or active_reason or active_symbol or active_side or active_q %}
+          <a href="/proposals/" class="text-xs text-blue-600 hover:underline mt-1 inline-block">Clear filters →</a>
+          {% endif %}
+        </div>
+      </td></tr>
       {% endfor %}
-    </tbody>
-  </table>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {# Pagination footer. Preserves all active filters via querystring. #}
