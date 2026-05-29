@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.128 — 2026-05-29
+- **🎨 Proposal expanded view layout fix.** The v2.24.126 translate-zone refactor put `data-translate-zone` directly on the `grid grid-cols-1 lg:grid-cols-2` container, so the injected "🌐 Translate all" button became its own grid cell — taking up a full column and leaving a giant empty box. Now the zone wraps the grid instead of being it, so the button sits cleanly above the two-column layout.
+
 ## 2.24.127 — 2026-05-29
 - **🐛 Fix 500 on `/trades/<ulid>`** — `TemplateSyntaxError` from a missing `{% endif %}` introduced in v2.24.124 when the Unrealized/Net PnL split landed. The outer `{% if not trade.closed_at and live.price %}` had no matching close before `</section>`, so the Jinja loader rejected the template. Added the missing endif. Trade detail loads again.
 
