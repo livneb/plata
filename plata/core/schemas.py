@@ -29,6 +29,8 @@ class SignalSource(StrEnum):
     BYBIT_WS = "bybit_ws"
     WHALEALERT = "whalealert"
     HISTORIAN = "historian"
+    RSS = "rss"
+    TELEGRAM = "telegram"
     MANUAL = "manual"
 
 

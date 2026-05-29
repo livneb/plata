@@ -32,6 +32,7 @@ from plata.dashboard.routes import (
     risk_config,
     settings as settings_route,
     trades,
+    tuning as tuning_route,
     workflow,
 )
 
@@ -680,6 +681,7 @@ def create_app() -> FastAPI:
     app.include_router(historian.router)
     app.include_router(dlq.router)
     app.include_router(settings_route.router)
+    app.include_router(tuning_route.router)
     app.include_router(push_route.router)
     app.include_router(sse_route.router)
     app.include_router(translate_route.router)

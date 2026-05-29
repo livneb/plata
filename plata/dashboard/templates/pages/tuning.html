@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Tuning · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <h1 class="text-2xl font-semibold">Tuning</h1>
+  <p class="text-xs text-gray-500">The Reviewer agent watches closed trades and proposes small, conservative tweaks to the <span class="font-mono">guard_*</span> risk-config keys. Apply or reject each one here.</p>
+
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+        <tr>
+          <th class="px-4 py-3">When</th>
+          <th class="px-4 py-3">Key</th>
+          <th class="px-4 py-3">Old → New</th>
+          <th class="px-4 py-3">Rationale</th>
+          <th class="px-4 py-3 text-right">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tuning_rows %}
+        <tr class="border-t border-gray-100 dark:border-gray-700">
+          <td class="px-4 py-3 text-xs text-gray-500"><time data-utc="{{ t.ts.isoformat() }}">{{ t.ts.strftime('%Y-%m-%d %H:%M') }}</time></td>
+          <td class="px-4 py-3 font-mono">{{ t.key }}</td>
+          <td class="px-4 py-3 font-mono text-xs">{{ t.old or '—' }} → <span class="font-bold">{{ t.new }}</span></td>
+          <td class="px-4 py-3 text-xs">{{ t.rationale }}<div class="text-[10px] text-gray-400 mt-1">evidence: {{ t.evidence | tojson }}</div></td>
+          <td class="px-4 py-3 text-right whitespace-nowrap">
+            <form method="post" action="/tuning/{{ t.id }}/apply" class="inline"
+                  data-confirm="Apply {{ t.key }} = {{ t.new }}?" data-confirm-title="Apply tweak" data-confirm-label="Apply">
+              <button type="submit" class="text-blue-500 hover:underline mr-3">Apply</button>
+            </form>
+            <form method="post" action="/tuning/{{ t.id }}/reject" class="inline"
+                  data-confirm="Reject this proposed tweak?" data-confirm-title="Reject tweak" data-confirm-label="Reject" data-confirm-danger>
+              <button type="submit" class="text-red-500 hover:underline">Reject</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No pending tuning proposals. The Reviewer needs ≥25 closed trades since the last proposal before it considers a new one.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

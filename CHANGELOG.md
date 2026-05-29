@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.130 — 2026-05-29
+- **📰 News tab on /settings/?tab=news** — editable from one place: enable/disable each source (GDELT, Reddit, CryptoPanic, RSS, Telegram channels), edit GDELT's boolean query, list of subreddits, list of RSS feeds (name | url, one per line), allowlist + blocklist keywords, minimum title length. All stored in Redis hash `news_config` and re-read on every poll — no restart needed.
+- **🪣 Content filter applied before publish.** Every signal is checked against the allowlist (must contain at least one of N keywords) and blocklist (drop if any match) and a min-title-length, BEFORE it reaches the LLM. Drops are counted by reason on the same tab. Stories like "woman upset with neighbor about fence" never get past `block_keywords` / `no_required_keyword` now.
+- **📡 Generic RSS source.** New `RssSource` polls every 5 min, reads the feed list from `news_config.rss_feeds`. Uses the already-installed `feedparser` dep.
+- **🤖 Telegram channel ingestion.** The bot can now act as a news source. Add it to a channel/group, DM it `/joininfo` (run inside the target chat to discover its ID), then paste the ID into Settings → News → Telegram channel IDs. Messages from those chats are published as `RawSignal(source=TELEGRAM)` and flow through the same content filter and graph ingestion pipeline. New `/joininfo` command + chat-message handler in `plata/hitl/telegram_bot.py`.
+- **🎚️ Tuning moved out of Settings into a Trades submenu.** It was awkward as a settings tab — tuning is a per-trade decision workflow. New page at `/tuning/`, surfaced under sidebar → Trading → Tuning. Old `/settings/tuning/{id}/{action}` POSTs 307-redirect to `/tuning/{id}/{action}` for the brief window between deploy and any open browser tab.
+
 ## 2.24.129 — 2026-05-29
 - **🌐 "Translate all" is now one batched LLM call** instead of N sequential round-trips. Items in a `data-translate-zone` are joined with a `<<<---PLATA_SPLIT--->>>` marker, sent in a single `/api/translate/` request, then split back into each cell. Cache hits short-circuit per text, so partially-cached zones only send the misses. Toggle-off still works (click again → revert to originals). Net effect: translating the full proposal panel (event summary + strategist reasoning + 8 analogs) goes from ~10 serial calls to 1.
 - **🐛 Strategist reasoning now actually translates** as part of the zone — it was already marked `data-translate-item` but the old per-row loop made it easy to miss; the batch path always includes it.

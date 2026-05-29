@@ -5,15 +5,15 @@ from datetime import datetime, timezone
 
 import httpx
 
+from plata.agents.scraper.news_config import DEFAULTS as NEWS_DEFAULTS, get_config as get_news_config
 from plata.agents.scraper.sources.base_source import BaseSource
 from plata.core.observability import get_logger
 from plata.core.schemas import RawSignal, SignalSource
 
 _log = get_logger("scraper.gdelt")
 
-# GDELT 2.0 Doc API
+# GDELT 2.0 Doc API. Query string is live-editable via /settings/?tab=news.
 BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-QUERY = 'sourcelang:eng (war OR sanction OR cyberattack OR "central bank" OR inflation OR crypto OR bitcoin OR regulation)'
 
 
 class GdeltSource(BaseSource):
@@ -24,8 +24,15 @@ class GdeltSource(BaseSource):
         self._seen_urls: set[str] = set()
 
     async def poll(self) -> list[RawSignal]:
+        try:
+            cfg = await get_news_config()
+        except Exception:  # noqa: BLE001
+            cfg = {}
+        if not cfg.get("gdelt_enabled", True):
+            return []
+        query = cfg.get("gdelt_query") or NEWS_DEFAULTS["gdelt_query"]
         params = {
-            "query": QUERY,
+            "query": query,
             "mode": "ArtList",
             "format": "json",
             "maxrecords": "75",
