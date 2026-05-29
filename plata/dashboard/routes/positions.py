@@ -91,16 +91,35 @@ async def index(request: Request):
 
 @router.get("/{symbol}", response_class=HTMLResponse)
 async def detail(request: Request, symbol: str):
+    from sqlalchemy import func as _func
     symbol = symbol.upper()
     redis = get_redis()
     async with session_scope() as session:
-        trades = (await session.execute(
+        open_trades = (await session.execute(
             select(TradeLedger)
             .where(TradeLedger.symbol == symbol)
             .where(TradeLedger.exit_price.is_(None))
         )).scalars().all()
-    card = await _symbol_card(symbol, trades, redis)
-    # Full history for the chart (up to 288 samples = 24h @ 5min).
+        # All closed trades for entry markers + totals.
+        closed_trades = (await session.execute(
+            select(TradeLedger)
+            .where(TradeLedger.symbol == symbol)
+            .where(TradeLedger.exit_price.is_not(None))
+            .order_by(TradeLedger.opened_at.desc())
+            .limit(50)
+        )).scalars().all()
+        realized_total = float((await session.execute(
+            select(_func.coalesce(_func.sum(TradeLedger.net_pnl), 0))
+            .where(TradeLedger.symbol == symbol)
+            .where(TradeLedger.exit_price.is_not(None))
+        )).scalar() or 0)
+        total_closed_count = int((await session.execute(
+            select(_func.count())
+            .select_from(TradeLedger)
+            .where(TradeLedger.symbol == symbol)
+            .where(TradeLedger.exit_price.is_not(None))
+        )).scalar() or 0)
+    card = await _symbol_card(symbol, open_trades, redis)
     raw = await redis.lrange(f"symbol:history:{symbol}", 0, -1)
     points: list[dict[str, Any]] = []
     for line in raw:
@@ -109,6 +128,27 @@ async def detail(request: Request, symbol: str):
             points.append({"x": ts, "y": float(p)})
         except Exception:  # noqa: BLE001
             continue
+    # Entry-marker annotations for the chart: every open + closed trade's
+    # opened_at + entry price + qty + side. Closed trades also get an exit
+    # marker. The template renders these as ApexCharts point/range annotations.
+    def _marker(t: TradeLedger, kind: str) -> dict:
+        is_open_marker = kind == "open"
+        return {
+            "ulid": t.trade_ulid,
+            "kind": kind,                 # "open" | "close"
+            "side": t.side,
+            "x": (t.opened_at.isoformat() if is_open_marker else (t.closed_at.isoformat() if t.closed_at else None)),
+            "y": float(t.entry_price if is_open_marker else (t.exit_price or 0)),
+            "qty": float(t.qty or 0),
+            "notional": float(t.qty or 0) * float(t.entry_price if is_open_marker else (t.exit_price or 0)),
+            "net_pnl": float(t.net_pnl) if t.net_pnl is not None else None,
+            "close_reason": str(t.close_reason) if t.close_reason else None,
+        }
+    markers = [_marker(t, "open") for t in open_trades]
+    for t in closed_trades:
+        markers.append(_marker(t, "open"))
+        if t.closed_at:
+            markers.append(_marker(t, "close"))
     return templates.TemplateResponse(
         request, "pages/positions_detail.html",
         {
@@ -119,9 +159,23 @@ async def detail(request: Request, symbol: str):
                     "ulid": t.trade_ulid, "side": t.side,
                     "qty": float(t.qty or 0), "entry": float(t.entry_price or 0),
                     "opened_at": t.opened_at,
-                } for t in trades
+                } for t in open_trades
+            ],
+            "closed_trades": [
+                {
+                    "ulid": t.trade_ulid, "side": t.side,
+                    "qty": float(t.qty or 0),
+                    "entry": float(t.entry_price or 0),
+                    "exit": float(t.exit_price) if t.exit_price is not None else None,
+                    "net_pnl": float(t.net_pnl) if t.net_pnl is not None else None,
+                    "close_reason": str(t.close_reason) if t.close_reason else None,
+                    "closed_at": t.closed_at,
+                } for t in closed_trades[:10]
             ],
             "points": points,
+            "markers": markers,
+            "realized_total": realized_total,
+            "total_closed_count": total_closed_count,
         },
     )
 

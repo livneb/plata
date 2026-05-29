@@ -9,6 +9,16 @@
   <a href="/trades/watch" class="text-xs text-blue-500 hover:underline whitespace-nowrap">📡 Symbol watch list →</a>
 </div>
 
+<!-- Open / Closed split — client-side filter on the same dataset. -->
+{% set total_n = trades | length %}
+{% set open_n = trades | selectattr('row.exit_price', 'none') | list | length %}
+{% set closed_n = total_n - open_n %}
+<div class="flex items-center gap-1 mb-3 text-xs">
+  <button type="button" data-pos-view="open" class="pos-view px-3 py-1.5 rounded-full font-medium bg-blue-600 text-white">🟢 Open <span class="opacity-80 ml-1">{{ open_n }}</span></button>
+  <button type="button" data-pos-view="closed" class="pos-view px-3 py-1.5 rounded-full font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">✓ Closed <span class="opacity-80 ml-1">{{ closed_n }}</span></button>
+  <button type="button" data-pos-view="all" class="pos-view px-3 py-1.5 rounded-full font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">All <span class="opacity-80 ml-1">{{ total_n }}</span></button>
+</div>
+
 <!-- Group + sort controls. Client-side reorder; no round-trip. -->
 <div class="flex flex-wrap items-end gap-3 mb-3 text-xs">
   <label class="block">
@@ -75,6 +85,7 @@
       {% set t = e.row %}
       <tr class="trade-row border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
           onclick="location.href='/trades/{{ t.trade_ulid }}?from=trades'"
+          data-pos-state="{{ 'open' if t.exit_price is none else 'closed' }}"
           data-symbol="{{ t.symbol }}"
           data-side="{{ t.side or '' }}"
           data-venue="{{ e.venue or '' }}"
@@ -206,6 +217,28 @@
       }
       return 0;
     }
+    // Open / Closed view selector — persists in localStorage. Defaults to open.
+    const POS_VIEW_LS = 'plata.trades.view';
+    function currentView() { return localStorage.getItem(POS_VIEW_LS) || 'open'; }
+    function applyView(view) {
+      tbody.querySelectorAll('tr.trade-row').forEach(r => {
+        const s = r.dataset.posState || 'open';
+        const show = (view === 'all') || (view === s);
+        r.style.display = show ? '' : 'none';
+      });
+      document.querySelectorAll('.pos-view').forEach(b => {
+        const active = b.dataset.posView === view;
+        b.className = (active
+          ? 'pos-view px-3 py-1.5 rounded-full font-medium bg-blue-600 text-white'
+          : 'pos-view px-3 py-1.5 rounded-full font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600');
+      });
+      localStorage.setItem(POS_VIEW_LS, view);
+    }
+    document.querySelectorAll('.pos-view').forEach(b => {
+      b.addEventListener('click', () => applyView(b.dataset.posView));
+    });
+    // initial apply happens after the first reorder() call below
+
     function reorder() {
       const groupKey = $group.value;
       const sortKey  = $sort.value;
@@ -272,6 +305,7 @@
       reorder();
     });
     reorder();
+    applyView(currentView());
   })();
 </script>
 {% endblock %}

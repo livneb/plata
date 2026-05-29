@@ -2,6 +2,19 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.124 — 2026-05-29
+- **Trade detail — live unrealized PnL for OPEN positions.** The summary header used to show `—` for Exit / Notional at close / Net PnL on open trades; you'd only see PnL after they closed. Now: when the trade is still open, those three cells flip to **Current price** (mark-to-market from the symbol watch, with the price drift % next to it), **Notional now**, and a prominent **Unrealized PnL** ($ + %), all color-coded. Each carries a small pulsing 🟢 indicator that updates as the sampler ticks.
+- **Per-position auto-close rules card.** New section inside the Close-now card on `/trades/<ulid>`. Set deterministic hands-off rules — the position monitor evaluates them every minute and publishes a closure the instant any fires:
+  - **Loss in $ ≤ −$X** (e.g. -50.00 USD)
+  - **Loss % ≤ −X%** (e.g. -4%)
+  - **Trailing peak drawdown** ≤ -X% from the best unrealized PnL the position touched (Redis-tracked)
+  - **Close after N days** from the rule-set time
+  - **Loss within window** — close if PnL drops Y% over the last N days (walks `trade:samples:<ulid>`)
+  - Saved on `trade_ledger.raw_bybit_response.auto_close_rules`; `Clear all` button wipes them. New POST `/trades/<ulid>/auto_rules`.
+- **Symbol detail page — entry/exit markers on the chart + total realized.** `/positions/<SYMBOL>` chart now overlays one annotation point per open or closed trade: `↑ LONG 1.00 ($750)` / `↓ SHORT 0.50 ($375)` for entries, `× exit +5.74` for closes, color-coded by side / PnL. Side rail adds **Realized (all time)** ($, count) and a bolder **Total on this symbol** = realized + unrealized.
+- **Positions page — Open / Closed split.** Three pills above the table (🟢 Open / ✓ Closed / All) with live counts; click to filter. Choice persists in `localStorage` (defaults to **Open**). Works alongside the existing Group-by / Sort-by controls.
+- **🔔 Bell icon is now a clear emoji** instead of a thin SVG outline that some browsers rendered nearly invisible. Wrapped in a circular hover target so the tap area is consistent with the avatar pill next to it.
+
 ## 2.24.123 — 2026-05-29
 - **Trade detail — % deltas next to the dollar figures.** On `/trades/<ulid>` the summary header now shows:
   - **Notional at close** $X · `±Y.YY%` — price drift from entry to exit (sign-agnostic; just the % the underlying moved). Green if up / red if down.

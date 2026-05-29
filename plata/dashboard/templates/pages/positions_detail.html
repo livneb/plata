@@ -33,6 +33,19 @@
           {% if card.unrealized > 0 %}+{% endif %}${{ '%.2f' % card.unrealized }}
         </dd>
       </div>
+      <div class="flex justify-between" title="Sum of net_pnl across every closed trade ever on this symbol.">
+        <dt class="text-gray-500">Realized (all time, {{ total_closed_count }} closed)</dt>
+        <dd class="font-mono font-semibold {% if realized_total > 0 %}text-green-500{% elif realized_total < 0 %}text-red-500{% endif %}">
+          {% if realized_total > 0 %}+{% endif %}${{ '%.2f' % realized_total }}
+        </dd>
+      </div>
+      <div class="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-1.5 mt-1.5" title="Total = realized + unrealized.">
+        <dt class="text-gray-500 font-semibold">Total on this symbol</dt>
+        {% set sym_total = realized_total + card.unrealized %}
+        <dd class="font-mono font-semibold {% if sym_total > 0 %}text-green-500{% elif sym_total < 0 %}text-red-500{% endif %}">
+          {% if sym_total > 0 %}+{% endif %}${{ '%.2f' % sym_total }}
+        </dd>
+      </div>
     </dl>
 
     <h2 class="text-xs uppercase text-gray-500 mt-4 mb-2">Open trades on this symbol</h2>
@@ -65,8 +78,34 @@
     }
     const first = data[0].y, last = data[data.length - 1].y;
     const up = last >= first;
+    // Build entry/exit annotations from the markers list. Each marker is
+    // {x: iso, y: price, kind: open|close, side, qty, notional, net_pnl}.
+    const markers = {{ markers | tojson }};
+    const winStart = new Date(data[0].x).getTime();
+    const winEnd   = new Date(data[data.length-1].x).getTime();
+    const pointAnnos = [];
+    markers.forEach(m => {
+      if (!m.x || !m.y) return;
+      const ts = new Date(m.x).getTime();
+      if (isNaN(ts) || ts < winStart || ts > winEnd) return;  // outside chart window
+      const sideLong = (m.side || '').toLowerCase() === 'long';
+      const isOpen = m.kind === 'open';
+      const color = isOpen ? (sideLong ? '#10b981' : '#ef4444')
+                            : (m.net_pnl != null && m.net_pnl >= 0 ? '#10b981' : '#ef4444');
+      const arrow = isOpen ? (sideLong ? '↑' : '↓') : '×';
+      const labelText = isOpen
+        ? `${arrow} ${(m.side||'').toUpperCase()} ${m.qty.toFixed(2)} ($${m.notional.toFixed(0)})`
+        : `× exit ${m.net_pnl != null ? (m.net_pnl >= 0 ? '+' : '') + m.net_pnl.toFixed(2) : ''}`;
+      pointAnnos.push({
+        x: ts, y: m.y,
+        marker: { size: isOpen ? 6 : 5, fillColor: color, strokeColor: '#fff', strokeWidth: 1.5, shape: isOpen ? 'circle' : 'square' },
+        label: { borderColor: color, offsetY: isOpen ? 0 : 20,
+                  style: { color: '#fff', background: color, fontSize: '9px', padding: { left: 4, right: 4, top: 1, bottom: 1 } },
+                  text: labelText },
+      });
+    });
     const chart = new ApexCharts(el, {
-      chart: { type: 'area', height: 280, toolbar: { show: false }, animations: { enabled: false }, fontFamily: 'Inter, sans-serif' },
+      chart: { type: 'area', height: 320, toolbar: { show: false }, animations: { enabled: false }, fontFamily: 'Inter, sans-serif' },
       stroke: { curve: 'smooth', width: 2 },
       series: [{ name: '{{ card.symbol }}', data: data }],
       colors: [up ? '#10b981' : '#ef4444'],
@@ -75,6 +114,7 @@
       yaxis: { labels: { formatter: (v) => v.toFixed(4), style: { fontSize: '10px' } } },
       tooltip: { x: { format: 'HH:mm dd MMM' } },
       grid: { borderColor: 'rgba(128,128,128,0.15)' },
+      annotations: { points: pointAnnos },
     });
     chart.render();
     // Refresh every 30s without a full page reload.

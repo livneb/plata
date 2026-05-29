@@ -301,6 +301,48 @@ async def manual_sl_tp(trade_ulid: str, request: Request):
     return RedirectResponse(url=f"/trades/{trade_ulid}", status_code=303)
 
 
+@router.post("/{trade_ulid}/auto_rules")
+async def manual_auto_rules(trade_ulid: str, request: Request, clear: int = 0):
+    """Save deterministic auto-close rules for an open position. Position
+    monitor reads them every minute. Empty fields disable the rule.
+    Pass ?clear=1 to wipe all rules at once."""
+    from datetime import datetime, timezone
+    from fastapi.responses import JSONResponse
+    form = await request.form()
+    rules: dict = {}
+    if not clear:
+        # Numeric fields — store as floats; skip blank/invalid.
+        for k in ("max_loss_usd", "max_loss_pct", "trailing_peak_pct",
+                  "close_after_days", "rolling_loss_pct", "rolling_loss_days"):
+            v = (form.get(k) or "").strip()
+            if not v:
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if f <= 0:
+                continue
+            rules[k] = f
+    async with session_scope() as session:
+        trade = (await session.execute(
+            select(TradeLedger).where(TradeLedger.trade_ulid == trade_ulid)
+        )).scalar_one_or_none()
+        if not trade or trade.exit_price is not None:
+            return JSONResponse({"ok": False, "reason": "not_open"}, status_code=400)
+        raw = dict(trade.raw_bybit_response or {})
+        if rules:
+            raw["auto_close_rules"] = rules
+            # Capture the rule-setting moment so we can compute "rolling N-day"
+            # deltas without rescanning every sample.
+            raw["auto_close_rules_set_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            raw.pop("auto_close_rules", None)
+            raw.pop("auto_close_rules_set_at", None)
+        trade.raw_bybit_response = raw
+    return RedirectResponse(url=f"/trades/{trade_ulid}", status_code=303)
+
+
 @router.post("/{trade_ulid}/note")
 async def manual_note(trade_ulid: str, request: Request):
     """Append a free-text note to the trade's raw_bybit_response JSONB under
@@ -432,6 +474,32 @@ async def detail(request: Request, trade_ulid: str):
                 event_doc = await redis.json().get(event_key(triggering))
                 if isinstance(event_doc, dict):
                     event_doc.pop("embedding", None)
+    # Live price + unrealized PnL for open positions, so the summary shows
+    # "Current value" / "Unrealized PnL" instead of "—" placeholders.
+    live: dict = {}
+    if trade and trade.exit_price is None:
+        try:
+            redis = get_redis()
+            sym = await redis.hgetall(f"symbol:latest:{trade.symbol}") or {}
+            price = float(sym.get("price") or 0) or None
+            if price is None:
+                tl = await redis.hgetall(f"trade:latest:{trade.trade_ulid}") or {}
+                if tl.get("price"):
+                    price = float(tl["price"])
+            entry = float(trade.entry_price or 0)
+            qty = float(trade.qty or 0)
+            if price and entry > 0 and qty > 0:
+                sign = 1.0 if (trade.side or "").lower() == "long" else -1.0
+                live = {
+                    "price": price,
+                    "ts": sym.get("ts"),
+                    "notional_now": round(qty * price, 4),
+                    "unrealized_pnl": round(sign * (price - entry) * qty, 4),
+                    "pnl_pct": round(sign * (price - entry) / entry * 100.0, 3),
+                    "price_pct": round((price - entry) / entry * 100.0, 3),
+                }
+        except Exception:  # noqa: BLE001
+            pass
     # Position monitor health snapshot, if any
     health: dict = {}
     suggested_adjustment_ulid: str | None = None
@@ -465,5 +533,6 @@ async def detail(request: Request, trade_ulid: str):
             "audits": audits,
             "health": health,
             "suggested_adjustment_ulid": suggested_adjustment_ulid,
+            "live": live,
         },
     )

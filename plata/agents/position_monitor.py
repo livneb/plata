@@ -227,6 +227,84 @@ class PositionMonitor(BaseAgent):
         qty = float(trade.qty or 0)
         side_sign = 1.0 if (trade.side or "").lower() == "long" else -1.0
 
+        # --- 0) Per-trade auto-close rules (set by user on trade detail) ----
+        # These run BEFORE SL/TP because they're more user-specific and live
+        # on `raw_bybit_response.auto_close_rules`. Each is a dollar / percent
+        # / time threshold; first one that matches publishes a manual closure.
+        raw_resp = trade.raw_bybit_response or {}
+        rules = raw_resp.get("auto_close_rules") or {}
+        if cur_price and rules and qty > 0 and entry > 0:
+            unr = side_sign * (cur_price - entry) * qty
+            unr_pct = side_sign * (cur_price - entry) / entry * 100.0
+            triggered_rule: str | None = None
+            # max_loss_usd — "close when unrealized PnL ≤ −$X"
+            mlu = rules.get("max_loss_usd")
+            if mlu and unr <= -float(mlu):
+                triggered_rule = f"max_loss_usd:{mlu}"
+            # max_loss_pct — "close when PnL% ≤ −X%"
+            if not triggered_rule and rules.get("max_loss_pct"):
+                mlp = float(rules["max_loss_pct"])
+                if unr_pct <= -mlp:
+                    triggered_rule = f"max_loss_pct:{mlp}"
+            # close_after_days — "close N days after the rule was set"
+            if not triggered_rule and rules.get("close_after_days"):
+                set_at_iso = raw_resp.get("auto_close_rules_set_at")
+                if set_at_iso:
+                    try:
+                        set_at = datetime.fromisoformat(set_at_iso)
+                        days = float(rules["close_after_days"])
+                        if (now - set_at).total_seconds() >= days * 86400:
+                            triggered_rule = f"close_after_days:{days}"
+                    except Exception:  # noqa: BLE001
+                        pass
+            # trailing_peak_pct — drawdown from the best PnL we've seen.
+            # Cheap implementation: track best unr in a Redis hash.
+            if not triggered_rule and rules.get("trailing_peak_pct"):
+                try:
+                    tk = f"trade:peak_unr:{trade.trade_ulid}"
+                    peak_raw = await redis.get(tk)
+                    peak = float(peak_raw) if peak_raw else unr
+                    if unr > peak:
+                        peak = unr
+                        await redis.set(tk, peak, ex=14 * 86400)
+                    drop_pct = (peak - unr) / max(abs(peak), 1e-9) * 100.0 if peak > 0 else 0.0
+                    tpp = float(rules["trailing_peak_pct"])
+                    if peak > 0 and drop_pct >= tpp:
+                        triggered_rule = f"trailing_peak_pct:{tpp}"
+                except Exception:  # noqa: BLE001
+                    pass
+            # rolling_loss_pct over rolling_loss_days — PnL drop over a window.
+            if (not triggered_rule and rules.get("rolling_loss_pct")
+                  and rules.get("rolling_loss_days")):
+                try:
+                    rlp = float(rules["rolling_loss_pct"])
+                    rld = float(rules["rolling_loss_days"])
+                    # Pull recent samples; trade:samples:<ulid> is newest-first
+                    # cap-limited list (see trade_sampler).
+                    raw_samples = await redis.lrange(
+                        f"trade:samples:{trade.trade_ulid}", 0, 2000)
+                    cutoff = now - timedelta(days=rld)
+                    past_pct = None
+                    # Walk backwards (oldest end) until we find a sample at-or-before cutoff.
+                    for line in raw_samples[::-1]:
+                        try:
+                            obj = json.loads(line)
+                            ts = datetime.fromisoformat(obj.get("ts"))
+                            if ts >= cutoff:
+                                past_pct = float(obj.get("pct") or 0)
+                                break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    if past_pct is not None and (past_pct - unr_pct) >= rlp:
+                        triggered_rule = f"rolling_loss:{rlp}%/{rld}d"
+                except Exception:  # noqa: BLE001
+                    pass
+            if triggered_rule:
+                self.log.info("auto_close_rule_triggered",
+                              trade=trade.trade_ulid, rule=triggered_rule)
+                await self._publish_closure(trade, cur_price, CloseReason.MANUAL)
+                return
+
         # --- 1) SL / TP hit ---------------------------------------------------
         if cur_price and self._b(cfg, "monitor_auto_close_sl_tp", True):
             sl = float(trade.sl_price) if trade.sl_price is not None else None

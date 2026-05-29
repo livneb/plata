@@ -30,6 +30,18 @@
         <div class="font-mono font-semibold">{% if trade.qty and trade.entry_price %}${{ '{:,.2f}'.format((trade.qty | float) * (trade.entry_price | float)) }}{% else %}—{% endif %}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Opened</div><div><time data-utc="{{ trade.opened_at.isoformat() }}">{{ trade.opened_at.strftime('%Y-%m-%d %H:%M') }}</time></div></div>
       <div><div class="text-[10px] uppercase text-gray-500">SL{{ help_icon('sl') }} / TP{{ help_icon('tp') }}</div><div>{{ trade.sl_price or '—' }} / {{ trade.tp_price or '—' }}</div></div>
+      {# When open: show LIVE current price (replaces "Exit") and live notional (replaces "Notional at close") #}
+      {% if not trade.closed_at and live.price %}
+      <div><div class="text-[10px] uppercase text-gray-500" title="Live mark-to-market price from the symbol watch (5-min cadence).">Current price <span class="text-[9px] text-emerald-500 animate-pulse">●</span></div>
+        <div class="font-mono font-semibold" id="current-price">{{ '%.4f' % live.price }}
+          <span class="ml-1 text-[10px] {% if live.price_pct > 0 %}text-green-500{% elif live.price_pct < 0 %}text-red-500{% else %}text-gray-400{% endif %}"
+                title="(current − entry) / entry × 100% — sign-agnostic price drift.">
+            {% if live.price_pct > 0 %}+{% endif %}{{ '%.2f' % live.price_pct }}%
+          </span>
+        </div></div>
+      <div><div class="text-[10px] uppercase text-gray-500" title="Current value of the position = qty × current price (USD). Updates with each sampler tick.">Notional now</div>
+        <div class="font-mono" id="notional-now">${{ '{:,.2f}'.format(live.notional_now) }}</div></div>
+      {% else %}
       <div><div class="text-[10px] uppercase text-gray-500">Exit</div><div>{{ trade.exit_price or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500" title="Exit notional = qty × exit price (USD). What the position was worth at close. The Δ% next to it is the change vs Notional invested — direction is sign-agnostic (just the price drift).">Notional at close</div>
         <div class="font-mono">
@@ -44,6 +56,20 @@
             {% endif %}
           {% else %}—{% endif %}
         </div></div>
+      {% endif %}
+      {# Unrealized (open) or Net (closed) PnL — same cell, label flips #}
+      {% if not trade.closed_at and live.price %}
+      <div><div class="text-[10px] uppercase text-gray-500" title="Unrealized PnL — what you'd realise if you closed at the current price. Sign reflects side (long: positive when price up; short: positive when price down). Updates with sampler.">Unrealized PnL <span class="text-[9px] text-emerald-500 animate-pulse">●</span></div>
+        <div class="font-mono text-base">
+          <span id="unreal-pnl" class="{% if live.unrealized_pnl > 0 %}text-green-500{% elif live.unrealized_pnl < 0 %}text-red-500{% else %}text-gray-400{% endif %} font-semibold">
+            {% if live.unrealized_pnl > 0 %}+{% endif %}${{ '{:,.2f}'.format(live.unrealized_pnl) }}
+          </span>
+          <span id="unreal-pnl-pct" class="ml-1 text-[10px] {% if live.pnl_pct > 0 %}text-green-500{% elif live.pnl_pct < 0 %}text-red-500{% else %}text-gray-400{% endif %}"
+                title="Unrealized PnL as % of Notional invested.">
+            ({% if live.pnl_pct > 0 %}+{% endif %}{{ '%.2f' % live.pnl_pct }}%)
+          </span>
+        </div></div>
+      {% else %}
       <div><div class="text-[10px] uppercase text-gray-500" title="Net PnL and PnL % of Notional invested. Sign reflects side (long: positive = up move; short: positive = down move). This is the PnL view that matches your account balance.">Net PnL{{ help_icon('net_pnl') }}</div>
         <div class="font-mono">
           {% if trade.net_pnl is not none %}
@@ -87,6 +113,60 @@
           Close at market
         </button>
         <span id="manual-close-status" class="ml-2 text-[11px] text-gray-500"></span>
+        {% set existing_rules = (trade.raw_bybit_response or {}).get('auto_close_rules') or {} %}
+        <div class="mt-3 pt-3 border-t border-red-200 dark:border-red-800">
+          <div class="text-[11px] font-semibold text-red-700 dark:text-red-300 mb-1">⚖ Auto-close rules</div>
+          <p class="text-[10px] text-gray-600 dark:text-gray-300 mb-2">
+            Hands-off rules the position monitor checks every minute. Fires a closure the moment any rule is true.
+            Leave any field blank to disable that rule. (SL/TP price triggers are in the amber card →)
+          </p>
+          <form method="post" action="/trades/{{ trade.trade_ulid }}/auto_rules" class="space-y-1.5">
+            <label class="flex items-center gap-2 text-[11px]">
+              <span class="w-28 text-gray-500">Loss in $ ≤</span>
+              <span class="text-gray-400">−$</span>
+              <input name="max_loss_usd" type="text" inputmode="decimal" value="{{ existing_rules.max_loss_usd or '' }}" placeholder="50.00"
+                     class="w-24 p-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+              <span class="text-gray-400 text-[10px]">close if unrealized loss exceeds this absolute $</span>
+            </label>
+            <label class="flex items-center gap-2 text-[11px]">
+              <span class="w-28 text-gray-500">Loss % ≤</span>
+              <span class="text-gray-400">−</span>
+              <input name="max_loss_pct" type="text" inputmode="decimal" value="{{ existing_rules.max_loss_pct or '' }}" placeholder="4.0"
+                     class="w-24 p-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+              <span class="text-gray-400 text-[10px]">% of notional invested · e.g. <code>4</code> closes at −4%</span>
+            </label>
+            <label class="flex items-center gap-2 text-[11px]">
+              <span class="w-28 text-gray-500">Trailing peak ≤</span>
+              <span class="text-gray-400">−</span>
+              <input name="trailing_peak_pct" type="text" inputmode="decimal" value="{{ existing_rules.trailing_peak_pct or '' }}" placeholder="2.0"
+                     class="w-24 p-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+              <span class="text-gray-400 text-[10px]">% drawdown from the best PnL the position has touched</span>
+            </label>
+            <label class="flex items-center gap-2 text-[11px]">
+              <span class="w-28 text-gray-500">Close after</span>
+              <input name="close_after_days" type="text" inputmode="decimal" value="{{ existing_rules.close_after_days or '' }}" placeholder="3"
+                     class="w-24 p-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+              <span class="text-gray-400 text-[10px]">days from now (≈ {{ existing_rules.close_after_days or '?' }} day timeout)</span>
+            </label>
+            <label class="flex items-center gap-2 text-[11px]">
+              <span class="w-28 text-gray-500">Loss within</span>
+              <input name="rolling_loss_pct" type="text" inputmode="decimal" value="{{ existing_rules.rolling_loss_pct or '' }}" placeholder="4.0"
+                     class="w-16 p-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+              <span class="text-gray-400">% in</span>
+              <input name="rolling_loss_days" type="text" inputmode="decimal" value="{{ existing_rules.rolling_loss_days or '' }}" placeholder="2"
+                     class="w-12 p-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />
+              <span class="text-gray-400 text-[10px]">days · close if PnL drops this % over the window</span>
+            </label>
+            <div class="flex items-center gap-2 mt-2">
+              <button type="submit" class="px-3 py-1 text-[11px] rounded text-white bg-red-700 hover:bg-red-800">Save rules</button>
+              {% if existing_rules %}
+              <button type="submit" formaction="/trades/{{ trade.trade_ulid }}/auto_rules?clear=1"
+                      class="px-3 py-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">Clear all</button>
+              <span class="text-[10px] text-emerald-600 dark:text-emerald-400">Rules active</span>
+              {% endif %}
+            </div>
+          </form>
+        </div>
       </form>
 
       <!-- Adjust SL / TP -->
