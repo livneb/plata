@@ -24,6 +24,7 @@ from plata.dashboard.routes import (
     graph,
     historian,
     history,
+    news as news_route,
     positions,
     proposals,
     push as push_route,
@@ -679,6 +680,7 @@ def create_app() -> FastAPI:
     app.include_router(history.router)
     app.include_router(graph.router)
     app.include_router(historian.router)
+    app.include_router(news_route.router)
     app.include_router(dlq.router)
     app.include_router(settings_route.router)
     app.include_router(tuning_route.router)
