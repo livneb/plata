@@ -89,6 +89,7 @@
           {% else %}—{% endif %}
         </div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Closed</div><div>{% if trade.closed_at %}<time data-utc="{{ trade.closed_at.isoformat() }}">{{ trade.closed_at | time_ago }}</time>{% else %}—{% endif %}</div></div>
+      {% endif %}
     </div>
   </section>
 
