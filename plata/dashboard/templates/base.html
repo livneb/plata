@@ -175,10 +175,8 @@
           <svg id="theme-icon-dark" class="w-5 h-5 dark:hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/></svg>
         </button>
         {% if current_user %}
-        <button id="push-toggle" type="button" title="Enable push notifications"
-                class="text-xs text-gray-500 hover:text-gray-300 hidden sm:inline">🔔</button>
+        <!-- 🔔 Notifications + activity bell (replaces the old push-toggle button — push opt-in is now inside the bell dropdown). -->
         <!-- Account dropdown (Flowbite). Click the avatar to open. -->
-        <!-- 🔔 Notifications + activity bell -->
         <div class="relative">
           <button type="button" id="bell-btn"
                   class="relative inline-flex items-center justify-center w-9 h-9 rounded-full text-lg leading-none text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -196,6 +194,12 @@
             </div>
             <ul id="bell-list-notif" class="max-h-[60vh] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 text-xs"></ul>
             <ul id="bell-list-act"   class="hidden max-h-[60vh] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 text-xs"></ul>
+            <!-- Push opt-in footer — enables iOS PWA / Chrome web pushes so
+                 notifications arrive even when the tab is closed. -->
+            <div class="border-t border-gray-200 dark:border-gray-700 p-2 text-[11px] flex items-center justify-between bg-gray-50 dark:bg-gray-900/40 rounded-b-lg">
+              <span class="text-gray-500">📡 Push delivery</span>
+              <button id="push-toggle" type="button" class="text-blue-600 hover:underline">Enable on this device</button>
+            </div>
           </div>
         </div>
         <button type="button" id="account-btn" data-dropdown-toggle="account-dropdown"

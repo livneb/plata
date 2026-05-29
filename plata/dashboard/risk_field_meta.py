@@ -99,6 +99,12 @@ FIELDS: dict[str, dict] = {
         "type": "bool",
         "help": "If you're already LONG SPY, reject a new SHORT SPY proposal (and vice versa). Prevents paying margin on two opposite sides.",
     },
+    "guard_one_per_symbol_side": {
+        "label": "One position per (symbol, side)",
+        "group": "guards",
+        "type": "bool",
+        "help": "When ON, the strategist can't open a second long (or second short) on a symbol you already hold. New events on held symbols flow to the position monitor's event loop instead, which decides scale_up / scale_down / close. Recommended ON — without it, two different events triggering the same thesis on GLD open two duplicate positions with inconsistent sizing.",
+    },
     "guard_dedup_event_ulid": {
         "label": "One trade per event",
         "group": "guards",

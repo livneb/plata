@@ -9,66 +9,99 @@
         Drag · scroll to zoom · click a node for details · click an event to focus its neighborhood · <span class="font-mono">Esc</span> to go back.
       </p>
     </div>
-    <div class="flex items-center gap-2 text-xs flex-wrap">
-      <label class="text-gray-500">events:</label>
-      <select id="limit-select" class="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-1">
-        <option value="20">20</option>
-        <option value="40" selected>40</option>
-        <option value="80">80</option>
-        <option value="150">150</option>
-        <option value="300">300</option>
-        <option value="500">500</option>
-        <option value="1000">1000</option>
-      </select>
-      <label class="text-gray-500 ml-2">layout:</label>
-      <select id="layout-select" class="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-1">
-        <option value="cose" selected>Constellation</option>
-        <option value="concentric">Hub &amp; spoke</option>
-        <option value="breadthfirst">Tree</option>
-        <option value="grid">Grid</option>
-        <option value="circle">Circle</option>
-      </select>
-      <label class="text-gray-500 ml-2" title="Hides nodes with composite weight below this threshold. Weight blends connection count × event sentiment × recency.">min weight:</label>
-      <input id="min-degree" type="range" min="0" max="10" step="0.5" value="0.5" class="w-20 align-middle" />
-      <span id="min-degree-val" class="text-gray-400 font-mono">0.5</span>
-      <button id="reload-btn" class="px-3 py-1 rounded text-white bg-blue-700 hover:bg-blue-800">Reload</button>
+    <button id="clear-focus" class="hidden px-3 py-1 rounded border border-gray-300 dark:border-gray-600 text-xs">← Back</button>
+  </div>
+
+  <!-- Flowbite advanced-table style toolbar — single bordered card holds
+       every control. Search-style entity filter on the left, two Flowbite
+       dropdown buttons (Show / Categories) in the middle, layout/limit/min
+       selectors + actions on the right. -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+    <!-- Row 1 — search + filter dropdowns + actions -->
+    <div class="flex flex-wrap items-center gap-2 text-xs">
+      <!-- Pin search: live filter the entity-chip list below -->
+      <div class="relative flex-1 min-w-[220px]">
+        <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+          <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-3.5-3.5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>
+        </div>
+        <input id="entity-search" type="text" placeholder="Filter pin chips by name (Israel, BTC, Musk…)"
+               class="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-blue-500" />
+      </div>
+
+      <!-- Show: types (events / countries / people / …) — Flowbite dropdown w/ checkboxes -->
+      <button id="dd-types-btn" type="button" data-dropdown-toggle="dd-types"
+              class="inline-flex items-center px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+        <svg class="w-3.5 h-3.5 mr-1.5 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path d="M2.628 1.601C5.028 1.206 7.49 1 10 1s4.973.206 7.372.601a.75.75 0 0 1 .628.74v2.288a2.25 2.25 0 0 1-.659 1.59l-4.682 4.683a2.25 2.25 0 0 0-.659 1.59v3.037c0 .684-.31 1.33-.844 1.757l-1.937 1.55A.75.75 0 0 1 8 18.25v-5.757a2.25 2.25 0 0 0-.659-1.591L2.659 6.22A2.25 2.25 0 0 1 2 4.629V2.34a.75.75 0 0 1 .628-.74Z"/></svg>
+        Show <span id="dd-types-count" class="ml-1 inline-flex items-center justify-center w-4 h-4 text-[9px] rounded-full bg-blue-100 text-blue-800">7</span>
+        <svg class="w-2.5 h-2.5 ml-1.5" fill="none" viewBox="0 0 10 6"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4"/></svg>
+      </button>
+      <div id="dd-types" class="z-30 hidden p-3 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-56">
+        <ul class="space-y-2 text-sm">
+          {% for k, label in [
+            ('event','📰 events'),('country','🌍 countries'),('person','👤 people'),
+            ('company','🏢 companies'),('org','🏛️ orgs'),('asset','💰 assets'),
+            ('ticker','💹 tickers')] %}
+          <li class="flex items-center">
+            <input type="checkbox" class="filter-type w-4 h-4 rounded" data-type="{{ k }}" id="ft-{{ k }}" checked />
+            <label for="ft-{{ k }}" class="ml-2 cursor-pointer">{{ label }}</label>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <!-- Categories dropdown -->
+      <button id="dd-cats-btn" type="button" data-dropdown-toggle="dd-cats"
+              class="inline-flex items-center px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+        🏷️ Categories <span id="dd-cats-count" class="ml-1 inline-flex items-center justify-center w-4 h-4 text-[9px] rounded-full bg-blue-100 text-blue-800">7</span>
+        <svg class="w-2.5 h-2.5 ml-1.5" fill="none" viewBox="0 0 10 6"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4"/></svg>
+      </button>
+      <div id="dd-cats" class="z-30 hidden p-3 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 w-56">
+        <ul class="space-y-2 text-sm">
+          {% for k in ['crypto','macro','regulatory','company','geopolitics','tech','other'] %}
+          <li class="flex items-center">
+            <input type="checkbox" class="filter-cat w-4 h-4 rounded" data-cat="{{ k }}" id="fc-{{ k }}" checked />
+            <label for="fc-{{ k }}" class="ml-2 cursor-pointer">{{ k }}</label>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <button id="reload-btn" class="px-4 py-2 rounded-lg text-white bg-blue-700 hover:bg-blue-800 font-medium">Reload</button>
       <button id="normalize-btn" title="Merge duplicate entity nodes (US/USA, IL/ISR, …)"
-              class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">🧹 Dedup</button>
-      <button id="clear-focus" class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hidden">← Back</button>
+              class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">🧹 Dedup</button>
     </div>
-  </div>
 
-  <!-- Type-filter chips -->
-  <div class="flex flex-wrap items-center gap-2 text-xs px-1">
-    <span class="text-gray-500">show:</span>
-    {% for k, label in [
-      ('event','📰 events'),('country','🌍 countries'),('person','👤 people'),
-      ('company','🏢 companies'),('org','🏛️ orgs'),('asset','💰 assets'),
-      ('ticker','💹 tickers')] %}
-    <label class="inline-flex items-center gap-1 cursor-pointer select-none">
-      <input type="checkbox" class="filter-type" data-type="{{ k }}" checked />
-      <span class="px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600">{{ label }}</span>
-    </label>
-    {% endfor %}
-    <span class="text-gray-500 ml-3">categories:</span>
-    {% for k in ['crypto','macro','regulatory','company','geopolitics','tech','other'] %}
-    <label class="inline-flex items-center gap-1 cursor-pointer select-none">
-      <input type="checkbox" class="filter-cat" data-cat="{{ k }}" checked />
-      <span class="px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-[10px]">{{ k }}</span>
-    </label>
-    {% endfor %}
-  </div>
+    <!-- Row 2 — layout / events count / min-weight -->
+    <div class="flex flex-wrap items-center gap-3 text-xs pt-1 border-t border-gray-100 dark:border-gray-700">
+      <label class="flex items-center gap-1.5">
+        <span class="text-gray-500">Events</span>
+        <select id="limit-select" class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+          <option value="20">20</option><option value="40" selected>40</option><option value="80">80</option>
+          <option value="150">150</option><option value="300">300</option><option value="500">500</option><option value="1000">1000</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-1.5">
+        <span class="text-gray-500">Layout</span>
+        <select id="layout-select" class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+          <option value="cose" selected>Constellation</option><option value="concentric">Hub &amp; spoke</option>
+          <option value="breadthfirst">Tree</option><option value="grid">Grid</option><option value="circle">Circle</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-1.5" title="Hides nodes with composite weight below this threshold. Weight blends connection count × event sentiment × recency.">
+        <span class="text-gray-500">Min weight</span>
+        <input id="min-degree" type="range" min="0" max="10" step="0.5" value="0.5" class="w-24" />
+        <span id="min-degree-val" class="text-gray-400 font-mono w-8 text-right">0.5</span>
+      </label>
+    </div>
 
-  <!-- Heavy-entity chips, populated by JS after data loads. Each chip is the
-       NAME of a high-degree entity (Israel, USA, Russia, Bitcoin, Elon Musk…).
-       Multi-select OR: clicking several shows everything connected to ANY of them.
-       Weight today = edge count (more connections → heavier → shown). -->
-  <div id="entity-chips-bar" class="hidden flex-wrap items-center gap-2 text-xs px-1">
-    <span class="text-gray-500">pin:</span>
-    <span id="entity-chips-list" class="flex flex-wrap gap-1"></span>
-    <button id="entity-chips-clear" type="button" class="hidden px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">clear</button>
-    <span class="text-gray-400 text-[10px] ml-2"
-          title="Weight per node = Σ edges × (0.2 + 0.8·event sentiment_magnitude) × 0.5^(age_days / 7)&#10;&#10;Translation: a node connected to one explosive event yesterday outscores a node connected to five dull events from a month ago.">heaviest entities · multi-select · weight = edges × sentiment × recency ⓘ</span>
+    <!-- Row 3 — heavy-entity pin chips (populated by JS) -->
+    <div id="entity-chips-bar" class="hidden flex-wrap items-center gap-2 text-xs pt-1 border-t border-gray-100 dark:border-gray-700">
+      <span class="text-[10px] font-medium uppercase text-gray-500 mr-1">Pin</span>
+      <span id="entity-chips-list" class="flex flex-wrap gap-1"></span>
+      <button id="entity-chips-clear" type="button" class="hidden px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">clear</button>
+      <span class="text-gray-400 text-[10px] ml-auto"
+            title="Weight per node = Σ edges × (0.2 + 0.8·event sentiment_magnitude) × 0.5^(age_days / 7)">heaviest entities · multi-select · weight = edges × sentiment × recency ⓘ</span>
+    </div>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">

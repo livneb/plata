@@ -289,10 +289,17 @@ class LLMClient:
         schema: dict[str, Any],
         schema_name: str,
         temperature: float = 0.1,
-        max_tokens: int = 2048,
+        max_tokens: int = 8192,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """JSON-schema-locked output. Strongest defense against prompt injection."""
+        """JSON-schema-locked output. Strongest defense against prompt injection.
+
+        Default max_tokens is generous (8192) so structured-output calls with
+        large schemas (e.g. historian's 10-event batches) don't get cut off
+        mid-string — that surfaced as `JSONDecodeError: Unterminated string`
+        in the historian. Caller can override with a smaller cap when the
+        schema is known to be small.
+        """
         response = await self.complete(
             messages=messages,
             response_format={
@@ -304,4 +311,19 @@ class LLMClient:
             metadata=metadata,
         )
         content = response.choices[0].message.content or "{}"
-        return json.loads(content)
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as exc:
+            # Truncated mid-string almost always means we hit max_tokens. Give
+            # the caller a usable error instead of a raw decode trace, and
+            # include the finish_reason + content tail so it's diagnosable.
+            finish = "?"
+            try:
+                finish = response.choices[0].finish_reason or "?"
+            except Exception:  # noqa: BLE001
+                pass
+            tail = content[-200:].replace("\n", " ")
+            raise RuntimeError(
+                f"LLM structured response was not valid JSON "
+                f"(finish_reason={finish}, tail={tail!r}, original={exc.msg})"
+            ) from exc

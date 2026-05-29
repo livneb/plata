@@ -29,6 +29,7 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     "auto_approve_threshold_usd": "1000",
     # Layer-1 guards (configurable; defaults are safe-but-permissive)
     "guard_block_opposing_side": "true",
+    "guard_one_per_symbol_side": "true",   # refuse duplicate (symbol, side) — monitor handles scale-up instead
     "guard_symbol_cooldown_min": "15",
     "guard_dedup_event_ulid": "true",
     "guard_min_conviction": "0.6",
@@ -153,6 +154,20 @@ class RiskManager(BaseAgent):
             proposal_side = str(proposal.side).lower()
             if any((t.get("side") or "").lower() != proposal_side for t in same_sym):
                 await self._reject(proposal, "opposing_side_open_on_symbol")
+                return
+
+        # One-per-(symbol, side): refuse to open a second long/short on a
+        # symbol you already hold. The position monitor's event-driven loop
+        # is the right place to react to new events on held symbols (it
+        # decides hold / scale_up / scale_down). Without this guard,
+        # different events on the same thesis open duplicate positions
+        # with inconsistent sizing.
+        if self._cfg_bool("guard_one_per_symbol_side", True):
+            same_sym_side = [t for t in open_trades
+                              if (t.get("symbol") or "").upper() == proposal.symbol.upper()
+                              and (t.get("side") or "").lower() == str(proposal.side).lower()]
+            if same_sym_side:
+                await self._reject(proposal, f"already_holding:{proposal.symbol}:{proposal.side}")
                 return
 
         # Per-symbol cooldown.

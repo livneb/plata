@@ -249,9 +249,56 @@ async def _lifespan(_app: FastAPI):
             await _asyncio.sleep(60)
     _watchdog_task = _asyncio.create_task(_health_watchdog(), name="health-watchdog")
     _app.state._health_watchdog = _watchdog_task
+
+    # Server-side push relay: subscribe to dashboard:events and, for
+    # actionable kinds, deliver a web push to every saved subscription
+    # (iOS PWA / Chrome). Browsers wake even when the tab is closed.
+    async def _push_relay() -> None:
+        from plata.core.bus import subscribe as _subscribe
+        from plata.dashboard.push import send_to_user
+        ACTIONABLE = {"proposal_pending", "adjustment_suggested", "system_state"}
+        try:
+            async for _channel, payload in _subscribe("dashboard:events"):
+                try:
+                    if not isinstance(payload, dict):
+                        continue
+                    kind = payload.get("kind")
+                    if kind not in ACTIONABLE:
+                        continue
+                    if kind == "system_state" and payload.get("state") != "HALTED":
+                        continue
+                    # Compose title/body/url per kind.
+                    if kind == "proposal_pending":
+                        title = "Plata · New proposal"
+                        body = f"{payload.get('symbol','?')} {(payload.get('side') or '').upper()} — awaiting your approval"
+                        url = "/proposals/?state=pending_hitl"
+                    elif kind == "adjustment_suggested":
+                        title = "Plata · Position adjustment"
+                        body = f"Monitor suggests {payload.get('action','adjustment')} on {payload.get('symbol','?')}"
+                        url = f"/proposals/?symbol={payload.get('symbol','')}#detail-{payload.get('ulid','')}"
+                    else:  # system_state == HALTED
+                        title = "Plata · System HALTED"
+                        body = "Trading is paused — tap to manage"
+                        url = "/agents/"
+                    # Fan out to every user with a saved subscription.
+                    async for sub_key in get_redis().scan_iter(match="push:sub:*", count=50):
+                        user_email = sub_key.split(":", 2)[-1]
+                        try:
+                            await send_to_user(user_email, title=title, body=body, url=url, tag=kind)
+                        except Exception as exc:  # noqa: BLE001
+                            _log.warning("push_relay_send_failed", user=user_email, error=str(exc)[:160])
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("push_relay_dispatch_failed", error=str(exc)[:160])
+        except _asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("push_relay_loop_died", error=str(exc)[:160])
+    _push_task = _asyncio.create_task(_push_relay(), name="push-relay")
+    _app.state._push_relay = _push_task
     yield
     _sweeper_task.cancel()
     _watchdog_task.cancel()
+    _push_task.cancel()
 
 
 def create_app() -> FastAPI:

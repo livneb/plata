@@ -2,6 +2,23 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.125 — 2026-05-29
+- **🐛 `guard_one_per_symbol_side`** — new risk guard (default ON). Rejects any new strategist proposal whose `(symbol, side)` already has an open trade. **Stops the recurring duplicate-GLD-longs problem.** New events on already-held symbols flow through the position monitor's event loop instead, which decides `scale_up / scale_down / close`. Toggle on `/settings/?tab=risk` → Guards. Rejection reason: `already_holding:<symbol>:<side>`.
+- **📲 Push notifications fire on actionable events.** New `_push_relay` background task in the dashboard subscribes to `dashboard:events` and fans out a web push (via existing pywebpush + VAPID) to every saved subscription whenever:
+  - `proposal_pending` — "Plata · New proposal · SPY SHORT — awaiting your approval"
+  - `adjustment_suggested` — "Plata · Position adjustment · monitor suggests close on GLD"
+  - `system_state == HALTED` — "Plata · System HALTED — tap to manage"
+  Works on iPhone (add Plata to home screen as a PWA, then enable from the bell dropdown) and Chrome (just enable). Pushes deep-link to the relevant page when tapped.
+- **🔔 Bell is the only notification icon now.** Removed the old greyed-out push-toggle 🔔 (sm:inline only, easy to confuse with the bell). Push opt-in moved into a footer at the bottom of the bell dropdown — "📡 Push delivery · Enable on this device".
+- **Graph filters rebuilt as Flowbite advanced-table style.** Single bordered card holds everything:
+  - Search input (with magnifying-glass icon) live-filters the entity pin chips.
+  - "Show" dropdown with checkboxes for node types (events / countries / people / ...).
+  - "Categories" dropdown for event categories.
+  - Sub-row with Layout / Events / Min weight selectors.
+  - Heaviest-entity pin chips on a third row, populated by JS.
+  - Reload + 🧹 Dedup as proper Flowbite buttons.
+- **🐛 Historian `JSONDecodeError: Unterminated string`.** LLM was hitting the default `max_tokens=2048` mid-output for 10-event batches. Bumped structured-output default to 8192 and added a wrapper that converts truncations into a clear `RuntimeError` with `finish_reason` + content tail (so callers can see "this got truncated" instead of a raw decode trace).
+
 ## 2.24.124 — 2026-05-29
 - **Trade detail — live unrealized PnL for OPEN positions.** The summary header used to show `—` for Exit / Notional at close / Net PnL on open trades; you'd only see PnL after they closed. Now: when the trade is still open, those three cells flip to **Current price** (mark-to-market from the symbol watch, with the price drift % next to it), **Notional now**, and a prominent **Unrealized PnL** ($ + %), all color-coded. Each carries a small pulsing 🟢 indicator that updates as the sampler ticks.
 - **Per-position auto-close rules card.** New section inside the Close-now card on `/trades/<ulid>`. Set deterministic hands-off rules — the position monitor evaluates them every minute and publishes a closure the instant any fires:
