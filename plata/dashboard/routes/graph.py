@@ -49,7 +49,8 @@ async def index(request: Request):
 
 @router.get("/data")
 async def graph_data(
-    limit: int = Query(40, ge=1, le=2000),
+    limit: str = Query("40", description="Integer 1..5000 or 'all' for the full set (capped at 5000)."),
+    order: str = Query("desc", description="'desc' = newest first (default), 'asc' = oldest first."),
     focus: str | None = None,
     since: int | None = Query(None, description="Only return events with ts_epoch >= since (unix s)."),
 ) -> JSONResponse:
@@ -65,6 +66,18 @@ async def graph_data(
     redis = get_redis()
     server_ts_epoch = int(__import__("time").time())
 
+    # Parse limit param: int or "all" (capped at 5000 to avoid OOM).
+    if str(limit).lower() == "all":
+        limit_int = 5000
+        is_all = True
+    else:
+        try:
+            limit_int = max(1, min(5000, int(limit)))
+        except (TypeError, ValueError):
+            limit_int = 40
+        is_all = False
+    newest_first = (order or "desc").lower() != "asc"
+
     event_keys: list[str] = []
     if focus:
         event_keys = [event_key(focus)]
@@ -72,7 +85,9 @@ async def graph_data(
         scanned = []
         async for k in redis.scan_iter(match="event:*", count=500):
             scanned.append(k)
-            if not since and len(scanned) >= limit * 4:
+            # Only short-circuit when we have a small bounded request; for "all"
+            # or oldest-first we need the full set to sort properly.
+            if not since and not is_all and newest_first and len(scanned) >= limit_int * 4:
                 break
         if scanned:
             pipe = redis.pipeline()
@@ -89,8 +104,8 @@ async def graph_data(
                 if since is not None and ts_int < int(since):
                     continue
                 paired.append((k, ts_int))
-            paired.sort(key=lambda kv: kv[1], reverse=True)
-            event_keys = [k for k, _ in paired[:limit]] if since is None else [k for k, _ in paired]
+            paired.sort(key=lambda kv: kv[1], reverse=newest_first)
+            event_keys = [k for k, _ in paired[:limit_int]] if since is None else [k for k, _ in paired]
 
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []

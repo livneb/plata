@@ -214,7 +214,7 @@
         </tr>
       <tr id="detail-{{ p.ulid }}" class="hidden border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
         <td colspan="8" class="px-6 py-4">
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+          <div data-translate-zone class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
             <!-- Re-submit chain — visible from BOTH sides -->
             {% if p.extras.children or p.extras.source_proposal_ulid %}
             <div class="lg:col-span-2 mb-2 p-2 rounded border border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/20 text-[11px]">
@@ -257,7 +257,7 @@
                   <a href="/graph/?focus={{ p.event_ulid }}" class="text-blue-500 hover:underline">↗ graph</a>
                 </div>
                 {% if p.event.summary %}
-                <p data-translate class="mt-2 whitespace-pre-wrap leading-relaxed text-gray-700 dark:text-gray-300">{{ p.event.summary }}</p>
+                <p data-translate-item class="mt-2 whitespace-pre-wrap leading-relaxed text-gray-700 dark:text-gray-300">{{ p.event.summary }}</p>
                 {% endif %}
               </div>
               {% elif p.event_ulid %}
@@ -266,14 +266,14 @@
               </div>
               {% endif %}
               <h3 class="text-[10px] uppercase text-gray-500 mb-1">Strategist reasoning</h3>
-              <p data-translate class="whitespace-pre-wrap leading-relaxed">{{ p.reasoning or '—' }}</p>
+              <p data-translate-item class="whitespace-pre-wrap leading-relaxed">{{ p.reasoning or '—' }}</p>
               {% if p.analogs %}
               <h3 class="text-[10px] uppercase text-gray-500 mt-3 mb-1">{{ p.analogs | length }} analog events (KNN)</h3>
               <ul class="space-y-1">
                 {% for a in p.analogs %}
                 <li class="flex items-start gap-2">
                   <span class="font-mono text-[10px] text-gray-400 mt-0.5">{{ '%.2f' % (a.similarity or 0) }}</span>
-                  <span data-translate class="flex-1">
+                  <span data-translate-item class="flex-1">
                     {{ a.summary or a.event_ulid or '—' }}
                     {% if a.price_impact %}<span class="text-[10px] text-gray-400 ml-1">· {{ a.price_impact | tojson }}</span>{% endif %}
                   </span>

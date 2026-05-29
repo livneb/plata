@@ -128,9 +128,20 @@ class Executor(BaseAgent):
                 # the trade lands in the ledger with a clear `regulatory_fallback`
                 # flag, surface a venue-wide warning, and don't DLQ the message.
                 msg = str(e) or repr(e)
+                low = msg.lower()
+                # Regulatory / geo-block / KYC signatures across venues:
+                # - Bybit retCode 10024 ("regulatory restrictions")
+                # - PermissionDenied class
+                # - CloudFront 403 from country block (ccxt mis-classifies as RateLimitExceeded)
+                # - explicit "regulatory" / "blocked" / "country" wording
                 is_regulatory = (
-                    "retCode" in msg and "10024" in msg
-                ) or "PermissionDenied" in type(e).__name__ or "regulatory" in msg.lower()
+                    ("retcode" in low and "10024" in low)
+                    or "PermissionDenied" in type(e).__name__
+                    or "regulatory" in low
+                    or "cloudfront" in low
+                    or ("blocked" in low and "country" in low)
+                    or ("403" in low and ("country" in low or "geo" in low or "blocked" in low))
+                )
                 # BadSymbol: venue rejected the symbol — same paper-fallback
                 # path, different label so the audit row says "wrong venue"
                 # not "regulatory". Means routing missed (e.g. stock symbol
