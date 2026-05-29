@@ -591,7 +591,7 @@
 <script>
   // Initialise Flowbite tabs manually so deep-links (?tab=risk) work even before the autoinit fires.
   (function () {
-    const tabs = ['controls', 'risk', 'account', 'env', 'api', 'tuning'];
+    const tabs = ['controls', 'risk', 'account', 'env', 'api', 'news'];
     const params = new URLSearchParams(location.search);
     const want = (params.get('tab') || 'controls').toLowerCase();
     const active = tabs.includes(want) ? want : 'controls';

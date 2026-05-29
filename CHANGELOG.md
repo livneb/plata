@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.131 — 2026-05-29
+- **🐛 News tab now actually opens.** v2.24.130 added the `📰 News` tab button + panel but the inline tab-activator JS still had a hard-coded allowlist (`['controls','risk','account','env','api','tuning']`) — clicking News did nothing because the new key wasn't in the list, and the panel stayed hidden so the page kept showing whatever default (Controls) was active. Also removed the stale `'tuning'` from the list since that tab moved to `/tuning/` in v2.24.130. Result: `/settings/?tab=news` and clicking the tab both open the editor (sources, GDELT query, subreddits, RSS feeds, Telegram channels, allow/blocklists, min-title-length).
+
 ## 2.24.130 — 2026-05-29
 - **📰 News tab on /settings/?tab=news** — editable from one place: enable/disable each source (GDELT, Reddit, CryptoPanic, RSS, Telegram channels), edit GDELT's boolean query, list of subreddits, list of RSS feeds (name | url, one per line), allowlist + blocklist keywords, minimum title length. All stored in Redis hash `news_config` and re-read on every poll — no restart needed.
 - **🪣 Content filter applied before publish.** Every signal is checked against the allowlist (must contain at least one of N keywords) and blocklist (drop if any match) and a min-title-length, BEFORE it reaches the LLM. Drops are counted by reason on the same tab. Stories like "woman upset with neighbor about fence" never get past `block_keywords` / `no_required_keyword` now.
