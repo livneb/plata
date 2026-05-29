@@ -77,7 +77,15 @@
         <span class="text-gray-500">Events</span>
         <select id="limit-select" class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
           <option value="20">20</option><option value="40" selected>40</option><option value="80">80</option>
-          <option value="150">150</option><option value="300">300</option><option value="500">500</option><option value="1000">1000</option>
+          <option value="150">150</option><option value="300">300</option><option value="500">500</option>
+          <option value="1000">1000</option><option value="all">All</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-1.5" title="newest = most-recent events first. Combined with limit (e.g. 100 newest) for fast loads.">
+        <span class="text-gray-500">Order</span>
+        <select id="order-select" class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+          <option value="desc" selected>Newest first</option>
+          <option value="asc">Oldest first</option>
         </select>
       </label>
       <label class="flex items-center gap-1.5">
@@ -167,6 +175,7 @@
     const cyEl = document.getElementById('cy');
     const detailEl = document.getElementById('detail');
     const limitSel = document.getElementById('limit-select');
+    const orderSel = document.getElementById('order-select');
     const layoutSel = document.getElementById('layout-select');
     const minDegreeInput = document.getElementById('min-degree');
     const minDegreeVal = document.getElementById('min-degree-val');
@@ -283,7 +292,7 @@
         // Background delta fetch.
         (async () => {
           try {
-            const params = new URLSearchParams({ limit, since: String(persisted.lastSyncEpoch || 0) });
+            const params = new URLSearchParams({ limit, order: orderSel?.value || 'desc', since: String(persisted.lastSyncEpoch || 0) });
             const r = await fetch('/graph/data?' + params.toString());
             const delta = await r.json();
             if ((delta.nodes && delta.nodes.length) || (delta.edges && delta.edges.length)) {
@@ -303,7 +312,7 @@
 
       showLoading(focusKey ? 'Loading focused view…' : 'Loading graph…');
       try {
-        const params = new URLSearchParams({ limit });
+        const params = new URLSearchParams({ limit, order: orderSel?.value || 'desc' });
         if (focusKey) params.set('focus', focusKey.replace(/^event:/, ''));
         const r = await fetch('/graph/data?' + params.toString());
         const data = await r.json();
@@ -551,7 +560,14 @@
         return {
           name: 'cose', animate: false, randomize: true, fit: true, padding: 60,
           idealEdgeLength: 320,
-          nodeRepulsion: (n) => 120000 + (degree[n.id()] || 0) * 30000,
+          // Repulsion scales aggressively with composite weight so heavy
+          // nodes (big hubs) push lighter nodes much farther away — the
+          // graph self-organises around the heavy hubs instead of an even
+          // grid. Linear in weight isn't enough; we use a small quadratic.
+          nodeRepulsion: (n) => {
+            const w = degree[n.id()] || 0.5;
+            return 80000 + w * 70000 + (w * w) * 8000;
+          },
           edgeElasticity: () => 60,
           nodeOverlap: 120, gravity: 0.08, gravityRange: 5.0, gravityCompound: 1.2,
           componentSpacing: 200, numIter: 4500,
@@ -825,6 +841,7 @@
       }, 2000);
     });
     limitSel.addEventListener('change', () => loadGraph());
+    orderSel?.addEventListener('change', () => loadGraph());
 
     // Filter & layout controls re-render from the current in-memory data (no fetch).
     function rerenderFromCurrent() {

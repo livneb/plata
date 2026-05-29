@@ -474,57 +474,104 @@
       if (btn) btn.addEventListener('click', enablePush);
     })();
 
-    // ---------- 🌐 translate-this — wraps any element with data-translate ----------
-    // Usage: <div data-translate>...long text...</div> → small 🌐 button appears.
-    // Click → POST /api/translate (lang+aud from cookies) → replaces the text. Original
-    // is kept on the element so you can flip back.
+    // ---------- 🌐 translate-this — ONE button per zone ----------
+    // Two patterns supported:
+    //   1. data-translate (legacy, single element): one 🌐 button right next
+    //      to the element, translates JUST that element.
+    //   2. data-translate-zone (preferred): one 🌐 button placed at the top
+    //      of the zone, translates EVERY child marked data-translate-item.
+    //      Reduces the wall-of-🌐 problem inside the expanded proposal /
+    //      trade-detail panels.
     (function () {
       function cookie(name) { const m = document.cookie.match('(^|; )' + name + '=([^;]*)'); return m ? decodeURIComponent(m[2]) : ''; }
+      async function translateOne(el, lang, aud) {
+        // Initialize and toggle back if already translated.
+        if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
+        if (el.dataset.translated === '1') {
+          el.textContent = el.dataset.originalText;
+          el.dataset.translated = '0';
+          return { ok: true, toggled: 'off' };
+        }
+        const r = await fetch('/api/translate/', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: el.dataset.originalText || el.textContent, lang, aud }),
+        });
+        if (!r.ok) {
+          let msg = 'HTTP ' + r.status;
+          try { const e = await r.json(); if (e && e.detail) msg += ' — ' + e.detail; } catch {}
+          throw new Error(msg);
+        }
+        const j = await r.json();
+        if (j.skipped) return { ok: true, skipped: true };
+        if (j.text) {
+          el.textContent = j.text;
+          el.dataset.translated = '1';
+          el.dir = lang === 'he' ? 'rtl' : 'ltr';
+        }
+        return { ok: true };
+      }
+      function makeBtn(label, title) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700';
+        btn.title = title;
+        btn.innerHTML = label;
+        return btn;
+      }
       function decorate(root) {
-        (root || document).querySelectorAll('[data-translate]:not([data-translate-bound])').forEach(el => {
-          el.setAttribute('data-translate-bound', '1');
-          if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'inline-block ml-1 align-middle text-[11px] px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700';
-          btn.title = 'Translate / explain';
-          btn.textContent = '🌐';
+        (root || document).querySelectorAll('[data-translate-zone]:not([data-translate-bound])').forEach(zone => {
+          zone.setAttribute('data-translate-bound', '1');
+          const items = zone.querySelectorAll('[data-translate-item]');
+          if (!items.length) return;
+          const btn = makeBtn('🌐 <span>Translate all</span>', 'Translate every text block in this section');
+          btn.classList.add('mb-2');
           btn.addEventListener('click', async () => {
             const lang = cookie('plata_lang') || 'en';
-            const aud  = cookie('plata_aud')  || 'tech';
-            // Toggle back to original if already translated
-            if (el.dataset.translated === '1') {
-              el.textContent = el.dataset.originalText;
-              el.dataset.translated = '0';
-              return;
-            }
-            btn.disabled = true; const prev = btn.textContent; btn.textContent = '⏳';
+            const aud = cookie('plata_aud') || 'tech';
+            btn.disabled = true;
+            const prev = btn.innerHTML;
+            btn.innerHTML = '⏳ <span>Translating…</span>';
+            let skippedAll = true;
             try {
-              const r = await fetch('/api/translate/', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: el.dataset.originalText || el.textContent, lang, aud }),
-              });
-              if (!r.ok) {
-                let msg = 'HTTP ' + r.status;
-                try { const e = await r.json(); if (e && e.detail) msg += ' — ' + e.detail; } catch {}
-                throw new Error(msg);
+              for (const el of items) {
+                const res = await translateOne(el, lang, aud);
+                if (!res.skipped) skippedAll = false;
               }
-              const j = await r.json();
-              if (j.skipped) {
+              if (skippedAll) {
                 plataToast('Language / audience is still "English / Technical" — set it on Settings → Account → Preferences first.', 'info');
-                return;
-              }
-              if (j.text) {
-                el.textContent = j.text;
-                el.dataset.translated = '1';
-                el.dir = lang === 'he' ? 'rtl' : 'ltr';
               }
             } catch (e) {
               plataToast('Translate failed: ' + e.message, 'error');
             } finally {
-              btn.disabled = false; btn.textContent = prev;
+              btn.disabled = false; btn.innerHTML = prev;
+            }
+          });
+          // Place the button at the top of the zone for visibility.
+          zone.insertBefore(btn, zone.firstChild);
+        });
+        // Legacy single-element pattern — only used for standalone blocks not
+        // inside a translate-zone. (Skip elements that already live inside one.)
+        (root || document).querySelectorAll('[data-translate]:not([data-translate-bound])').forEach(el => {
+          if (el.closest('[data-translate-zone]')) {
+            el.setAttribute('data-translate-bound', '1');
+            return;
+          }
+          el.setAttribute('data-translate-bound', '1');
+          if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
+          const btn = makeBtn('🌐', 'Translate / explain');
+          btn.classList.add('ml-1', 'align-middle');
+          btn.addEventListener('click', async () => {
+            const lang = cookie('plata_lang') || 'en';
+            const aud  = cookie('plata_aud')  || 'tech';
+            btn.disabled = true; const prev = btn.innerHTML; btn.innerHTML = '⏳';
+            try {
+              const res = await translateOne(el, lang, aud);
+              if (res.skipped) plataToast('Language / audience is still "English / Technical" — set it on Settings → Account → Preferences first.', 'info');
+            } catch (e) {
+              plataToast('Translate failed: ' + e.message, 'error');
+            } finally {
+              btn.disabled = false; btn.innerHTML = prev;
             }
           });
           el.parentNode.appendChild(btn);

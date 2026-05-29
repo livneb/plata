@@ -294,6 +294,7 @@
   <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
     <h2 class="font-semibold mb-2">Strategist proposal</h2>
     {% if proposal %}
+    <div data-translate-zone>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
       <div><div class="text-[10px] uppercase text-gray-500">Conviction{{ help_icon('conviction') }}</div><div class="text-lg font-bold">{{ '%.2f' % (proposal.conviction or 0) }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Suggested SL %{{ help_icon('suggested_sl_pct') }}</div><div>{{ proposal.suggested_sl_pct or '—' }}</div></div>
@@ -302,7 +303,7 @@
     </div>
     <div class="mb-3">
       <div class="text-[10px] uppercase text-gray-500 mb-1">Reasoning</div>
-      <p data-translate class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ proposal.reasoning }}</p>
+      <p data-translate-item class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ proposal.reasoning }}</p>
     </div>
     {% if proposal.milestones %}
     <div class="mb-3">
@@ -356,13 +357,14 @@
         {% for a in proposal.similar_events %}
         <li class="flex gap-2">
           <span class="text-gray-400 font-mono whitespace-nowrap">sim {{ '%.2f' % (a.similarity or 0) }}</span>
-          <span data-translate class="flex-1">{{ a.summary }}</span>
+          <span data-translate-item class="flex-1">{{ a.summary }}</span>
           {% if a.price_impact %}<span class="text-gray-400 text-[10px] font-mono">{{ a.price_impact | tojson }}</span>{% endif %}
         </li>
         {% endfor %}
       </ul>
     </div>
     {% endif %}
+    </div>
     {% else %}
     <p class="text-sm text-gray-400 italic">Proposal payload not in the Redis stream anymore (likely trimmed). Trade still references proposal <span class="font-mono">{{ trade.proposal_id or '—' }}</span>.</p>
     {% endif %}
@@ -372,6 +374,7 @@
   <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
     <h2 class="font-semibold mb-2">Triggering event</h2>
     {% if event_doc %}
+    <div data-translate-zone>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
       <div><div class="text-[10px] uppercase text-gray-500">Source</div><div>{{ event_doc.source or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Category</div><div>{{ event_doc.category or '—' }}</div></div>
@@ -380,7 +383,7 @@
     </div>
     <div class="mb-3">
       <div class="text-[10px] uppercase text-gray-500 mb-1">Summary</div>
-      <p data-translate class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ event_doc.summary }}</p>
+      <p data-translate-item class="text-sm whitespace-pre-line bg-gray-50 dark:bg-gray-900 rounded p-3 border border-gray-200 dark:border-gray-700">{{ event_doc.summary }}</p>
     </div>
     {% if event_doc.entity_refs %}
     <div>
@@ -392,6 +395,7 @@
       </div>
     </div>
     {% endif %}
+    </div>
     {% else %}
     <p class="text-sm text-gray-400 italic">No triggering event linked.</p>
     {% endif %}
