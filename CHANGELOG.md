@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.132 — 2026-05-29
+- **📰 News pipeline page moved out of Settings into sidebar → Knowledge → News pipeline.** Settings is for operator knobs (risk, API keys, environment); the news editor is a knowledge-domain workflow (which feeds to ingest, what to allow through), so it lives next to History / Graph / Historian seed. New page at `/news/`. Legacy `/settings/news/save` + `/settings/news/filter_drops/reset` POSTs 307-redirect to the new URL for any open tab.
+
 ## 2.24.131 — 2026-05-29
 - **🐛 News tab now actually opens.** v2.24.130 added the `📰 News` tab button + panel but the inline tab-activator JS still had a hard-coded allowlist (`['controls','risk','account','env','api','tuning']`) — clicking News did nothing because the new key wasn't in the list, and the panel stayed hidden so the page kept showing whatever default (Controls) was active. Also removed the stale `'tuning'` from the list since that tab moved to `/tuning/` in v2.24.130. Result: `/settings/?tab=news` and clicking the tab both open the editor (sources, GDELT query, subreddits, RSS feeds, Telegram channels, allow/blocklists, min-title-length).
 
