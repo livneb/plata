@@ -132,6 +132,34 @@
             <span class="text-[9px] uppercase text-gray-500">LLM $</span>
             <span id="kpi-budget" class="font-mono text-gray-400">—</span>
           </a>
+          <button id="kpi-eye" type="button"
+                  class="hidden sm:inline-flex items-center justify-center p-1.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  title="Show more: open position size + % change today / 7d / 30d / all time"
+                  aria-label="Reveal portfolio breakdown">👁</button>
+        </div>
+        <!-- Eye-toggle reveal panel — anchored below the topbar, populated by
+             the KPI poller. Click 👁 to toggle. Choice persists in localStorage. -->
+        <div id="kpi-reveal" class="hidden fixed top-[60px] right-2 z-50 w-80 max-w-[calc(100vw-1rem)] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 text-xs">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold text-sm">Portfolio breakdown</h3>
+            <button type="button" id="kpi-eye-close" class="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" aria-label="Close">✕</button>
+          </div>
+          <dl class="space-y-1.5">
+            <div class="flex justify-between"><dt class="text-gray-500" title="Sum of qty × entry price across all open positions (USD).">Open notional</dt>
+              <dd id="rv-notional" class="font-mono font-semibold">—</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500" title="Open positions count.">Open positions</dt>
+              <dd id="rv-count" class="font-mono">—</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500" title="Sum of net_pnl for trades closed since 00:00 UTC.">Realized today</dt>
+              <dd id="rv-r-today" class="font-mono">—</dd></div>
+            <div class="border-t border-gray-200 dark:border-gray-700 my-1.5"></div>
+            <div class="flex justify-between"><dt class="text-gray-500">% Today</dt><dd id="rv-pct-today" class="font-mono">—</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">% 7-day (incl. open)</dt><dd id="rv-pct-7d" class="font-mono">—</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">% 30-day (incl. open)</dt><dd id="rv-pct-30d" class="font-mono">—</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">% All time</dt><dd id="rv-pct-all" class="font-mono">—</dd></div>
+            <div class="border-t border-gray-200 dark:border-gray-700 my-1.5"></div>
+            <div class="flex justify-between text-gray-500"><dt>Baseline equity</dt>
+              <dd><span id="rv-baseline" class="font-mono">—</span> <a href="/settings/?tab=risk" class="text-blue-500 hover:underline">edit</a></dd></div>
+          </dl>
         </div>
         <!-- Mode badge: yellow PAPER when paper_trading_mode=true, red LIVE when off.
              Reads the live setting from /api/header_stats so it stays in sync
@@ -150,6 +178,25 @@
         <button id="push-toggle" type="button" title="Enable push notifications"
                 class="text-xs text-gray-500 hover:text-gray-300 hidden sm:inline">🔔</button>
         <!-- Account dropdown (Flowbite). Click the avatar to open. -->
+        <!-- 🔔 Notifications + activity bell -->
+        <div class="relative">
+          <button type="button" id="bell-btn"
+                  class="relative p-2 rounded text-gray-500 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  aria-label="Notifications">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75v-.7V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>
+            <span id="bell-badge" class="hidden absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full text-[10px] font-bold bg-red-600 text-white">0</span>
+          </button>
+          <!-- Dropdown panel — notifications + activity tabs -->
+          <div id="bell-panel" class="hidden absolute right-0 mt-2 w-96 max-w-[calc(100vw-1rem)] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50">
+            <div class="flex border-b border-gray-200 dark:border-gray-700 text-xs">
+              <button type="button" id="bell-tab-notif" class="flex-1 py-2 px-3 font-semibold border-b-2 border-blue-600 text-blue-600">🔔 Notifications <span id="bell-tab-notif-count" class="opacity-70">(0)</span></button>
+              <button type="button" id="bell-tab-act"   class="flex-1 py-2 px-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-100">📜 Activity</button>
+              <button type="button" id="bell-clear" class="px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" title="Clear all">clear</button>
+            </div>
+            <ul id="bell-list-notif" class="max-h-[60vh] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 text-xs"></ul>
+            <ul id="bell-list-act"   class="hidden max-h-[60vh] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 text-xs"></ul>
+          </div>
+        </div>
         <button type="button" id="account-btn" data-dropdown-toggle="account-dropdown"
                 class="flex items-center text-sm rounded-full focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600"
                 title="{{ current_user }}">
@@ -521,30 +568,65 @@
         es.addEventListener('message', (ev) => {
           let data; try { data = JSON.parse(ev.data); } catch { return; }
           if (!data || !data.kind) return;
+          // Route into the bell feed instead of a toast. Notifications = action
+          // required. Activity = informational. Critical events still toast.
           switch (data.kind) {
             case 'proposal_pending':
-              plataToast(`New proposal awaiting approval: ${data.symbol || ''} ${(data.side || '').toUpperCase()}`, 'info');
-              // Bump the Pending HITL tile on the dashboard if it's visible.
+              window.plataBell?.push('notification', {
+                icon: '⏳', title: `New proposal — ${data.symbol || ''} ${(data.side || '').toUpperCase()}`,
+                detail: 'Awaiting your approval', href: '/proposals/?state=pending_hitl',
+              });
               document.dispatchEvent(new CustomEvent('plata:pending_changed'));
               break;
+            case 'adjustment_suggested':
+              window.plataBell?.push('notification', {
+                icon: '🔄', title: `Position monitor suggests ${data.action || 'an adjustment'} — ${data.symbol || ''}`,
+                detail: 'Review / approve', href: `/proposals/?symbol=${data.symbol || ''}#detail-${data.ulid || ''}`,
+              });
+              break;
             case 'proposal_resolved':
-              plataToast(`Proposal ${data.approved ? '✅ approved' : '❌ rejected'} by ${data.actor || ''}`,
-                         data.approved ? 'success' : 'error');
+              window.plataBell?.push('activity', {
+                icon: data.approved ? '✅' : '❌',
+                title: `Proposal ${data.approved ? 'approved' : 'rejected'}`,
+                detail: `by ${data.actor || 'system'}`,
+                href: '/proposals/',
+              });
               document.dispatchEvent(new CustomEvent('plata:pending_changed'));
               break;
             case 'trade_opened':
-              plataToast(`Trade opened: ${data.symbol} ${data.side.toUpperCase()} @ ${data.entry_price || ''} (${data.mode})`, 'success');
+              window.plataBell?.push('activity', {
+                icon: '📈', title: `Opened ${data.side?.toUpperCase()} ${data.symbol}`,
+                detail: `@ ${data.entry_price || '?'} · ${data.mode || 'paper'}`,
+                href: `/trades/${data.trade_ulid}`,
+              });
               document.dispatchEvent(new CustomEvent('plata:trades_changed'));
               break;
             case 'trade_closed': {
               const pnl = Number(data.net_pnl || 0);
-              const kind = pnl >= 0 ? 'success' : 'error';
-              plataToast(`Trade closed: ${data.symbol} net ${pnl >= 0 ? '+' : ''}${pnl.toFixed(4)} (${data.close_reason || ''})`, kind);
+              window.plataBell?.push('activity', {
+                icon: pnl >= 0 ? '💰' : '💸',
+                title: `Closed ${data.symbol} · ${pnl >= 0 ? '+' : ''}${pnl.toFixed(4)}`,
+                detail: data.close_reason || '',
+                href: `/trades/${data.trade_ulid}`,
+              });
               document.dispatchEvent(new CustomEvent('plata:trades_changed'));
               break;
             }
             case 'system_state':
-              plataToast(`System state: ${data.state}`, data.state === 'HALTED' ? 'error' : 'success');
+              // System halt is critical → keep the toast AND push notification.
+              if (data.state === 'HALTED') {
+                plataToast(`System HALTED`, 'error');
+                window.plataBell?.push('notification', {
+                  icon: '⛔', title: 'System HALTED',
+                  detail: 'Trading is paused. Click to manage.',
+                  href: '/agents/',
+                });
+              } else {
+                window.plataBell?.push('activity', {
+                  icon: '▶', title: `System ${data.state}`, detail: '',
+                  href: '/agents/',
+                });
+              }
               document.querySelectorAll('[data-system-state]').forEach(el => {
                 el.textContent = data.state;
                 el.className = (data.state === 'HALTED')
@@ -558,6 +640,115 @@
       }
       // Only connect once auth cookie exists (after login). The /sse endpoint will 302 otherwise.
       connect();
+    })();
+
+    // ---------- 🔔 Bell feed (notifications + activity) ----------
+    // Replaces ephemeral toasts. Items persist in localStorage so opening
+    // a new tab still shows what happened while you were away.
+    (function () {
+      const LS_N = 'plata.bell.notif';
+      const LS_A = 'plata.bell.activity';
+      const LS_U = 'plata.bell.unread';
+      const MAX = 50;
+      const $btn = document.getElementById('bell-btn');
+      const $badge = document.getElementById('bell-badge');
+      const $panel = document.getElementById('bell-panel');
+      const $listN = document.getElementById('bell-list-notif');
+      const $listA = document.getElementById('bell-list-act');
+      const $tabN = document.getElementById('bell-tab-notif');
+      const $tabA = document.getElementById('bell-tab-act');
+      const $tabNCount = document.getElementById('bell-tab-notif-count');
+      const $clear = document.getElementById('bell-clear');
+      if (!$btn) return;
+      function load(key) { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; } }
+      function save(key, arr) { try { localStorage.setItem(key, JSON.stringify(arr.slice(0, MAX))); } catch {} }
+      function getUnread() { try { return parseInt(localStorage.getItem(LS_U) || '0', 10) || 0; } catch { return 0; } }
+      function setUnread(n) {
+        try { localStorage.setItem(LS_U, String(Math.max(0, n))); } catch {}
+        if (n > 0) { $badge.textContent = n > 99 ? '99+' : String(n); $badge.classList.remove('hidden'); }
+        else { $badge.classList.add('hidden'); }
+      }
+      function fmtAgo(ts) {
+        const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+        if (s < 60) return s + 's ago'; if (s < 3600) return (s/60|0) + 'm ago';
+        if (s < 86400) return (s/3600|0) + 'h ago'; return (s/86400|0) + 'd ago';
+      }
+      function renderList(items, ul, emptyMsg) {
+        if (!ul) return;
+        if (!items.length) {
+          ul.innerHTML = `<li class="p-4 text-center text-gray-400">${emptyMsg}</li>`;
+          return;
+        }
+        ul.innerHTML = items.map(it => `
+          <li>
+            <a href="${it.href || '#'}" class="block p-3 hover:bg-gray-50 dark:hover:bg-gray-700/40">
+              <div class="flex items-start gap-2">
+                <span class="text-base leading-none">${it.icon || '•'}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium truncate">${escapeHtml(it.title || '')}</div>
+                  ${it.detail ? `<div class="text-[11px] text-gray-500 truncate">${escapeHtml(it.detail)}</div>` : ''}
+                  <div class="text-[10px] text-gray-400 mt-0.5">${fmtAgo(it.ts)}</div>
+                </div>
+              </div>
+            </a>
+          </li>
+        `).join('');
+      }
+      function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+      function rerender() {
+        const n = load(LS_N), a = load(LS_A);
+        $tabNCount.textContent = `(${n.length})`;
+        renderList(n, $listN, 'No notifications.');
+        renderList(a, $listA, 'No activity yet.');
+      }
+      function switchTab(which) {
+        const active = 'border-blue-600 text-blue-600';
+        const inactive = 'border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-100';
+        if (which === 'notif') {
+          $tabN.className = 'flex-1 py-2 px-3 font-semibold border-b-2 ' + active;
+          $tabA.className = 'flex-1 py-2 px-3 font-semibold border-b-2 ' + inactive;
+          $listN.classList.remove('hidden'); $listA.classList.add('hidden');
+        } else {
+          $tabA.className = 'flex-1 py-2 px-3 font-semibold border-b-2 ' + active;
+          $tabN.className = 'flex-1 py-2 px-3 font-semibold border-b-2 ' + inactive;
+          $listA.classList.remove('hidden'); $listN.classList.add('hidden');
+        }
+      }
+      function open() {
+        rerender();
+        $panel.classList.remove('hidden');
+        // Opening the panel clears the unread count (notification-style behaviour).
+        setUnread(0);
+      }
+      function close() { $panel.classList.add('hidden'); }
+      $btn.addEventListener('click', (ev) => { ev.stopPropagation();
+        $panel.classList.contains('hidden') ? open() : close();
+      });
+      $tabN.addEventListener('click', () => switchTab('notif'));
+      $tabA.addEventListener('click', () => switchTab('act'));
+      $clear.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        save(LS_N, []); save(LS_A, []); setUnread(0); rerender();
+      });
+      document.addEventListener('click', (ev) => {
+        if ($panel.classList.contains('hidden')) return;
+        if ($panel.contains(ev.target) || $btn.contains(ev.target)) return;
+        close();
+      });
+      // Public API used by the SSE handler above.
+      window.plataBell = {
+        push(bucket, item) {
+          const key = bucket === 'notification' ? LS_N : LS_A;
+          const arr = load(key);
+          arr.unshift({ ...item, ts: Date.now(), bucket });
+          save(key, arr);
+          if (bucket === 'notification') setUnread(getUnread() + 1);
+          if (!$panel.classList.contains('hidden')) rerender();
+        },
+      };
+      // Restore unread badge from the previous session.
+      setUnread(getUnread());
+      rerender();
     })();
 
     // ---------- Esc closes any visible modal ----------
@@ -891,7 +1082,39 @@
           lastNextPollEta = null;
         }
         renderNextPoll();
+        // Eye-reveal panel
+        const fmtUsd = (n) => '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtSigned = (n) => (n >= 0 ? '+' : '−') + fmtUsd(n);
+        const fmtPct = (n) => (n >= 0 ? '+' : '') + (n).toFixed(2) + '%';
+        const pctClass = (n) => n > 0 ? 'font-mono text-green-500' : n < 0 ? 'font-mono text-red-500' : 'font-mono text-gray-400';
+        const setText = (id, t, cls) => { const el = document.getElementById(id); if (el) { el.textContent = t; if (cls) el.className = cls; } };
+        setText('rv-notional', fmtUsd(s.open_notional_usd || 0));
+        setText('rv-count', String(s.open_count || 0));
+        setText('rv-r-today', fmtSigned(s.daily_pnl || 0), s.daily_pnl >= 0 ? 'font-mono text-green-500' : 'font-mono text-red-500');
+        setText('rv-pct-today', fmtPct(s.pct_today || 0), pctClass(s.pct_today || 0));
+        setText('rv-pct-7d',   fmtPct(s.pct_7d   || 0), pctClass(s.pct_7d   || 0));
+        setText('rv-pct-30d',  fmtPct(s.pct_30d  || 0), pctClass(s.pct_30d  || 0));
+        setText('rv-pct-all',  fmtPct(s.pct_all  || 0), pctClass(s.pct_all  || 0));
+        setText('rv-baseline', fmtUsd(s.baseline_equity_usd || 10000));
       }
+      // 👁 eye-toggle wiring (visible state persisted in localStorage).
+      const $eye = document.getElementById('kpi-eye');
+      const $reveal = document.getElementById('kpi-reveal');
+      const $eyeClose = document.getElementById('kpi-eye-close');
+      function setRevealOpen(open) {
+        if (!$reveal) return;
+        $reveal.classList.toggle('hidden', !open);
+        try { localStorage.setItem('plata.kpi.eye', open ? '1' : '0'); } catch {}
+      }
+      if ($eye) $eye.addEventListener('click', () => setRevealOpen($reveal.classList.contains('hidden')));
+      if ($eyeClose) $eyeClose.addEventListener('click', () => setRevealOpen(false));
+      try { if (localStorage.getItem('plata.kpi.eye') === '1') setRevealOpen(true); } catch {}
+      // Close when clicking outside.
+      document.addEventListener('click', (ev) => {
+        if (!$reveal || $reveal.classList.contains('hidden')) return;
+        if ($reveal.contains(ev.target) || $eye.contains(ev.target)) return;
+        setRevealOpen(false);
+      });
       async function tick() {
         try {
           const r = await fetch('/api/header_stats', { cache: 'no-store' });

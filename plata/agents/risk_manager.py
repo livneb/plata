@@ -59,6 +59,10 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     # per-action toggles above. Set to 1.0 to disable. Default 0.6 = a
     # confident "yes" trips it; a lukewarm 0.5 still goes HITL.
     "monitor_auto_approve_conviction_threshold": "0.6",
+    # Baseline equity (USD) used to compute % change in the topbar "Show
+    # details" panel. Paper accounts default to $10k; bump to match your
+    # live account if you wire one up.
+    "account_baseline_equity_usd": "10000",
 }
 
 

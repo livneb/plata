@@ -431,7 +431,9 @@ async def resubmit(
     actor = current_user_email(request) or "manual"
 
     cloned = TradeProposal(
-        triggering_event_ulid=src.triggering_event_ulid,
+        # Some legacy / monitor-suggested rows have no triggering event;
+        # the schema field is non-optional so fall back to empty string.
+        triggering_event_ulid=src.triggering_event_ulid or "",
         symbol=symbol.upper().strip(),
         side=Side(side.lower().strip()),
         conviction=max(0.0, min(1.0, float(conviction))),

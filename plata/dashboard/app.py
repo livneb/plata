@@ -402,7 +402,7 @@ def create_app() -> FastAPI:
     async def api_header_stats():
         """Top-bar KPIs: today's realized PnL, open positions + unrealized PnL,
         pending HITL count, today's LLM spend. Polled every ~10s by the topbar."""
-        from datetime import date, datetime, timezone
+        from datetime import date, datetime, timedelta, timezone
         from plata.core.bus import get_redis
         from plata.core.db import TradeLedger, session_scope
         from sqlalchemy import func, select
@@ -411,6 +411,11 @@ def create_app() -> FastAPI:
             "daily_pnl": 0.0, "open_count": 0, "unrealized_pnl": 0.0,
             "pending_hitl": 0, "llm_spend_today": 0.0, "llm_budget": 0.0,
             "paper_mode": True,
+            # Reveal-on-eye-click fields:
+            "open_notional_usd": 0.0,
+            "realized_7d": 0.0, "realized_30d": 0.0, "realized_all": 0.0,
+            "pct_today": 0.0, "pct_7d": 0.0, "pct_30d": 0.0, "pct_all": 0.0,
+            "baseline_equity_usd": 10000.0,
         }
         try:
             v = await redis.hget("risk_config", "paper_trading_mode")
@@ -447,6 +452,41 @@ def create_app() -> FastAPI:
                     sign = 1.0 if (r.side or "").lower() == "long" else -1.0
                     u += sign * (price - entry) * qty
                 stats["unrealized_pnl"] = round(u, 2)
+                # Open notional (qty × entry, USD) summed across open positions.
+                stats["open_notional_usd"] = round(
+                    sum(float(r.qty or 0) * float(r.entry_price or 0) for r in open_rows),
+                    2,
+                )
+                # Realized PnL windows: 7d / 30d / all time.
+                week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+                month_ago = datetime.now(timezone.utc) - timedelta(days=30)
+                stats["realized_7d"] = float((await session.execute(
+                    select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))
+                    .where(TradeLedger.exit_price.is_not(None))
+                    .where(TradeLedger.closed_at >= week_ago)
+                )).scalar() or 0)
+                stats["realized_30d"] = float((await session.execute(
+                    select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))
+                    .where(TradeLedger.exit_price.is_not(None))
+                    .where(TradeLedger.closed_at >= month_ago)
+                )).scalar() or 0)
+                stats["realized_all"] = float((await session.execute(
+                    select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))
+                    .where(TradeLedger.exit_price.is_not(None))
+                )).scalar() or 0)
+                # Equity baseline for %-change calc — configurable via risk_config.
+                # Paper accounts default to $10k; users override on /settings/?tab=risk.
+                try:
+                    b = await redis.hget("risk_config", "account_baseline_equity_usd")
+                    if b:
+                        stats["baseline_equity_usd"] = float(b)
+                except Exception:  # noqa: BLE001
+                    pass
+                base = stats["baseline_equity_usd"] or 1.0
+                stats["pct_today"] = round(100.0 * stats["daily_pnl"] / base, 3)
+                stats["pct_7d"]    = round(100.0 * (stats["realized_7d"] + stats["unrealized_pnl"]) / base, 3)
+                stats["pct_30d"]   = round(100.0 * (stats["realized_30d"] + stats["unrealized_pnl"]) / base, 3)
+                stats["pct_all"]   = round(100.0 * (stats["realized_all"] + stats["unrealized_pnl"]) / base, 3)
         except Exception:  # noqa: BLE001
             pass
         try:

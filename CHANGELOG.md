@@ -2,6 +2,28 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.122 — 2026-05-29
+- **🔔 Bell + dropdown replaces ephemeral toasts.** New bell icon next to the avatar with an unread-count badge. Click → dropdown panel with two tabs:
+  - **🔔 Notifications** — action-required items: `proposal_pending`, `adjustment_suggested` (from the position monitor), system-halt events. Each item is clickable and takes you to the relevant page (`/proposals/?state=pending_hitl`, `/proposals/?symbol=<sym>#detail-<ulid>`, `/agents/`).
+  - **📜 Activity** — informational: `trade_opened`, `trade_closed` (with signed PnL), `proposal_resolved`, system resume.
+  - Items persist in `localStorage` (last 50 each) so opening a new tab still shows what happened while you were away. Opening the panel clears the unread count. `clear` empties both feeds.
+  - Toasts now only fire for **critical** events (system HALTED) on top of the bell notification — everything else goes straight to the bell.
+- **👁 Eye-toggle reveal panel** in the topbar — open notional ($), open positions count, realized today, and % change today / 7d / 30d / all-time against `account_baseline_equity_usd`. Persists open/closed state.
+- **📋 "Copy all settings" button** on `/settings/?tab=risk` — copies every risk_config key/value to clipboard as a markdown table so you can paste back to me for investigation.
+- **🐛 SSE 500s on quiet Redis pub/sub.** `subscribe()` was using `pubsub.listen()` which blocks indefinitely; Railway's idle-timeout on the redis socket bubbled up as `redis.exceptions.TimeoutError` and tore down the SSE response every few minutes. Switched to `pubsub.get_message(timeout=30)` in a loop with explicit catches for `TimeoutError` (continue) and `CancelledError` (re-raise). Idle SSE streams now survive forever.
+- **🐛 `/proposals/<ulid>/resubmit` ValidationError when source had no triggering event.** Some legacy / monitor-suggested rows have `triggering_event_ulid=None`; the schema requires `str`. Resubmit now falls back to `""`.
+
+## 2.24.121 — 2026-05-28
+- **👁 Eye-toggle reveal panel on the topbar.** New button at the right of the KPI strip; click to open a small floating panel anchored under the topbar showing what the topbar can't fit:
+  - **Open notional** ($) — sum of qty × entry across every open position
+  - **Open positions** count
+  - **Realized today** ($ signed)
+  - **% Today / 7d / 30d / All time** — color-coded against `account_baseline_equity_usd` (default $10,000; editable on `/settings/?tab=risk` → Capital → "Baseline equity (USD)")
+  - Closes when you click outside, the ✕, or toggle again. Open/closed state persists in `localStorage`.
+- **📋 "Copy all settings" button** on `/settings/?tab=risk`. Builds a markdown table of every risk_config key/value currently on the page (both friendly cards and advanced raw rows) and copies it to the clipboard, so you can paste it back to me when something looks off. Includes the app version and timestamp at the top of the snapshot.
+- **🐛 SSE 500s on quiet Redis pub/sub.** `subscribe()` was using `pubsub.listen()` which blocks indefinitely; Railway's idle-timeout on the redis socket bubbled up as `redis.exceptions.TimeoutError` and tore down the SSE response. Switched to `pubsub.get_message(timeout=30)` in a loop with explicit catches for `TimeoutError` (continue) and `CancelledError` (re-raise). Idle SSE streams now survive forever.
+- **🐛 `/proposals/<ulid>/resubmit` ValidationError when source had no triggering event.** Some legacy / monitor-suggested rows have `triggering_event_ulid=None`; the `TradeProposal` schema requires `str`, so the clone constructor blew up. Resubmit now falls back to `""` for empty values.
+
 ## 2.24.121 — 2026-05-28
 - **🐛 Sidebar active-highlight was stuck on the last full-reload page.** With htmx-boost only swapping `#main-content`, the sidebar (rendered once at full page load) kept its server-rendered `bg-gray-200` highlight on whatever page you originally landed on — so navigating from /trades/ to /proposals/ would leave **Positions** highlighted on the proposals page. Fixed with a client-side `updateSidebarActive(pathname)` reconciler that runs on every boosted swap + on initial load: longest-prefix-match against every sidebar `<a>`'s href, clears the old highlight class, applies the new one. Also handles deep paths (`/trades/<ulid>` correctly highlights **Positions**).
 - **Auto-approve adjustments above a conviction threshold.** New `monitor_auto_approve_conviction_threshold` in `risk_config` (default **0.6**, editable slider on `/settings/?tab=risk` → **Auto-approve above conviction**). When the position monitor's LLM returns a `close / scale_up / scale_down` decision with `conviction ≥ threshold`, it's auto-applied — bypasses the per-action HITL toggles (`monitor_auto_close_offtrack` / `_scale_up` / `_scale_down`). Set the slider to 1.0 to disable and keep every adjustment HITL.

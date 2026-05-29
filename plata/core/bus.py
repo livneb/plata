@@ -189,13 +189,29 @@ async def publish_channel(channel: str, payload: dict[str, Any] | str) -> int:
 
 
 async def subscribe(*channels: str) -> AsyncIterator[tuple[str, Any]]:
-    """Yield (channel, decoded_message) tuples until cancelled."""
+    """Yield (channel, decoded_message) tuples until cancelled. Idle Redis
+    pub/sub connections can hit a read timeout on quiet periods (Railway
+    keepalive); catching that and continuing keeps the SSE stream alive
+    instead of 500-ing every few minutes."""
+    import asyncio as _asyncio
+    from redis.exceptions import TimeoutError as _RedisTimeout
     redis = get_redis()
     pubsub = redis.pubsub()
     await pubsub.subscribe(*channels)
     try:
-        async for raw in pubsub.listen():
-            if raw["type"] != "message":
+        while True:
+            try:
+                raw = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30)
+            except _RedisTimeout:
+                continue
+            except _asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — swallow + retry; client disconnect kills the task
+                await _asyncio.sleep(1)
+                continue
+            if not raw:
+                continue
+            if raw.get("type") != "message":
                 continue
             channel = raw["channel"]
             data = raw["data"]

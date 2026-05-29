@@ -217,6 +217,13 @@ FIELDS: dict[str, dict] = {
         "min": 0.0, "max": 1.0, "step": 0.05,
         "help": "Conviction-based auto-approval shortcut: any monitor adjustment (close / scale up / scale down) whose LLM conviction is ≥ this threshold gets auto-applied, bypassing the HITL toggles above. 0.6 = trip on confident verdicts; 1.0 = disable, every adjustment stays HITL.",
     },
+    "account_baseline_equity_usd": {
+        "label": "Baseline equity (USD)",
+        "group": "capital",
+        "type": "currency",
+        "min": 100, "max": 10000000, "step": 100,
+        "help": "Reference equity used to compute % change in the topbar's Show-details panel and in dashboard PnL summaries. Paper accounts default to $10k; bump to match your live account size.",
+    },
 }
 
 

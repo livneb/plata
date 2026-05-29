@@ -101,11 +101,77 @@
         <div>
           <p class="text-xs text-gray-500">Live tunables. Sliders/toggles update instantly. Every change is audited + versioned in Postgres.</p>
         </div>
-        <button data-modal-target="create-modal" data-modal-toggle="create-modal" type="button"
-                class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
-          + New key
-        </button>
+        <div class="flex items-center gap-2">
+          <button id="copy-risk-config-btn" type="button"
+                  class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  title="Copy every risk_config key/value to clipboard as a markdown table — paste it back to Claude for investigation.">
+            📋 Copy all settings
+          </button>
+          <button data-modal-target="create-modal" data-modal-toggle="create-modal" type="button"
+                  class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+            + New key
+          </button>
+        </div>
       </div>
+      <script>
+        // Copy-settings: build a markdown table from every risk_config row
+        // currently rendered on the page (friendly groups + advanced table).
+        document.getElementById('copy-risk-config-btn')?.addEventListener('click', async () => {
+          const rows = [];
+          // 1) Friendly grouped cards
+          document.querySelectorAll('.rc-form').forEach(form => {
+            const labelEl = form.querySelector('.text-sm.font-medium');
+            const keyEl = form.querySelector('.font-mono.text-gray-400');
+            let value = '';
+            const hidden = form.querySelector('input[type="hidden"][name="value"]');
+            const slider = form.querySelector('.rc-slider');
+            const num = form.querySelector('input[type="number"][name="value"]');
+            const txt = form.querySelector('input[type="text"][name="value"]');
+            if (hidden) value = hidden.value;
+            else if (slider) value = slider.value;
+            else if (num) value = num.value;
+            else if (txt) value = txt.value;
+            const label = labelEl ? labelEl.textContent.trim() : '';
+            const key = keyEl ? keyEl.textContent.trim() : '';
+            if (key) rows.push({ key, label, value });
+          });
+          // 2) Advanced raw table rows
+          document.querySelectorAll('#tab-risk table tbody tr').forEach(tr => {
+            const tds = tr.querySelectorAll('td');
+            if (tds.length < 2) return;
+            const keyText = tds[0].textContent.trim().split(/\s+/)[0];
+            const valText = tds[1].textContent.trim();
+            if (keyText && !rows.some(r => r.key === keyText)) {
+              rows.push({ key: keyText, label: '', value: valText });
+            }
+          });
+          if (!rows.length) {
+            plataToast('No settings rows found.', 'error');
+            return;
+          }
+          const md = [
+            '# Plata risk_config snapshot',
+            '',
+            `_App version: ${document.querySelector('meta[name=app-version]')?.content || '?'} · captured ${new Date().toISOString()}_`,
+            '',
+            '| Key | Label | Value |',
+            '|---|---|---|',
+            ...rows.map(r => `| \`${r.key}\` | ${r.label || ''} | \`${r.value}\` |`),
+          ].join('\n');
+          try {
+            await navigator.clipboard.writeText(md);
+            plataToast(`Copied ${rows.length} settings to clipboard.`, 'success');
+          } catch (e) {
+            // Fallback: select-into-textarea trick for older browsers / strict perms.
+            const ta = document.createElement('textarea');
+            ta.value = md; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); plataToast(`Copied ${rows.length} settings.`, 'success'); }
+            catch { plataToast('Copy failed — see console.', 'error'); }
+            document.body.removeChild(ta);
+          }
+        });
+      </script>
 
       {# Friendly grouped form — sliders / toggles / number inputs with help text. #}
       {% for group_key, group_title, group_desc in risk_groups %}
