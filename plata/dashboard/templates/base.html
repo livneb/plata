@@ -532,15 +532,45 @@
             btn.disabled = true;
             const prev = btn.innerHTML;
             btn.innerHTML = '⏳ <span>Translating…</span>';
-            let skippedAll = true;
             try {
-              for (const el of items) {
-                const res = await translateOne(el, lang, aud);
-                if (!res.skipped) skippedAll = false;
+              // Toggle-off path: if ALL items are already translated, revert.
+              const allOn = Array.from(items).every(el => el.dataset.translated === '1');
+              if (allOn) {
+                items.forEach(el => {
+                  if (el.dataset.originalText) { el.textContent = el.dataset.originalText; el.dataset.translated = '0'; }
+                });
+                return;
               }
-              if (skippedAll) {
+              // Stash originals + collect texts (skip already-translated cells).
+              const todo = [];
+              items.forEach(el => {
+                if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
+                if (el.dataset.translated !== '1') todo.push(el);
+              });
+              if (!todo.length) return;
+              const texts = todo.map(el => el.dataset.originalText || el.textContent);
+              const r = await fetch('/api/translate/', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ texts, lang, aud }),
+              });
+              if (!r.ok) {
+                let msg = 'HTTP ' + r.status;
+                try { const e = await r.json(); if (e && e.detail) msg += ' — ' + e.detail; } catch {}
+                throw new Error(msg);
+              }
+              const j = await r.json();
+              if (j.skipped) {
                 plataToast('Language / audience is still "English / Technical" — set it on Settings → Account → Preferences first.', 'info');
+                return;
               }
+              (j.texts || []).forEach((t, i) => {
+                const el = todo[i];
+                if (!el || !t) return;
+                el.textContent = t;
+                el.dataset.translated = '1';
+                el.dir = lang === 'he' ? 'rtl' : 'ltr';
+              });
             } catch (e) {
               plataToast('Translate failed: ' + e.message, 'error');
             } finally {

@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.129 — 2026-05-29
+- **🌐 "Translate all" is now one batched LLM call** instead of N sequential round-trips. Items in a `data-translate-zone` are joined with a `<<<---PLATA_SPLIT--->>>` marker, sent in a single `/api/translate/` request, then split back into each cell. Cache hits short-circuit per text, so partially-cached zones only send the misses. Toggle-off still works (click again → revert to originals). Net effect: translating the full proposal panel (event summary + strategist reasoning + 8 analogs) goes from ~10 serial calls to 1.
+- **🐛 Strategist reasoning now actually translates** as part of the zone — it was already marked `data-translate-item` but the old per-row loop made it easy to miss; the batch path always includes it.
+
 ## 2.24.128 — 2026-05-29
 - **🎨 Proposal expanded view layout fix.** The v2.24.126 translate-zone refactor put `data-translate-zone` directly on the `grid grid-cols-1 lg:grid-cols-2` container, so the injected "🌐 Translate all" button became its own grid cell — taking up a full column and leaving a giant empty box. Now the zone wraps the grid instead of being it, so the button sits cleanly above the two-column layout.
 
