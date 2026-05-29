@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.127 — 2026-05-29
+- **🐛 Fix 500 on `/trades/<ulid>`** — `TemplateSyntaxError` from a missing `{% endif %}` introduced in v2.24.124 when the Unrealized/Net PnL split landed. The outer `{% if not trade.closed_at and live.price %}` had no matching close before `</section>`, so the Jinja loader rejected the template. Added the missing endif. Trade detail loads again.
+
 ## 2.24.126 — 2026-05-29
 - **🐛 CloudFront 403 / "blocked from your country" now treated as a regulatory block** (paper fallback) instead of DLQ. Bybit's testnet sits behind a CloudFront distribution that geo-blocks several countries; ccxt surfaces this as `RateLimitExceeded` (misleading) with body `"The Amazon CloudFront distribution is configured to block access from your country."`. Executor's exception detector now matches `cloudfront`, `blocked + country`, and `403 + country|geo|blocked` in addition to the existing `retCode 10024` / `PermissionDenied` / `regulatory` signatures. All route to the same `regulatory_fallback=true` paper fill + `venue:blocked:<venue>` Redis flag + 10-min `VenueRegulatoryBlock` WARN on `/errors/`.
 - **🌐 One Translate button per zone.** The expanded detail panels on `/proposals/` and `/trades/<ulid>` used to show a 🌐 button next to *every* text block (event summary, strategist reasoning, each of the 8 analog summaries, milestones …). Now a **single "🌐 Translate all"** button appears at the top of the zone; clicking it translates every block in sequence. Implemented as a new `data-translate-zone` pattern in `base.html`. Legacy single `data-translate` still works for standalone blocks not inside a zone.
