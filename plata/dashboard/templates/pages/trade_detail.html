@@ -31,9 +31,37 @@
       <div><div class="text-[10px] uppercase text-gray-500">Opened</div><div><time data-utc="{{ trade.opened_at.isoformat() }}">{{ trade.opened_at.strftime('%Y-%m-%d %H:%M') }}</time></div></div>
       <div><div class="text-[10px] uppercase text-gray-500">SL{{ help_icon('sl') }} / TP{{ help_icon('tp') }}</div><div>{{ trade.sl_price or '—' }} / {{ trade.tp_price or '—' }}</div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Exit</div><div>{{ trade.exit_price or '—' }}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500" title="Exit notional = qty × exit price (USD). What the position was worth at close.">Notional at close</div>
-        <div class="font-mono">{% if trade.qty and trade.exit_price %}${{ '{:,.2f}'.format((trade.qty | float) * (trade.exit_price | float)) }}{% else %}—{% endif %}</div></div>
-      <div><div class="text-[10px] uppercase text-gray-500">Net PnL{{ help_icon('net_pnl') }}</div><div>{{ trade.net_pnl or '—' }}</div></div>
+      <div><div class="text-[10px] uppercase text-gray-500" title="Exit notional = qty × exit price (USD). What the position was worth at close. The Δ% next to it is the change vs Notional invested — direction is sign-agnostic (just the price drift).">Notional at close</div>
+        <div class="font-mono">
+          {% if trade.qty and trade.exit_price %}
+            ${{ '{:,.2f}'.format((trade.qty | float) * (trade.exit_price | float)) }}
+            {% if trade.entry_price %}
+              {% set notional_pct = ((trade.exit_price | float) - (trade.entry_price | float)) / (trade.entry_price | float) * 100.0 %}
+              <span class="ml-1 text-[10px] {% if notional_pct > 0 %}text-green-500{% elif notional_pct < 0 %}text-red-500{% else %}text-gray-400{% endif %}"
+                    title="Notional drift = (exit − entry) / entry × 100%. Sign-agnostic: shows price movement, not your PnL direction.">
+                {% if notional_pct > 0 %}+{% endif %}{{ '%.2f' % notional_pct }}%
+              </span>
+            {% endif %}
+          {% else %}—{% endif %}
+        </div></div>
+      <div><div class="text-[10px] uppercase text-gray-500" title="Net PnL and PnL % of Notional invested. Sign reflects side (long: positive = up move; short: positive = down move). This is the PnL view that matches your account balance.">Net PnL{{ help_icon('net_pnl') }}</div>
+        <div class="font-mono">
+          {% if trade.net_pnl is not none %}
+            <span class="{% if (trade.net_pnl | float) > 0 %}text-green-500{% elif (trade.net_pnl | float) < 0 %}text-red-500{% endif %}">
+              {% if (trade.net_pnl | float) > 0 %}+{% endif %}{{ '{:,.4f}'.format(trade.net_pnl | float) }}
+            </span>
+            {% if trade.qty and trade.entry_price %}
+              {% set inv = (trade.qty | float) * (trade.entry_price | float) %}
+              {% if inv > 0 %}
+                {% set pnl_pct = (trade.net_pnl | float) / inv * 100.0 %}
+                <span class="ml-1 text-[10px] {% if pnl_pct > 0 %}text-green-500{% elif pnl_pct < 0 %}text-red-500{% else %}text-gray-400{% endif %}"
+                      title="Net PnL as % of Notional invested.">
+                  ({% if pnl_pct > 0 %}+{% endif %}{{ '%.2f' % pnl_pct }}%)
+                </span>
+              {% endif %}
+            {% endif %}
+          {% else %}—{% endif %}
+        </div></div>
       <div><div class="text-[10px] uppercase text-gray-500">Closed</div><div>{% if trade.closed_at %}<time data-utc="{{ trade.closed_at.isoformat() }}">{{ trade.closed_at | time_ago }}</time>{% else %}—{% endif %}</div></div>
     </div>
   </section>

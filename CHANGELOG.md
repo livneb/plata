@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.123 — 2026-05-29
+- **Trade detail — % deltas next to the dollar figures.** On `/trades/<ulid>` the summary header now shows:
+  - **Notional at close** $X · `±Y.YY%` — price drift from entry to exit (sign-agnostic; just the % the underlying moved). Green if up / red if down.
+  - **Net PnL** ±$X · `(±Y.YY%)` — PnL as % of Notional invested. Sign reflects your side (long: positive = up move; short: positive = down move). This is the PnL view that matches your account balance.
+  - On your XAUUSDT short: entry 4745.24 → exit 4473.04 shows `−5.74%` notional drift, but Net PnL `+5.74` is `+5.74%` because you were short.
+
 ## 2.24.122 — 2026-05-29
 - **🔔 Bell + dropdown replaces ephemeral toasts.** New bell icon next to the avatar with an unread-count badge. Click → dropdown panel with two tabs:
   - **🔔 Notifications** — action-required items: `proposal_pending`, `adjustment_suggested` (from the position monitor), system-halt events. Each item is clickable and takes you to the relevant page (`/proposals/?state=pending_hitl`, `/proposals/?symbol=<sym>#detail-<ulid>`, `/agents/`).
