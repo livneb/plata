@@ -3,14 +3,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from plata.agents.scraper.news_config import DEFAULTS as NEWS_DEFAULTS, get_config as get_news_config
 from plata.agents.scraper.sources.base_source import BaseSource
 from plata.config.settings import get_settings
 from plata.core.observability import get_logger
 from plata.core.schemas import RawSignal, SignalSource
 
 _log = get_logger("scraper.reddit")
-
-SUBREDDITS = ["CryptoCurrency", "wallstreetbets", "Bitcoin", "ethfinance"]
 
 
 class RedditSource(BaseSource):
@@ -27,6 +26,13 @@ class RedditSource(BaseSource):
     async def poll(self) -> list[RawSignal]:
         if not self._cid or not self._secret:
             return []
+        try:
+            cfg = await get_news_config()
+        except Exception:  # noqa: BLE001
+            cfg = {}
+        if not cfg.get("reddit_enabled", True):
+            return []
+        subreddits = cfg.get("reddit_subreddits") or NEWS_DEFAULTS["reddit_subreddits"]
         try:
             import asyncpraw  # local import — optional dep until enabled
         except ImportError:  # pragma: no cover

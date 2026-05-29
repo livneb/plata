@@ -6,18 +6,20 @@ from datetime import datetime, timezone
 
 from plata.agents.base import BaseAgent
 from plata.agents.scraper.dedup import check_duplicate, ensure_recent_index
+from plata.agents.scraper.news_config import get_config as get_news_config, should_drop
 from plata.agents.scraper.sanitizer import detect_likely_injection, sanitize
 from plata.agents.scraper.sources.base_source import BaseSource
 from plata.agents.scraper.sources.cryptopanic import CryptoPanicSource
 from plata.agents.scraper.sources.gdelt import GdeltSource
 from plata.agents.scraper.sources.reddit import RedditSource
+from plata.agents.scraper.sources.rss import RssSource
 from plata.core.bus import Streams, publish
 from plata.core.db import SignalArchive, session_scope
 from plata.core.schemas import RawSignal
 
 
 def all_sources() -> list[BaseSource]:
-    return [RedditSource(), CryptoPanicSource(), GdeltSource()]
+    return [RedditSource(), CryptoPanicSource(), GdeltSource(), RssSource()]
 
 
 class Scraper(BaseAgent):
@@ -114,6 +116,20 @@ class Scraper(BaseAgent):
                 message="Source content contained injection-like phrases; archived only.",
                 context={"source": str(signal.source), "signal_ulid": signal.ulid},
             )
+            return
+
+        # Content filter — drop off-topic stories before they reach the LLM.
+        try:
+            news_cfg = await get_news_config()
+            drop_reason = should_drop(signal.title, signal.body, news_cfg)
+        except Exception:  # noqa: BLE001
+            drop_reason = None
+        if drop_reason:
+            from plata.core.bus import get_redis as _gr
+            _r = _gr()
+            await _r.hincrby("scraper:filter_drops", drop_reason.split(":", 1)[0], 1)
+            self.log.debug("content_filter_drop", source=str(signal.source),
+                           reason=drop_reason, title=(signal.title or "")[:80])
             return
 
         await publish(Streams.RAW_SIGNALS, signal)

@@ -42,30 +42,16 @@ async def index(request: Request, tab: str = "controls"):
     by_key = {r["provider"]: r for r in creds_rows}
     creds_view = [{**p, **by_key.get(p["key"], {})} for p in PROVIDERS]
 
-    # Pending tuner-proposed tweaks: most recent first, only ones still "pending".
-    tuning_rows: list[dict] = []
+    # News ingestion config — live-editable list of sources + content filters.
     try:
-        from sqlalchemy import desc as _desc, select as _select
-        from plata.core.db import AuditLog, session_scope
-        async with session_scope() as session:
-            audits = (await session.execute(
-                _select(AuditLog)
-                .where(AuditLog.action == "proposed_config_tweak")
-                .order_by(_desc(AuditLog.ts))
-                .limit(50)
-            )).scalars().all()
-        for a in audits:
-            p = a.payload or {}
-            if (p.get("status") or "pending") != "pending":
-                continue
-            tuning_rows.append({
-                "id": a.id, "ts": a.ts, "key": p.get("key"),
-                "old": p.get("old"), "new": p.get("new"),
-                "rationale": p.get("rationale"),
-                "evidence": p.get("evidence") or {},
-            })
+        from plata.agents.scraper.news_config import get_config as _get_news, DEFAULTS as _news_defaults
+        news_cfg = await _get_news()
+        news_drops = await redis.hgetall("scraper:filter_drops") or {}
     except Exception:  # noqa: BLE001
-        pass
+        news_cfg = {}
+        _news_defaults = {}
+        news_drops = {}
+
     return templates.TemplateResponse(
         request,
         "pages/settings.html",
@@ -77,7 +63,6 @@ async def index(request: Request, tab: str = "controls"):
             "risk_grouped": risk_grouped,
             "risk_groups": RISK_GROUPS,
             "risk_fields": RISK_FIELDS,
-            "tuning_rows": tuning_rows,
             "paper_mode": s.default_paper_trading_mode,
             "app_version": s.app_version,
             "admin_email": s.dashboard_admin_email or "",
@@ -92,8 +77,71 @@ async def index(request: Request, tab: str = "controls"):
             ),
             "alpaca_mode": "PAPER" if s.alpaca_paper else "LIVE",
             "creds_view": creds_view,
+            "news_cfg": news_cfg,
+            "news_defaults": _news_defaults,
+            "news_drops": news_drops,
         },
     )
+
+
+@router.post("/news/save")
+async def news_save(request: Request):
+    """Save the editable news ingestion config (sources, query, filters)."""
+    from plata.agents.scraper.news_config import DEFAULTS, save_config
+    form = await request.form()
+    updates: dict = {}
+    # Booleans (checkboxes — absent means false)
+    for k in ("gdelt_enabled", "reddit_enabled", "cryptopanic_enabled", "rss_enabled",
+              "telegram_channels_enabled"):
+        if k in DEFAULTS:
+            updates[k] = (form.get(k) == "on")
+    # Plain text/int fields
+    if "gdelt_query" in form:
+        updates["gdelt_query"] = (form.get("gdelt_query") or "").strip()
+    if "min_title_len" in form:
+        try:
+            updates["min_title_len"] = int(form.get("min_title_len") or 0)
+        except ValueError:
+            pass
+    # Lists from textareas — one per line.
+    def _lines(name: str) -> list[str]:
+        raw = (form.get(name) or "").strip()
+        if not raw:
+            return []
+        return [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if "reddit_subreddits" in form:
+        updates["reddit_subreddits"] = _lines("reddit_subreddits")
+    if "require_keywords" in form:
+        updates["require_keywords"] = _lines("require_keywords")
+    if "block_keywords" in form:
+        updates["block_keywords"] = _lines("block_keywords")
+    if "telegram_channel_ids" in form and "telegram_channel_ids" in DEFAULTS:
+        ids = []
+        for ln in _lines("telegram_channel_ids"):
+            try:
+                ids.append(int(ln))
+            except ValueError:
+                pass
+        updates["telegram_channel_ids"] = ids
+    # RSS feeds — parsed from a textarea: each line is "name | url" or just "url".
+    if "rss_feeds" in form:
+        feeds = []
+        for ln in _lines("rss_feeds"):
+            if "|" in ln:
+                name, url = ln.split("|", 1)
+                feeds.append({"name": name.strip(), "url": url.strip(), "enabled": True})
+            else:
+                feeds.append({"name": ln, "url": ln, "enabled": True})
+        updates["rss_feeds"] = feeds
+    await save_config(updates)
+    return RedirectResponse(url="/settings/?tab=news", status_code=303)
+
+
+@router.post("/news/filter_drops/reset")
+async def news_filter_drops_reset():
+    redis = get_redis()
+    await redis.delete("scraper:filter_drops")
+    return RedirectResponse(url="/settings/?tab=news", status_code=303)
 
 
 @router.post("/credentials/{provider}/save")
@@ -116,39 +164,6 @@ async def credentials_delete(provider: str):
 
 
 @router.post("/tuning/{audit_id}/{action}")
-async def tuning_decision(audit_id: int, action: str):
-    """Apply or reject a tuner-proposed config tweak. action ∈ {apply, reject}."""
-    from datetime import datetime, timezone
-    from sqlalchemy import select as _select
-    from plata.core.bus import Channels, publish_channel
-    from plata.core.db import AuditLog, ConfigSetting, session_scope
-    redis = get_redis()
-    async with session_scope() as session:
-        row = (await session.execute(
-            _select(AuditLog).where(AuditLog.id == audit_id)
-        )).scalar_one_or_none()
-        if row is None:
-            return JSONResponse({"ok": False, "reason": "not_found"}, status_code=404)
-        p = dict(row.payload or {})
-        if action == "apply":
-            key = p.get("key"); new_val = p.get("new")
-            if key and new_val is not None:
-                # Bump version + mirror to Redis (same as user-driven update).
-                stmt = (_select(ConfigSetting)
-                        .where(ConfigSetting.key == key)
-                        .order_by(ConfigSetting.version.desc()).limit(1))
-                latest = (await session.execute(stmt)).scalar_one_or_none()
-                version = (latest.version + 1) if latest else 1
-                session.add(ConfigSetting(
-                    key=key, value={"value": new_val}, version=version,
-                    updated_at=datetime.now(timezone.utc),
-                ))
-                await redis.hset("risk_config", key, str(new_val))
-                await publish_channel(Channels.CONFIG_UPDATED, {"key": key, "value": new_val})
-                p["status"] = "applied"
-        elif action == "reject":
-            p["status"] = "rejected"
-        else:
-            return JSONResponse({"ok": False, "reason": "bad_action"}, status_code=400)
-        row.payload = p
-    return RedirectResponse(url="/settings/?tab=tuning", status_code=303)
+async def tuning_decision_legacy(audit_id: int, action: str):
+    """Back-compat: tuning moved to /tuning/. Redirect old POSTs."""
+    return RedirectResponse(url=f"/tuning/{audit_id}/{action}", status_code=307)

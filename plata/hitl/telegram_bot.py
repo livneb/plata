@@ -36,6 +36,8 @@ class TelegramBot(BaseAgent):
             CallbackQueryHandler,
             CommandHandler,
             ContextTypes,
+            MessageHandler,
+            filters,
         )
 
         MENU = ReplyKeyboardMarkup(
@@ -77,6 +79,7 @@ class TelegramBot(BaseAgent):
             "/resume — resume agents after halt\n"
             "/paper on|off — toggle paper trading mode\n"
             "/positions — last reported executor state\n"
+            "/joininfo — channel-ingestion setup help (run inside the target chat)\n"
             "/help — this message\n\n"
             "Trade proposals will arrive here with Approve/Reject buttons."
         )
@@ -125,6 +128,66 @@ class TelegramBot(BaseAgent):
             await update.message.reply_text(f"Paper mode: {args[0]}")
 
         @_gated
+        async def cmd_joininfo(update, _):
+            chat = update.effective_chat
+            uid = update.effective_user.id if update.effective_user else "?"
+            text = (
+                "📡 Channel ingestion setup\n\n"
+                f"This chat's ID: <code>{chat.id}</code>\n"
+                f"Your user ID: <code>{uid}</code>\n\n"
+                "To make Plata listen to a channel/group:\n"
+                "1. Add this bot as a member (admin not required for public groups; "
+                "channels require admin with 'Post messages' read).\n"
+                "2. In Plata → Settings → 📰 News, paste the chat ID into "
+                "'Telegram channel IDs' and turn 'Listen to Telegram channels' ON.\n\n"
+                "Tip: forward a message from the target channel to @userinfobot to "
+                "discover its ID quickly. Channel IDs are negative (e.g. -1001234567890)."
+            )
+            await update.message.reply_text(text, parse_mode="HTML")
+
+        async def on_channel_message(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
+            """Ingest messages from channels/groups Plata is watching."""
+            try:
+                from plata.agents.scraper.news_config import get_config as _news_cfg
+                from plata.core.bus import Streams as _S, publish as _publish
+                from plata.core.schemas import RawSignal as _Raw, SignalSource as _Src
+                cfg = await _news_cfg()
+            except Exception:  # noqa: BLE001
+                return
+            if not cfg.get("telegram_channels_enabled"):
+                return
+            allowed_chats = set(cfg.get("telegram_channel_ids") or [])
+            msg = update.effective_message
+            if not msg:
+                return
+            chat_id = msg.chat_id
+            if allowed_chats and chat_id not in allowed_chats:
+                return
+            body = (msg.text or msg.caption or "").strip()
+            if not body:
+                return
+            link = None
+            try:
+                if msg.chat.username:
+                    link = f"https://t.me/{msg.chat.username}/{msg.message_id}"
+            except Exception:  # noqa: BLE001
+                link = None
+            title = body.splitlines()[0][:300]
+            sig = _Raw(
+                source=_Src.TELEGRAM,
+                url=link or f"tg://{chat_id}/{msg.message_id}",
+                title=title,
+                body=body[:4000],
+                source_published_at=msg.date,
+                metadata={
+                    "chat_id": chat_id,
+                    "chat_title": getattr(msg.chat, "title", None),
+                    "message_id": msg.message_id,
+                },
+            )
+            await _publish(_S.RAW_SIGNALS, sig)
+
+        @_gated
         async def cmd_positions(update, _):
             # Best-effort: read latest from agent_status:executor
             redis = get_redis()
@@ -154,7 +217,17 @@ class TelegramBot(BaseAgent):
         app.add_handler(CommandHandler("resume", cmd_resume))
         app.add_handler(CommandHandler("paper", cmd_paper))
         app.add_handler(CommandHandler("positions", cmd_positions))
+        app.add_handler(CommandHandler("joininfo", cmd_joininfo))
         app.add_handler(CallbackQueryHandler(cb_approval))
+        # Channel/group ingestion — listens to any chat the bot is a member of;
+        # the on_channel_message handler self-gates by news_config.telegram_channel_ids.
+        try:
+            chan_filter = filters.UpdateType.CHANNEL_POST | (
+                (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP) & ~filters.COMMAND
+            )
+            app.add_handler(MessageHandler(chan_filter, on_channel_message))
+        except Exception:  # noqa: BLE001
+            _log.exception("channel_ingest_handler_register_failed")
 
         # Start the bot and the alert subscriber
         # Silence the noisy traceback on `Conflict: terminated by other getUpdates`
