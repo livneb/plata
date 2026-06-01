@@ -18,7 +18,10 @@
           <th class="px-3 py-2">Source</th>
           <th class="px-3 py-2">Status</th>
           <th class="px-3 py-2">Last poll</th>
-          <th class="px-3 py-2">Fetched</th>
+          <th class="px-3 py-2" title="Items returned by source on the last poll (raw count before dedup/filter).">Raw</th>
+          <th class="px-3 py-2" title="Items that made it past dedup + content filter and were published to the strategist stream.">Pub'd</th>
+          <th class="px-3 py-2" title="Items dropped because they matched a recent URL/title (already seen).">Dup</th>
+          <th class="px-3 py-2" title="Items dropped by the content filter (allowlist/blocklist/min-title).">Filtered</th>
           <th class="px-3 py-2">Interval</th>
           <th class="px-3 py-2">Next in</th>
           <th class="px-3 py-2">How to verify</th>
@@ -44,7 +47,10 @@
             {% else %}<span class="text-xs text-gray-400">{{ src.status }}</span>{% endif %}
           </td>
           <td class="px-3 py-2 text-xs text-gray-500">{% if src.last_poll_at %}<time data-utc="{{ src.last_poll_at }}">{{ src.last_poll_at }}</time>{% else %}—{% endif %}</td>
-          <td class="px-3 py-2 font-mono text-xs">{{ src.last_fetched or '—' }}</td>
+          <td class="px-3 py-2 font-mono text-xs">{{ src.last_fetched or '0' }}<span class="block text-[9px] text-gray-400">lifetime {{ src.lifetime_raw }}</span></td>
+          <td class="px-3 py-2 font-mono text-xs text-emerald-500">{{ src.last_published or '0' }}<span class="block text-[9px] text-gray-400">lifetime {{ src.lifetime_published }}</span></td>
+          <td class="px-3 py-2 font-mono text-xs text-gray-400">{{ src.last_dup or '0' }}<span class="block text-[9px] text-gray-400">lifetime {{ src.lifetime_dup }}</span></td>
+          <td class="px-3 py-2 font-mono text-xs text-amber-500" title="{{ src.last_filtered_reasons or '' }}">{{ src.last_filtered or '0' }}<span class="block text-[9px] text-gray-400">lifetime {{ src.lifetime_filtered }}</span></td>
           <td class="px-3 py-2 font-mono text-xs">{% if src.interval_sec %}{{ src.interval_sec }}s{% else %}—{% endif %}</td>
           <td class="px-3 py-2 font-mono text-xs">
             {% if src.run_now_pending %}<span class="text-blue-500">queued</span>
@@ -54,6 +60,7 @@
           </td>
           <td class="px-3 py-2 text-[11px] text-gray-500 max-w-md leading-snug">{{ verify_hints.get(src.name, '—') }}</td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
+            <a href="/news/source/{{ src.name }}/log" class="text-xs text-blue-500 hover:underline mr-3" title="Last 20 polls — raw/published/dup/filtered with sample titles.">📊 Recent polls</a>
             <a href="/history/?hours=24&source={{ src.name }}" class="text-xs text-blue-500 hover:underline mr-3" title="Show the actual signals fetched from this source in the last 24h.">📜 Last results</a>
             <form method="post" action="/news/source/{{ src.name }}/run_now" class="inline">
               <button type="submit" class="text-xs text-blue-500 hover:underline mr-3" title="Force this source to poll on the next 2-second tick.">▶ Run now</button>
