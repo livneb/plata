@@ -214,6 +214,8 @@ async def _lifespan(_app: FastAPI):
                     auto_resumed: list[str] = []
                     still_halted_by_user: list[str] = []
                     async for k in redis.scan_iter(match="scraper:source:*", count=100):
+                        if k.endswith(":log"):
+                            continue
                         seen_any = True
                         data = await redis.hgetall(k)
                         name = k.rsplit(":", 1)[-1]
@@ -654,6 +656,8 @@ def create_app() -> FastAPI:
             all_halted = True
             now_ts = datetime.now(timezone.utc).timestamp()
             async for k in redis.scan_iter(match="scraper:source:*", count=100):
+                if k.endswith(":log"):
+                    continue
                 seen_any = True
                 data = await redis.hgetall(k)
                 if (data.get("status") or "").lower() == "halted":
