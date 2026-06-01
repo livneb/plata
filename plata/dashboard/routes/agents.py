@@ -1,12 +1,14 @@
 """Agent health page."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import func, select
 
 from plata.core.bus import get_redis
+from plata.core.db import LLMCost, session_scope
 from plata.dashboard import templates
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -14,47 +16,35 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    from datetime import timedelta
     redis = get_redis()
     today = date.today()
     yesterday = today - timedelta(days=1)
-    last_7 = set((today - timedelta(days=i)).isoformat() for i in range(0, 7))
-    last_30 = set((today - timedelta(days=i)).isoformat() for i in range(0, 30))
+    last_7_cutoff = datetime.combine(today - timedelta(days=6), datetime.min.time(), tzinfo=timezone.utc)
+    last_30_cutoff = datetime.combine(today - timedelta(days=29), datetime.min.time(), tzinfo=timezone.utc)
+    today_cutoff = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+    yesterday_cutoff = datetime.combine(yesterday, datetime.min.time(), tzinfo=timezone.utc)
 
-    # Single pass over the cost keyspace: build per-agent and global-day tallies
-    # in one SCAN. The old route did 12+ SCANs (one global + one per agent +
-    # one all-time global) which took ~15s with a few thousand keys.
-    per_agent: dict[str, dict[str, float]] = {}   # name -> {date_iso -> usd}
-    per_day_global: dict[str, float] = {}         # date_iso -> usd (excludes per-agent rows)
+    # Spend: Postgres is now the source of truth (durable, no 36h TTL). One
+    # grouped query per (agent, date) and one global per-date pass.
+    per_agent: dict[str, dict[str, float]] = {}   # name -> date_iso -> usd
     agent_names: set[str] = set()
-    cost_keys: list[str] = []
-    async for ck in redis.scan_iter(match="cost:daily:*", count=1000):
-        cost_keys.append(ck)
-    if cost_keys:
-        vals = await redis.mget(*cost_keys)
-        for k, v in zip(cost_keys, vals):
-            try:
-                f = float(v or 0.0)
-            except (TypeError, ValueError):
-                continue
-            # Expected formats:
-            #   cost:daily:<YYYY-MM-DD>
-            #   cost:daily:<YYYY-MM-DD>:agent:<name>
-            parts = k.split(":")
-            if len(parts) == 3:                       # global day row
-                per_day_global[parts[2]] = per_day_global.get(parts[2], 0.0) + f
-            elif len(parts) == 5 and parts[3] == "agent":
-                date_iso = parts[2]
-                name = parts[4]
-                agent_names.add(name)
-                per_agent.setdefault(name, {})[date_iso] = per_agent.setdefault(name, {}).get(date_iso, 0.0) + f
+    date_col = func.date(LLMCost.ts).label("d")
+    async with session_scope() as session:
+        rows = (await session.execute(
+            select(LLMCost.agent, date_col, func.sum(LLMCost.cost_usd))
+            .group_by(LLMCost.agent, date_col)
+        )).all()
+    for agent, d, total in rows:
+        date_iso = d.isoformat() if hasattr(d, "isoformat") else str(d)
+        f = float(total or 0)
+        agent_names.add(agent)
+        per_agent.setdefault(agent, {})[date_iso] = per_agent[agent].get(date_iso, 0.0) + f
 
-    # Status hashes (one HSCAN-style pass via scan_iter + hgetall per match).
+    # Status hashes from Redis (live-only data, not historical).
     status_by_name: dict[str, dict] = {}
     status_keys: list[str] = []
     async for k in redis.scan_iter(match="agent_status:*", count=100):
         status_keys.append(k)
-    # Pipeline the HGETALLs.
     if status_keys:
         pipe = redis.pipeline()
         for k in status_keys:
@@ -65,16 +55,16 @@ async def index(request: Request):
             status_by_name[name] = hh or {}
             agent_names.add(name)
 
-    from datetime import datetime as _dt, timezone as _tz
     STALE_AFTER_SEC = 120
-    now_utc = _dt.now(_tz.utc)
-
-    def _sum_window(days: set[str], by_date: dict[str, float]) -> float:
-        return sum(v for d, v in by_date.items() if d in days)
-
-    agents_data = []
+    now_utc = datetime.now(timezone.utc)
     today_iso = today.isoformat()
     yesterday_iso = yesterday.isoformat()
+
+    def _sum_window(by_date: dict[str, float], cutoff_date: date) -> float:
+        cutoff = cutoff_date.isoformat()
+        return sum(v for d, v in by_date.items() if d >= cutoff)
+
+    agents_data = []
     for name in sorted(agent_names):
         data = dict(status_by_name.get(name) or {})
         data["name"] = name
@@ -86,7 +76,7 @@ async def index(request: Request):
             age = None
             if hb:
                 try:
-                    age = (now_utc - _dt.fromisoformat(hb)).total_seconds()
+                    age = (now_utc - datetime.fromisoformat(hb)).total_seconds()
                 except Exception:  # noqa: BLE001
                     age = None
             data["heartbeat_age_sec"] = age
@@ -95,16 +85,21 @@ async def index(request: Request):
         bd = per_agent.get(name, {})
         data["spend_today_usd"]     = bd.get(today_iso, 0.0)
         data["spend_yesterday_usd"] = bd.get(yesterday_iso, 0.0)
-        data["spend_7d_usd"]        = _sum_window(last_7, bd)
-        data["spend_30d_usd"]       = _sum_window(last_30, bd)
+        data["spend_7d_usd"]        = _sum_window(bd, today - timedelta(days=6))
+        data["spend_30d_usd"]       = _sum_window(bd, today - timedelta(days=29))
         data["spend_all_usd"]       = sum(bd.values())
         agents_data.append(data)
 
-    daily_total      = per_day_global.get(today_iso, 0.0)
-    yesterday_total  = per_day_global.get(yesterday_iso, 0.0)
-    last_7_total     = _sum_window(last_7, per_day_global)
-    last_30_total    = _sum_window(last_30, per_day_global)
-    all_time_total   = sum(per_day_global.values())
+    # Global totals from the same in-memory dataset.
+    all_by_date: dict[str, float] = {}
+    for _, bd in per_agent.items():
+        for d, v in bd.items():
+            all_by_date[d] = all_by_date.get(d, 0.0) + v
+    daily_total      = all_by_date.get(today_iso, 0.0)
+    yesterday_total  = all_by_date.get(yesterday_iso, 0.0)
+    last_7_total     = _sum_window(all_by_date, today - timedelta(days=6))
+    last_30_total    = _sum_window(all_by_date, today - timedelta(days=29))
+    all_time_total   = sum(all_by_date.values())
 
     return templates.TemplateResponse(
         request,

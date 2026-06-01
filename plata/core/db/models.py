@@ -329,3 +329,28 @@ class Proposal(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
     )
+
+
+class LLMCost(Base):
+    """One row per LLM call. Source of truth for spend history.
+
+    Redis `cost:daily:*` keys remain as a fast tally for live page headers
+    and budget enforcement, but they expire after 36h / 35d — losing history.
+    This table is durable and joinable.
+    """
+    __tablename__ = "llm_cost"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    agent: Mapped[str] = mapped_column(String(64), index=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8))
+
+    __table_args__ = (
+        Index("ix_llm_cost_agent_ts", "agent", "ts"),
+        Index("ix_llm_cost_ts_agent", "ts", "agent"),
+    )

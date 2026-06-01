@@ -131,8 +131,11 @@ async def _read_budget_caps() -> dict[str, float]:
     return caps
 
 
-async def _record_and_check(agent: str, cost_usd: float) -> None:
-    """Increment counters and enforce caps. Raises BudgetExceededError on circuit-breaker."""
+async def _record_and_check(agent: str, cost_usd: float,
+                             model: str | None = None,
+                             prompt_tokens: int | None = None,
+                             completion_tokens: int | None = None) -> None:
+    """Increment counters, persist to Postgres, enforce caps."""
     redis = get_redis()
     daily = _today_key()
     monthly = _month_key()
@@ -141,10 +144,24 @@ async def _record_and_check(agent: str, cost_usd: float) -> None:
     new_daily = float(await redis.incrbyfloat(daily, cost_usd))
     new_monthly = float(await redis.incrbyfloat(monthly, cost_usd))
     new_daily_agent = float(await redis.incrbyfloat(daily_agent, cost_usd))
-    # Expire keys so they roll over naturally
+    # Expire keys so they roll over naturally (history lives in Postgres).
     await redis.expire(daily, 60 * 60 * 36)
     await redis.expire(daily_agent, 60 * 60 * 36)
     await redis.expire(monthly, 60 * 60 * 24 * 35)
+
+    # Durable history: one row per LLM call. Fire-and-forget — never let a
+    # cost-row insert failure break the calling agent's actual work.
+    try:
+        from decimal import Decimal as _Dec
+        from plata.core.db import LLMCost as _LLMCost, session_scope as _ss
+        async with _ss() as session:
+            session.add(_LLMCost(
+                agent=agent, model=model,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                cost_usd=_Dec(str(cost_usd)),
+            ))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("llm_cost_persist_failed", agent=agent, error=str(exc)[:160])
 
     caps = await _read_budget_caps()
     daily_cap = caps.get("daily_total", float("inf"))
@@ -265,7 +282,12 @@ class LLMClient:
                 reported_cost = None
             estimated = _estimate_cost_usd(self.model, usage.prompt_tokens, usage.completion_tokens)
             cost = reported_cost if (reported_cost is not None and reported_cost > 0) else estimated
-            await _record_and_check(self.agent, cost)
+            await _record_and_check(
+                self.agent, cost,
+                model=self.model,
+                prompt_tokens=getattr(usage, "prompt_tokens", None),
+                completion_tokens=getattr(usage, "completion_tokens", None),
+            )
             if trace is not None:
                 try:
                     trace.update(

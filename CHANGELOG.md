@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.141 — 2026-05-29
+- **🗄️ LLM cost moved to Postgres (durable). Redis becomes a fast tally only.** The old setup stored every cost in `cost:daily:*` Redis keys with **36-hour / 35-day TTLs** — meaning historical spend was being silently deleted as keys expired. Now:
+  - New `llm_cost` table (alembic migration `20260529_0000`) — one row per LLM call with ts, agent, model, prompt_tokens, completion_tokens, cost_usd. Indexed on `(agent, ts)` and `(ts, agent)`.
+  - `LLMClient.complete()` inserts a row per call on top of the existing Redis incrbyfloat (Redis kept for sub-ms budget enforcement and live header totals).
+  - `/agents/` now reads spend from Postgres via a single `GROUP BY agent, DATE(ts)` query — durable history, no TTL surprises, and ~5× faster than the previous Redis SCAN+MGET approach.
+  - **One-shot backfill on dashboard startup**: copies any existing `cost:daily:*:agent:*` Redis key into the new table (one row per `(agent, date)` with noon-UTC ts), then marks each key with a `:backfilled` sentinel so re-runs are idempotent. Today's accumulated spend survives the migration; tomorrow's writes go directly to Postgres.
+
 ## 2.24.140 — 2026-05-29
 - **⚡ `/agents/` loads in <1s instead of ~15s.** The route used to do 12+ Redis `SCAN`s — one global, then one per-agent for the all-time total, then another global for the all-time daily sum. Each SCAN walked thousands of `cost:daily:*` keys. Rewrote as a **single SCAN + one MGET**: one pass collects every `cost:daily:*` and `cost:daily:*:agent:*` key, MGET fetches every value in one batch, then per-agent and per-window totals are computed from the in-memory dict. Status hashes are also pipelined now. Same result, ~15× faster.
 
