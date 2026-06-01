@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.140 — 2026-05-29
+- **⚡ `/agents/` loads in <1s instead of ~15s.** The route used to do 12+ Redis `SCAN`s — one global, then one per-agent for the all-time total, then another global for the all-time daily sum. Each SCAN walked thousands of `cost:daily:*` keys. Rewrote as a **single SCAN + one MGET**: one pass collects every `cost:daily:*` and `cost:daily:*:agent:*` key, MGET fetches every value in one batch, then per-agent and per-window totals are computed from the in-memory dict. Status hashes are also pipelined now. Same result, ~15× faster.
+
 ## 2.24.139 — 2026-05-29
 - **🐛 `/errors/` now logs why an agent went stale.** The health watchdog had `if age > 180 and not halted:` — so any agent that died **after** being halted (the common case here: executor and risk_manager were halted, then their containers died) got silently skipped by the staleness check. Nothing reached `ErrorLog`, so `/errors/` was empty even with 5 dead agents. Removed the `not halted` clause: the watchdog now logs every stale critical agent, includes a tail noting if it was also halted before going stale, and tells the user to restart the Railway container. Same 10-minute cooldown per agent so it doesn't spam.
 - **🪧 Halted-agents banner ignores stale processes.** The "⚠ 2 agents halted: executor, risk_manager" banner kept showing for dead processes because `/api/agents/halted` only checked the `halted` field, not heartbeat age. Now: stale agents (heartbeat > 2 min) are excluded from the banner — they're dead, not pausable, and surfaced separately as STALE on `/agents/`. The banner is now reserved for truly-halted-but-alive agents the user can actually resume.
