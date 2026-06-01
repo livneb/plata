@@ -39,12 +39,42 @@ async def _source_rows(redis) -> list[dict]:
             "status": h.get("status") or "—",
             "last_poll_at": h.get("last_poll_at"),
             "last_fetched": h.get("last_fetched"),
+            "last_published": h.get("last_published"),
+            "last_dup": h.get("last_dup"),
+            "last_filtered": h.get("last_filtered"),
+            "last_filtered_reasons": h.get("last_filtered_reasons"),
             "last_error": h.get("last_error"),
             "interval_sec": h.get("interval_sec"),
             "seconds_until_next": seconds_until,
             "run_now_pending": h.get("run_now") == "1",
+            "lifetime_raw": h.get("lifetime_raw") or "0",
+            "lifetime_published": h.get("lifetime_published") or "0",
+            "lifetime_dup": h.get("lifetime_dup") or "0",
+            "lifetime_filtered": h.get("lifetime_filtered") or "0",
+            "lifetime_polls": h.get("lifetime_polls") or "0",
         })
     return rows
+
+
+@router.get("/source/{name}/log", response_class=HTMLResponse)
+async def source_log(name: str, request: Request):
+    """Last 20 polls for a single source — what came in, what got dropped, why."""
+    if name not in SOURCE_NAMES:
+        return RedirectResponse(url="/news/", status_code=303)
+    redis = get_redis()
+    import json as _json
+    raw = await redis.lrange(f"scraper:source:{name}:log", 0, 19) or []
+    entries = []
+    for r in raw:
+        try:
+            entries.append(_json.loads(r))
+        except Exception:  # noqa: BLE001
+            continue
+    h = await redis.hgetall(f"scraper:source:{name}") or {}
+    return templates.TemplateResponse(
+        request, "pages/news_source_log.html",
+        {"active": "news", "source_name": name, "entries": entries, "stats": h},
+    )
 
 
 @router.get("/", response_class=HTMLResponse)

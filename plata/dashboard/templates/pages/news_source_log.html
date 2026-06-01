@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ source_name }} — recent polls · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold">{{ source_name }} — recent polls</h1>
+      <p class="text-xs text-gray-500">Last 20 polls. Each row shows what came back from the source and how it broke down: <span class="font-mono">raw</span> = items returned by source; <span class="font-mono">dup</span> = matched a recent URL/title; <span class="font-mono">filtered</span> = dropped by content filter; <span class="font-mono">published</span> = forwarded to the graph-ingestion stream.</p>
+    </div>
+    <a href="/news/" class="text-sm text-blue-500 hover:underline">← News pipeline</a>
+  </div>
+
+  <!-- Lifetime totals -->
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="text-[10px] uppercase text-gray-500">Polls</div>
+      <div class="text-lg font-mono">{{ stats.get('lifetime_polls') or '0' }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="text-[10px] uppercase text-gray-500">Raw fetched</div>
+      <div class="text-lg font-mono">{{ stats.get('lifetime_raw') or '0' }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="text-[10px] uppercase text-gray-500">Published</div>
+      <div class="text-lg font-mono text-emerald-500">{{ stats.get('lifetime_published') or '0' }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="text-[10px] uppercase text-gray-500">Dup-dropped</div>
+      <div class="text-lg font-mono text-gray-400">{{ stats.get('lifetime_dup') or '0' }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="text-[10px] uppercase text-gray-500">Filter-dropped</div>
+      <div class="text-lg font-mono text-amber-500">{{ stats.get('lifetime_filtered') or '0' }}</div>
+    </div>
+  </div>
+
+  <!-- Per-poll table -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead class="text-[10px] uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+        <tr>
+          <th class="px-3 py-2">When</th>
+          <th class="px-3 py-2">Raw</th>
+          <th class="px-3 py-2">Published</th>
+          <th class="px-3 py-2">Dup</th>
+          <th class="px-3 py-2">Filtered (by reason)</th>
+          <th class="px-3 py-2">Sample titles</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+        <tr class="border-t border-gray-100 dark:border-gray-700">
+          <td class="px-3 py-2 text-xs text-gray-500"><time data-utc="{{ e.ts }}">{{ e.ts }}</time></td>
+          <td class="px-3 py-2 font-mono text-xs">{{ e.raw }}</td>
+          <td class="px-3 py-2 font-mono text-xs text-emerald-500">{{ e.published }}</td>
+          <td class="px-3 py-2 font-mono text-xs text-gray-400">{{ e.dup }}</td>
+          <td class="px-3 py-2 font-mono text-[11px]">
+            {% if e.filtered_reasons %}
+              {% for reason, count in e.filtered_reasons.items() %}
+              <span class="inline-block px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 mr-1 mb-1" title="{{ reason }}">{{ reason }}: {{ count }}</span>
+              {% endfor %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="px-3 py-2 text-[11px] text-gray-500 max-w-md">
+            {% if e.sample_titles %}
+              {% for t in e.sample_titles %}
+              <div class="truncate">{{ t }}</div>
+              {% endfor %}
+            {% else %}<span class="text-gray-400">— no items —</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="px-3 py-6 text-center text-gray-400">No polls recorded yet. Click ▶ Run now on /news/ to trigger one.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="text-xs text-gray-500">For the actual published signals, see <a href="/history/?hours=24&source={{ source_name }}" class="text-blue-500 hover:underline">📜 Last results</a>. For all errors raised during a poll, see <a href="/errors/" class="text-blue-500 hover:underline">/errors/</a> filtered to scraper.</p>
+</div>
+{% endblock %}

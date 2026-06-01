@@ -62,14 +62,53 @@ class Scraper(BaseAgent):
             await redis.hdel(key, "run_now")
             try:
                 signals = await src.poll()
+                outcomes: dict[str, int] = {"dup": 0, "injection": 0, "published": 0}
+                filtered_reasons: dict[str, int] = {}
                 for s in signals:
-                    await self._process_one(s)
+                    r = await self._process_one(s)
+                    if r.startswith("filtered:"):
+                        reason = r.split(":", 2)[1] if ":" in r[len("filtered:"):] else r[len("filtered:"):]
+                        # Use the leading bucket (e.g. "blocked" from "blocked:neighbor")
+                        bucket = reason.split(":", 1)[0]
+                        filtered_reasons[bucket] = filtered_reasons.get(bucket, 0) + 1
+                    elif r in outcomes:
+                        outcomes[r] += 1
+                # Per-source totals + last-poll detail row pushed onto a 20-entry
+                # ring so /news/?row=<n>/log shows recent activity.
+                raw = len(signals)
+                published = outcomes["published"]
+                dup = outcomes["dup"]
+                filt = sum(filtered_reasons.values())
+                inj = outcomes["injection"]
+                await redis.hincrby(key, "lifetime_raw", raw)
+                await redis.hincrby(key, "lifetime_published", published)
+                await redis.hincrby(key, "lifetime_dup", dup)
+                await redis.hincrby(key, "lifetime_filtered", filt)
+                await redis.hincrby(key, "lifetime_polls", 1)
                 next_at = (datetime.now(timezone.utc).timestamp() + interval)
+                filt_blob = ",".join(f"{k}:{v}" for k, v in filtered_reasons.items()) or ""
                 await redis.hset(key, mapping={
                     "status": "idle", "last_poll_at": now,
-                    "last_fetched": len(signals), "last_error": "",
+                    "last_fetched": raw,
+                    "last_published": published,
+                    "last_dup": dup,
+                    "last_filtered": filt,
+                    "last_filtered_reasons": filt_blob,
+                    "last_error": "",
                     "next_poll_at": str(int(next_at)),
                 })
+                # Push last-poll detail into a recent-polls ring (latest first).
+                log_key = f"{key}:log"
+                import json as _json
+                entry = _json.dumps({
+                    "ts": now,
+                    "raw": raw, "published": published, "dup": dup,
+                    "filtered": filt, "filtered_reasons": filtered_reasons,
+                    "injection": inj,
+                    "sample_titles": [(s.title or "")[:120] for s in signals[:3]],
+                })
+                await redis.lpush(log_key, entry)
+                await redis.ltrim(log_key, 0, 19)
             except Exception as e:
                 next_at = (datetime.now(timezone.utc).timestamp() + interval)
                 await self.error_reporter.capture_exception(
@@ -94,7 +133,8 @@ class Scraper(BaseAgent):
                 await asyncio.sleep(2)
                 elapsed += 2
 
-    async def _process_one(self, signal: RawSignal) -> None:
+    async def _process_one(self, signal: RawSignal) -> str:
+        """Returns the outcome label: 'dup' | 'injection' | 'filtered:<reason>' | 'published'."""
         # Sanitize body in place so archive stores clean content too.
         clean_body = sanitize(signal.body, max_chars=8000)
         signal = signal.model_copy(update={"body": clean_body})
@@ -120,7 +160,7 @@ class Scraper(BaseAgent):
 
         if is_dup:
             self.log.debug("dedup_match", source=str(signal.source), master_ulid=master)
-            return
+            return "dup"
 
         if detect_likely_injection(signal.body):
             await self.error_reporter.capture(
@@ -129,7 +169,7 @@ class Scraper(BaseAgent):
                 message="Source content contained injection-like phrases; archived only.",
                 context={"source": str(signal.source), "signal_ulid": signal.ulid},
             )
-            return
+            return "injection"
 
         # Content filter — drop off-topic stories before they reach the LLM.
         try:
@@ -143,6 +183,7 @@ class Scraper(BaseAgent):
             await _r.hincrby("scraper:filter_drops", drop_reason.split(":", 1)[0], 1)
             self.log.debug("content_filter_drop", source=str(signal.source),
                            reason=drop_reason, title=(signal.title or "")[:80])
-            return
+            return f"filtered:{drop_reason}"
 
         await publish(Streams.RAW_SIGNALS, signal)
+        return "published"
