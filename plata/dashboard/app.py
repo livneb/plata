@@ -87,6 +87,58 @@ async def _lifespan(_app: FastAPI):
         await ensure_aux_tables()
     except Exception as exc:  # noqa: BLE001
         _log.warning("aux_tables_create_failed", error=str(exc)[:160])
+    # One-shot backfill: copy any live Redis cost:daily:*:agent:* keys into the
+    # new llm_cost table so that the migration moment doesn't lose recent data.
+    # Each (date, agent) becomes ONE row with synthetic noon-UTC timestamp.
+    # Idempotent: marks each key as backfilled with a sentinel `:backfilled` key.
+    try:
+        from datetime import datetime as _dt, time as _t, timezone as _tz
+        from decimal import Decimal as _Dec
+        from plata.core.bus import get_redis as _gr
+        from plata.core.db import LLMCost as _LLMCost, session_scope as _ss
+        from sqlalchemy import select as _sel, func as _f
+        r = _gr()
+        moved = 0
+        async with _ss() as session:
+            async for ck in r.scan_iter(match="cost:daily:*:agent:*", count=500):
+                if await r.exists(f"{ck}:backfilled"):
+                    continue
+                parts = ck.split(":")
+                if len(parts) != 5:
+                    continue
+                date_iso = parts[2]; agent = parts[4]
+                try:
+                    d = _dt.fromisoformat(date_iso).date()
+                except Exception:  # noqa: BLE001
+                    continue
+                # Skip if a row already exists for this (agent, date) — protects
+                # against re-running on a dashboard restart.
+                date_col = _f.date(_LLMCost.ts)
+                exists = (await session.execute(
+                    _sel(_LLMCost.id).where(_LLMCost.agent == agent, date_col == d).limit(1)
+                )).scalar_one_or_none()
+                if exists:
+                    await r.set(f"{ck}:backfilled", "1", ex=60 * 60 * 24 * 365)
+                    continue
+                raw = await r.get(ck)
+                try:
+                    val = float(raw or 0)
+                except (TypeError, ValueError):
+                    continue
+                if val <= 0:
+                    continue
+                ts = _dt.combine(d, _t(12, 0, 0), tzinfo=_tz.utc)
+                session.add(_LLMCost(
+                    ts=ts, agent=agent, model=None,
+                    prompt_tokens=None, completion_tokens=None,
+                    cost_usd=_Dec(str(val)),
+                ))
+                await r.set(f"{ck}:backfilled", "1", ex=60 * 60 * 24 * 365)
+                moved += 1
+        if moved:
+            _log.info("llm_cost_backfill_complete", moved=moved)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("llm_cost_backfill_failed", error=str(exc)[:160])
     try:
         from plata.config import credentials as _creds
         await _creds.ensure_table()
