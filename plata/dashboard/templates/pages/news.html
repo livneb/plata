@@ -24,7 +24,7 @@
           <th class="px-3 py-2" title="Items dropped by the content filter (allowlist/blocklist/min-title).">Filtered</th>
           <th class="px-3 py-2">Interval</th>
           <th class="px-3 py-2">Next in</th>
-          <th class="px-3 py-2">How to verify</th>
+          <th class="px-3 py-2">Diagnosis</th>
           <th class="px-3 py-2 text-right">Actions</th>
         </tr>
       </thead>
@@ -58,7 +58,21 @@
             {% elif src.seconds_until_next <= 0 %}<span class="text-emerald-500">now</span>
             {% else %}{{ src.seconds_until_next }}s{% endif %}
           </td>
-          <td class="px-3 py-2 text-[11px] text-gray-500 max-w-md leading-snug">{{ verify_hints.get(src.name, '—') }}</td>
+          <td class="px-3 py-2 text-[11px] max-w-md leading-snug">
+            {% if src.diagnose_message %}
+              {% set ds = src.diagnose_severity %}
+              <div class="p-1.5 rounded border
+                {% if ds == 'error' %}border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300
+                {% elif ds == 'warn' %}border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300
+                {% else %}border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-500{% endif %}">
+                {% if ds == 'error' %}🛑{% elif ds == 'warn' %}⚠{% else %}ℹ{% endif %}
+                {{ src.diagnose_message }}
+              </div>
+            {% else %}
+              <span class="text-emerald-500">✓ Healthy.</span>
+              <span class="block text-[10px] text-gray-500 mt-1">{{ verify_hints.get(src.name, '') }}</span>
+            {% endif %}
+          </td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
             <a href="/news/source/{{ src.name }}/log" class="text-xs text-blue-500 hover:underline mr-3" title="Last 20 polls — raw/published/dup/filtered with sample titles.">📊 Recent polls</a>
             <a href="/history/?hours=24&source={{ src.name }}" class="text-xs text-blue-500 hover:underline mr-3" title="Show the actual signals fetched from this source in the last 24h.">📜 Last results</a>

@@ -21,8 +21,86 @@ router = APIRouter(prefix="/news", tags=["news"])
 SOURCE_NAMES = ["gdelt", "reddit", "cryptopanic", "rss"]
 
 
+async def _diagnose(name: str, h: dict, cfg: dict, now_ts: float,
+                     scraper_status: dict, settings_obj) -> tuple[str, str]:
+    """Return (severity, message) — '' severity means healthy."""
+    # 1. Scraper agent stale or never booted?
+    scraper_hb = scraper_status.get("last_heartbeat")
+    if scraper_hb:
+        from datetime import datetime as _dt
+        try:
+            age = (_dt.now().astimezone() - _dt.fromisoformat(scraper_hb)).total_seconds()
+            if age > 180:
+                return ("error", f"Scraper agent heartbeat is {int(age // 60)}m old — "
+                        "the ingestion_hub container is probably dead. "
+                        "Restart it on Railway; no source will poll until then.")
+        except Exception:  # noqa: BLE001
+            pass
+    elif scraper_status:
+        return ("error", "Scraper agent has never heartbeated since boot — its "
+                "background loop may have crashed before reaching the poll routine. "
+                "Check /errors/.")
+
+    # 2. Last poll too long ago? (interval × 3 is generous slack for jitter)
+    last_poll = h.get("last_poll_at")
+    interval = int(h.get("interval_sec") or 0)
+    if last_poll and interval:
+        from datetime import datetime as _dt
+        try:
+            age = (_dt.now().astimezone() - _dt.fromisoformat(last_poll)).total_seconds()
+            if age > interval * 3 and age > 600:
+                hrs = int(age // 3600); mins = int((age % 3600) // 60)
+                return ("error", f"Last poll was {hrs}h{mins}m ago — interval is "
+                        f"{interval}s, so this should have polled multiple times "
+                        "by now. Scraper task is wedged or the container restarted "
+                        "without re-starting the poll loops.")
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 3. Source-specific prerequisites
+    if name == "reddit":
+        if not (settings_obj.reddit_client_id and settings_obj.reddit_client_secret):
+            return ("warn", "Reddit credentials are missing — `reddit_client_id` "
+                    "and `reddit_client_secret` are not set in /settings/?tab=api "
+                    "or as env vars. The poll() method returns [] until they're set.")
+    if name == "rss":
+        feeds = cfg.get("rss_feeds") or []
+        if not feeds:
+            return ("warn", "No RSS feeds configured. Add at least one feed in the "
+                    "'RSS feeds' section below (format: 'Name | https://feed/url'), "
+                    "then save.")
+
+    # 4. Disabled in config
+    enabled_key = f"{name}_enabled"
+    if enabled_key in cfg and not cfg.get(enabled_key):
+        return ("info", f"This source is disabled in the Sources panel below. "
+                "Enable the checkbox + Save to start polling.")
+
+    # 5. Last error?
+    last_err = h.get("last_error") or ""
+    if last_err:
+        return ("warn", f"Last poll errored: {last_err}")
+
+    # 6. Polled but raw=0 consistently
+    polls = int(h.get("lifetime_polls") or 0)
+    raw = int(h.get("lifetime_raw") or 0)
+    if polls >= 5 and raw == 0:
+        if name == "gdelt":
+            return ("warn", "GDELT has run 5+ times and returned zero articles — "
+                    "either the query is too narrow or you're getting rate-limited. "
+                    "Edit the GDELT query in the panel below.")
+        return ("warn", f"Source has run {polls} times with zero results — the "
+                "upstream API may be returning empty for the current query/config.")
+
+    return ("", "")
+
+
 async def _source_rows(redis) -> list[dict]:
     import time
+    from plata.config.settings import get_settings as _gs
+    settings_obj = _gs()
+    cfg = await get_news_config()
+    scraper_status = await redis.hgetall("agent_status:scraper") or {}
     rows = []
     now_ts = time.time()
     for name in SOURCE_NAMES:
@@ -34,6 +112,7 @@ async def _source_rows(redis) -> list[dict]:
                 seconds_until = int(next_poll_at) - int(now_ts)
             except ValueError:
                 pass
+        severity, message = await _diagnose(name, h, cfg, now_ts, scraper_status, settings_obj)
         rows.append({
             "name": name,
             "status": h.get("status") or "—",
@@ -52,6 +131,8 @@ async def _source_rows(redis) -> list[dict]:
             "lifetime_dup": h.get("lifetime_dup") or "0",
             "lifetime_filtered": h.get("lifetime_filtered") or "0",
             "lifetime_polls": h.get("lifetime_polls") or "0",
+            "diagnose_severity": severity,
+            "diagnose_message": message,
         })
     return rows
 
