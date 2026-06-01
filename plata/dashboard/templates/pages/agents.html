@@ -56,11 +56,11 @@
       {% if a.halted == 'stopped' %}
       <span class="bg-gray-200 text-gray-700 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300"
             title="Agent has historical LLM spend but no live heartbeat — service may have been removed, renamed, or its heartbeat key expired. Its past spend still contributes to the daily totals at the top.">STOPPED</span>
-      {% elif a.halted == 'True' %}
-      <span class="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded">HALTED</span>
       {% elif a.stale %}
       <span class="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded"
-            title="Last heartbeat is older than 2 minutes — the orchestrator considers this agent dead (see Activity history for the matching alert).">STALE</span>
+            title="Last heartbeat is older than 2 minutes — the process is likely dead, not halted. Click Resume won't help; restart the container on Railway (or check container logs).">STALE</span>
+      {% elif a.halted == 'True' %}
+      <span class="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded">HALTED</span>
       {% else %}
       <span class="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded">RUNNING</span>
       {% endif %}
@@ -114,10 +114,16 @@
   });
 
   document.getElementById('resume-all')?.addEventListener('click', async () => {
-    const ok = await plataConfirm({ title: 'Resume all agents', message: 'Resume every agent system-wide?', confirmLabel: 'Resume all' });
+    const ok = await plataConfirm({ title: 'Resume all agents', message: 'Resume every agent system-wide? Note: STALE agents are dead processes — Resume cannot bring them back; restart their Railway container.', confirmLabel: 'Resume all' });
     if (!ok) return;
     const r = await fetch('/api/resume', { method: 'POST' });
-    plataToast(r.ok ? 'Resume-all sent.' : 'Resume-all failed.', r.ok ? 'success' : 'error');
+    if (!r.ok) { plataToast('Resume-all failed.', 'error'); return; }
+    let j = {};
+    try { j = await r.json(); } catch {}
+    const a = (j.agents_cleared || []).length;
+    const s = (j.sources_cleared || []).length;
+    plataToast(`Resume-all sent. Cleared halted flag on ${a} agent(s), ${s} source(s). Refreshing…`, 'success');
+    setTimeout(() => location.reload(), 800);
   });
   document.getElementById('halt-all')?.addEventListener('click', async () => {
     const ok = await plataConfirm({ title: 'Halt all agents', message: 'Halt every agent system-wide?', confirmLabel: 'Halt all', danger: true });
