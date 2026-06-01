@@ -3,6 +3,9 @@
 Each entry is one deployed version. Most recent first.
 
 <<<<<<< HEAD
+## 2.24.148 — 2026-06-01
+- **🐛 Stop flooding `/activity/history` with `Agent X appears dead` rows.** The orchestrator's death detector ran every 30s and wrote one `err` row per dead agent per cycle — five dead agents = ~600 rows/hour, drowning everything else. Now: log once per "dead spell" using a `orchestrator:dead_logged` Redis hash as a per-agent marker. When the agent's heartbeat returns, the marker clears so a future death is reported normally. Same one-shot semantics applied to the `HALT triggered: critical agent dead` notice.
+
 ## 2.24.147 — 2026-06-01
 - **🐛 ROOT-CAUSE FOUND: reddit poll has been silently NameError-ing since v2.24.130.** The constant `SUBREDDITS` was deleted when subreddits became config-driven, but line 53 of `reddit.py` still referenced the uppercase global. Every poll raised `NameError: name 'SUBREDDITS' is not defined` and the runner's blanket try/except just bumped the error counter. **No items ever made it through Reddit** — explains the lifetime=0 you saw. Fixed: loop variable now reads the lowercase local `subreddits` populated from config.
 - **🔬 Real per-source poll probe — actual evidence, not hand-wavy diagnosis.** New `scraper:source:<name>:probe` Redis hash captures what really happened on the last poll:

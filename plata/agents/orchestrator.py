@@ -84,24 +84,38 @@ class Orchestrator(BaseAgent):
             async for k in redis.scan_iter(match="agent_status:*", count=100):
                 keys.append(k)
             now = datetime.now(timezone.utc)
+            alive_now: set[str] = set()
             for k in keys:
                 status = await redis.hgetall(k)
                 last_hb = status.get("last_heartbeat")
                 if not last_hb:
                     continue
                 last_dt = datetime.fromisoformat(last_hb)
-                if (now - last_dt).total_seconds() > DEAD_AGENT_THRESHOLD_SEC:
-                    agent_name = k.split(":")[-1]
-                    self.log.warning("agent_appears_dead", agent=agent_name, last_heartbeat=last_hb)
-                    await log_action(self.name, f"Agent {agent_name} appears dead", kind="err")
-                    # If a trading-critical agent is dead → halt.
-                    if agent_name in {"risk_manager", "executor"}:
-                        await publish_channel(Channels.SYSTEM_HALT, {
-                            "reason": "critical_agent_dead", "agent": agent_name,
-                        })
-                        await log_action(
-                            self.name,
-                            f"HALT triggered: critical agent dead ({agent_name})",
-                            kind="err",
-                        )
+                agent_name = k.split(":")[-1]
+                is_dead = (now - last_dt).total_seconds() > DEAD_AGENT_THRESHOLD_SEC
+                if not is_dead:
+                    alive_now.add(agent_name)
+                    # Clear the "already-logged-dead" marker so a future death
+                    # will be reported again.
+                    await redis.hdel("orchestrator:dead_logged", agent_name)
+                    continue
+                # Only log once per dead spell — not every 30s check while the
+                # agent stays dead. Was flooding /activity/history with one
+                # "Agent X appears dead" row per agent per minute.
+                already_logged = await redis.hget("orchestrator:dead_logged", agent_name)
+                if already_logged:
+                    continue
+                await redis.hset("orchestrator:dead_logged", agent_name, last_hb)
+                self.log.warning("agent_appears_dead", agent=agent_name, last_heartbeat=last_hb)
+                await log_action(self.name, f"Agent {agent_name} appears dead", kind="err")
+                # If a trading-critical agent is dead → halt (also once per spell).
+                if agent_name in {"risk_manager", "executor"}:
+                    await publish_channel(Channels.SYSTEM_HALT, {
+                        "reason": "critical_agent_dead", "agent": agent_name,
+                    })
+                    await log_action(
+                        self.name,
+                        f"HALT triggered: critical agent dead ({agent_name})",
+                        kind="err",
+                    )
             await log_action(self.name, f"Heartbeat check across {len(keys)} agents")
