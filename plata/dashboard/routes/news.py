@@ -105,6 +105,7 @@ async def _source_rows(redis) -> list[dict]:
     now_ts = time.time()
     for name in SOURCE_NAMES:
         h = await redis.hgetall(f"scraper:source:{name}") or {}
+        probe = await redis.hgetall(f"scraper:source:{name}:probe") or {}
         next_poll_at = h.get("next_poll_at")
         seconds_until = None
         if next_poll_at:
@@ -133,6 +134,7 @@ async def _source_rows(redis) -> list[dict]:
             "lifetime_polls": h.get("lifetime_polls") or "0",
             "diagnose_severity": severity,
             "diagnose_message": message,
+            "probe": probe,
         })
     return rows
 

@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 
 import httpx
 
-from plata.agents.scraper.news_config import DEFAULTS as NEWS_DEFAULTS, get_config as get_news_config
+from plata.agents.scraper.news_config import (
+    DEFAULTS as NEWS_DEFAULTS,
+    get_config as get_news_config,
+    record_poll_probe,
+)
 from plata.agents.scraper.sources.base_source import BaseSource
 from plata.core.observability import get_logger
 from plata.core.schemas import RawSignal, SignalSource
@@ -39,15 +43,26 @@ class GdeltSource(BaseSource):
             "sort": "datedesc",
         }
         signals: list[RawSignal] = []
+        probe_kwargs: dict = {"url": BASE_URL, "query": query[:200]}
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(BASE_URL, params=params)
+                probe_kwargs["http_status"] = r.status_code
+                probe_kwargs["final_url"] = str(r.url)
+                probe_kwargs["response_size"] = len(r.content or b"")
+                probe_kwargs["sample"] = (r.text or "")[:300]
                 r.raise_for_status()
                 data = r.json()
-        except Exception:
+        except Exception as exc:
             _log.exception("gdelt_fetch_failed")
+            probe_kwargs["error_type"] = type(exc).__name__
+            probe_kwargs["error_message"] = str(exc)[:240]
+            await record_poll_probe("gdelt", **probe_kwargs)
             return []
-        for art in data.get("articles", []):
+        articles = data.get("articles") or []
+        probe_kwargs["item_count"] = len(articles)
+        await record_poll_probe("gdelt", **probe_kwargs)
+        for art in articles:
             url = art.get("url")
             if not url or url in self._seen_urls:
                 continue
