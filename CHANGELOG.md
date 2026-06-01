@@ -2,6 +2,7 @@
 
 Each entry is one deployed version. Most recent first.
 
+<<<<<<< HEAD
 ## 2.24.147 — 2026-06-01
 - **🐛 ROOT-CAUSE FOUND: reddit poll has been silently NameError-ing since v2.24.130.** The constant `SUBREDDITS` was deleted when subreddits became config-driven, but line 53 of `reddit.py` still referenced the uppercase global. Every poll raised `NameError: name 'SUBREDDITS' is not defined` and the runner's blanket try/except just bumped the error counter. **No items ever made it through Reddit** — explains the lifetime=0 you saw. Fixed: loop variable now reads the lowercase local `subreddits` populated from config.
 - **🔬 Real per-source poll probe — actual evidence, not hand-wavy diagnosis.** New `scraper:source:<name>:probe` Redis hash captures what really happened on the last poll:
@@ -15,6 +16,8 @@ Each entry is one deployed version. Most recent first.
 - **🔎 `/news/` shows a "Last poll probe ↓" disclosure** under each Diagnosis cell. Click to expand and see HTTP code, final URL (clickable), item count, response sample, and any error. This is what should have been there from the start — concrete evidence per source.
 - Wired into all four sources: gdelt, cryptopanic, reddit, rss.
 
+=======
+>>>>>>> origin/master
 ## 2.24.146 — 2026-06-01
 - **🩺 Per-source Diagnosis column on `/news/`** replaces the static "How to verify" text. Each row now tells you concretely why it's producing zero results. Ladder of checks (first match wins):
   1. Scraper agent heartbeat older than 180s → "Scraper agent heartbeat is Nm old — ingestion_hub container is probably dead. Restart on Railway; no source will poll until then."
