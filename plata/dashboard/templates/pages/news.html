@@ -1,32 +1,6 @@
 {% extends "base.html" %}
 {% block title %}News pipeline · Plata{% endblock %}
 {% block content %}
-<script>
-  // Auto-refresh the source schedule every 5s without losing the form scroll position.
-  (function () {
-    if (window.__newsRefresh) return; window.__newsRefresh = true;
-    setInterval(() => {
-      if (document.activeElement && ['TEXTAREA','INPUT'].includes(document.activeElement.tagName)) return;
-      const sb = document.documentElement.scrollTop;
-      fetch(location.pathname, { credentials: 'same-origin' })
-        .then(r => r.text())
-        .then(html => {
-          const m = html.match(/<h2[^>]*>Source schedule<\/h2>[\s\S]*?<\/table>\s*<\/div>/);
-          if (!m) return;
-          const cur = document.querySelector('h2');
-          if (!cur) return;
-          const wrap = cur.closest('.rounded-lg');
-          if (!wrap) return;
-          // Replace inner table+header with fresh markup
-          const wrapHtml = '<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto"><div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700"><h2 class="font-semibold">Source schedule</h2><span class="text-[10px] text-gray-400">Auto-refresh every 5s</span></div>' + m[0] + '</div>';
-          const tmp = document.createElement('div'); tmp.innerHTML = wrapHtml;
-          if (tmp.firstChild) wrap.replaceWith(tmp.firstChild);
-          document.documentElement.scrollTop = sb;
-        }).catch(()=>{});
-    }, 5000);
-  })();
-</script>
-
 <div class="space-y-4">
   <h1 class="text-2xl font-semibold">News pipeline</h1>
   <p class="text-xs text-gray-500">Control where Plata pulls stories from and what makes it past the content filter into the strategist. Changes apply on the next poll — no restart needed.</p>
@@ -35,7 +9,7 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
       <h2 class="font-semibold">Source schedule</h2>
-      <span class="text-[10px] text-gray-400">Auto-refresh every 5s</span>
+      <a href="/news/" class="text-[10px] text-blue-500 hover:underline">↻ refresh</a>
     </div>
     <table class="w-full text-sm text-left">
       <thead class="text-[10px] uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
