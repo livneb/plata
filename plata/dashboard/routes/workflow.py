@@ -67,12 +67,19 @@ async def _source_cards() -> list[dict[str, Any]]:
     """Per-source cards. Returned with `lane` set based on the source's current state."""
     redis = get_redis()
     cards: list[dict[str, Any]] = []
+    keys: list[str] = []
     async for k in redis.scan_iter(match="scraper:source:*", count=100):
-        # v2.24.137 added `scraper:source:<name>:log` LISTS (recent-polls ring).
-        # The SCAN pattern matches them too — skip so HGETALL doesn't WRONGTYPE.
         if k.endswith(":log"):
             continue
-        data = await redis.hgetall(k)
+        keys.append(k)
+    if not keys:
+        return cards
+    pipe = redis.pipeline()
+    for k in keys:
+        pipe.hgetall(k)
+    results = await pipe.execute()
+    for k, data in zip(keys, results):
+        data = data or {}
         name = k.split(":")[-1]
         raw = data.get("status") or "sleeping"
         # Status badge value
@@ -241,11 +248,17 @@ async def _active_cards() -> list[dict[str, Any]]:
     """Event-driven observers — orchestrator, telegram bot, trade sampler."""
     redis = get_redis()
     cards: list[dict[str, Any]] = []
-    for name in ("orchestrator", "telegram_bot", "trade_sampler"):
-        data = await redis.hgetall(f"agent_status:{name}")
+    names = ("orchestrator", "telegram_bot", "trade_sampler")
+    pipe = redis.pipeline()
+    for name in names:
+        pipe.hgetall(f"agent_status:{name}")
+        pipe.lrange(f"agent_activity:{name}", 0, 0)
+    results = await pipe.execute()
+    for i, name in enumerate(names):
+        data = results[i * 2] or {}
+        recent = results[i * 2 + 1] or []
         if not data:
             continue
-        recent = await redis.lrange(f"agent_activity:{name}", 0, 0)
         last_action = ""
         if recent:
             parts = recent[0].split("|", 2)
@@ -344,13 +357,32 @@ async def _doing_cards() -> list[dict[str, Any]]:
     """One card per agent with in_flight > 0."""
     redis = get_redis()
     cards = []
+    keys: list[str] = []
     async for k in redis.scan_iter(match="agent_status:*", count=100):
-        data = await redis.hgetall(k)
+        keys.append(k)
+    if not keys:
+        return cards
+    pipe = redis.pipeline()
+    for k in keys:
+        pipe.hgetall(k)
+    statuses = await pipe.execute()
+    # Pipeline the activity lookups only for agents that need them.
+    needs_activity: list[tuple[str, dict]] = []
+    for k, data in zip(keys, statuses):
+        data = data or {}
         name = k.split(":")[-1]
         in_flight = int(data.get("in_flight") or 0)
         if in_flight <= 0 or name in ("orchestrator", "telegram_bot"):
             continue
-        recent = await redis.lrange(f"agent_activity:{name}", 0, 0)
+        needs_activity.append((name, data))
+    if not needs_activity:
+        return cards
+    pipe = redis.pipeline()
+    for name, _ in needs_activity:
+        pipe.lrange(f"agent_activity:{name}", 0, 0)
+    activities = await pipe.execute()
+    for (name, data), recent in zip(needs_activity, activities):
+        in_flight = int(data.get("in_flight") or 0)
         last_summary = ""
         if recent:
             parts = recent[0].split("|", 2)
@@ -380,16 +412,24 @@ async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
     # already shows the last action in its subtitle.
     skip = {"orchestrator", "telegram_bot", "scraper", "trade_sampler"}
     entries: list[tuple[str, str, str]] = []
+    keys: list[str] = []
     async for k in redis.scan_iter(match="agent_activity:*", count=100):
         agent = k.split(":")[-1]
         if agent in skip:
             continue
-        rows = await redis.lrange(k, 0, limit * 4)
-        for row in rows:
-            parts = row.split("|", 2)
-            if len(parts) != 3 or parts[1] != "ok":
-                continue
-            entries.append((parts[0], agent, parts[2]))
+        keys.append(k)
+    if keys:
+        pipe = redis.pipeline()
+        for k in keys:
+            pipe.lrange(k, 0, limit * 4)
+        all_rows = await pipe.execute()
+        for k, rows in zip(keys, all_rows):
+            agent = k.split(":")[-1]
+            for row in rows or []:
+                parts = row.split("|", 2)
+                if len(parts) != 3 or parts[1] != "ok":
+                    continue
+                entries.append((parts[0], agent, parts[2]))
     entries.sort(key=lambda x: x[0], reverse=True)
 
     # Group consecutive same-agent entries within a 5-second window into a single card.
@@ -439,11 +479,22 @@ async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
 async def _gather() -> dict[str, Any]:
     settings = get_settings()
     redis = get_redis()
-    state = await redis.get("system:state")
-    sources = await _source_cards()
-    active = await _active_cards()
-    doing = await _doing_cards()
-    done = await _done_cards()
+    # Run every independent gather in parallel — was sequential (~9 awaits)
+    # which dominated /workflow/ load time (~7s). asyncio.gather brings it
+    # down to roughly max(slowest_function) instead of sum.
+    import asyncio as _asyncio
+    (state, sources, active, doing, done, historian_card,
+     historian_batches, pending, ready_streams) = await _asyncio.gather(
+        redis.get("system:state"),
+        _source_cards(),
+        _active_cards(),
+        _doing_cards(),
+        _done_cards(),
+        _historian_card(),
+        _historian_batch_cards(),
+        _pending_proposal_cards(),
+        _ready_cards(),
+    )
     sleeping_lane: list[dict] = []
     for c in sources:
         if c["lane"] == "doing":
@@ -453,7 +504,6 @@ async def _gather() -> dict[str, Any]:
         else:
             sleeping_lane.append(c)
 
-    historian_card = await _historian_card()
     if historian_card:
         if historian_card["lane"] == "doing":
             doing.insert(0, historian_card)
@@ -462,8 +512,7 @@ async def _gather() -> dict[str, Any]:
         elif historian_card["lane"] == "done":
             done.insert(0, historian_card)
 
-    # Per-batch cards from the active historian run, capped so they don't drown the lanes.
-    for bc in (await _historian_batch_cards())[:8]:
+    for bc in (historian_batches or [])[:8]:
         if bc["lane"] == "doing":
             doing.append(bc)
         elif bc["lane"] == "active":
@@ -476,7 +525,7 @@ async def _gather() -> dict[str, Any]:
         "paper_mode": settings.default_paper_trading_mode,
         "sleeping": sleeping_lane,
         "active": active,
-        "ready": (await _pending_proposal_cards()) + (await _ready_cards()),
+        "ready": pending + ready_streams,
         "doing": doing,
         "done": done,
         "as_of": datetime.now(timezone.utc).isoformat(),

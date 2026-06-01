@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.145 — 2026-06-01
+- **⚡ `/workflow/` kanban loads in ~1s instead of ~7s.** `_gather` did **nine sequential awaits** (state, sources, active, doing, done, historian, batches, pending HITL, ready streams) — each waiting on the previous. Now they run with one `asyncio.gather` and the page waits on max(slowest), not the sum.
+- **⚡ Per-key Redis reads now pipelined inside the hot card-builders.** `_source_cards`, `_active_cards`, `_doing_cards`, `_done_cards` were doing N+1 round-trips (SCAN → for each key: HGETALL, LRANGE). Now: collect keys with one SCAN, batch all HGETALLs in one pipeline, batch all LRANGEs in a second pipeline. Same data, ~10× fewer round-trips.
+
 ## 2.24.144 — 2026-06-01
 - **🐛 Fix `/workflow/` 500 (`WRONGTYPE Operation against a key holding the wrong kind of value`).** v2.24.137 introduced per-source recent-poll rings stored as Redis LISTS at `scraper:source:<name>:log` (via `LPUSH`). Several places that `SCAN` for `scraper:source:*` were calling `HGETALL` on those list keys — the per-source hash and the per-source log list both match the pattern. Added `if k.endswith(":log"): continue` guards at four sites: `/workflow/` `_source_cards`, `/workflow/resume/sources/all`, `_health_watchdog` scraper-resume sweep, and the auto-scrapers-halted-while-RUNNING check. `/api/resume` already had the guard (added in v2.24.138).
 
