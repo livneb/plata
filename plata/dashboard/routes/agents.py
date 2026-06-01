@@ -38,7 +38,8 @@ async def index(request: Request):
         date_iso = d.isoformat() if hasattr(d, "isoformat") else str(d)
         f = float(total or 0)
         agent_names.add(agent)
-        per_agent.setdefault(agent, {})[date_iso] = per_agent[agent].get(date_iso, 0.0) + f
+        bd = per_agent.setdefault(agent, {})
+        bd[date_iso] = bd.get(date_iso, 0.0) + f
 
     # Status hashes from Redis (live-only data, not historical).
     status_by_name: dict[str, dict] = {}
