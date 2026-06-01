@@ -1,32 +1,6 @@
 {% extends "base.html" %}
 {% block title %}News pipeline · Plata{% endblock %}
 {% block content %}
-<script>
-  // Auto-refresh the source schedule every 5s without losing the form scroll position.
-  (function () {
-    if (window.__newsRefresh) return; window.__newsRefresh = true;
-    setInterval(() => {
-      if (document.activeElement && ['TEXTAREA','INPUT'].includes(document.activeElement.tagName)) return;
-      const sb = document.documentElement.scrollTop;
-      fetch(location.pathname, { credentials: 'same-origin' })
-        .then(r => r.text())
-        .then(html => {
-          const m = html.match(/<h2[^>]*>Source schedule<\/h2>[\s\S]*?<\/table>\s*<\/div>/);
-          if (!m) return;
-          const cur = document.querySelector('h2');
-          if (!cur) return;
-          const wrap = cur.closest('.rounded-lg');
-          if (!wrap) return;
-          // Replace inner table+header with fresh markup
-          const wrapHtml = '<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto"><div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700"><h2 class="font-semibold">Source schedule</h2><span class="text-[10px] text-gray-400">Auto-refresh every 5s</span></div>' + m[0] + '</div>';
-          const tmp = document.createElement('div'); tmp.innerHTML = wrapHtml;
-          if (tmp.firstChild) wrap.replaceWith(tmp.firstChild);
-          document.documentElement.scrollTop = sb;
-        }).catch(()=>{});
-    }, 5000);
-  })();
-</script>
-
 <div class="space-y-4">
   <h1 class="text-2xl font-semibold">News pipeline</h1>
   <p class="text-xs text-gray-500">Control where Plata pulls stories from and what makes it past the content filter into the strategist. Changes apply on the next poll — no restart needed.</p>
@@ -35,41 +9,51 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
       <h2 class="font-semibold">Source schedule</h2>
-      <span class="text-[10px] text-gray-400">Auto-refresh every 5s</span>
+      <a href="/news/" class="text-[10px] text-blue-500 hover:underline">↻ refresh</a>
     </div>
     <table class="w-full text-sm text-left">
       <thead class="text-[10px] uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
         <tr>
-          <th class="px-4 py-2">Source</th>
-          <th class="px-4 py-2">Status</th>
-          <th class="px-4 py-2">Last poll</th>
-          <th class="px-4 py-2">Fetched</th>
-          <th class="px-4 py-2">Interval</th>
-          <th class="px-4 py-2">Next in</th>
-          <th class="px-4 py-2 text-right">Actions</th>
+          <th class="px-3 py-2">ID</th>
+          <th class="px-3 py-2">Source</th>
+          <th class="px-3 py-2">Status</th>
+          <th class="px-3 py-2">Last poll</th>
+          <th class="px-3 py-2">Fetched</th>
+          <th class="px-3 py-2">Interval</th>
+          <th class="px-3 py-2">Next in</th>
+          <th class="px-3 py-2">How to verify</th>
+          <th class="px-3 py-2 text-right">Actions</th>
         </tr>
       </thead>
       <tbody>
+        {% set verify_hints = {
+          'gdelt':       'Click ▶ Run now → status flips to ⏳ polling, then idle. "Fetched" > 0 if any new GDELT article matched the query. Cross-check on /history/ — a new event tagged source=gdelt should appear within ~10s.',
+          'reddit':      'Click ▶ Run now → status flips to ⏳ polling, then idle. Needs Reddit creds in /settings/?tab=api. "Fetched" > 0 means a new post arrived from a listed subreddit. Cross-check /history/ for source=reddit.',
+          'cryptopanic': 'Click ▶ Run now → status flips to ⏳ polling. Free tier returns ~30 titles per call; "Fetched" should be small but ≥ 0. Cross-check /history/ for source=cryptopanic.',
+          'rss':         'Add a feed under "RSS feeds" below, save, click ▶ Run now. Status reaches ⏳ polling and "Fetched" > 0 if the feed has new entries since last poll. Cross-check /history/ for source=rss.',
+        } %}
         {% for src in sources %}
-        <tr class="border-t border-gray-100 dark:border-gray-700">
-          <td class="px-4 py-2 font-mono">{{ src.name }}</td>
-          <td class="px-4 py-2">
+        <tr id="src-row-{{ loop.index }}" class="border-t border-gray-100 dark:border-gray-700">
+          <td class="px-3 py-2 font-mono text-xs text-gray-400">#{{ loop.index }}</td>
+          <td class="px-3 py-2 font-mono">{{ src.name }}</td>
+          <td class="px-3 py-2">
             {% if src.status == 'polling' %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">⏳ polling</span>
             {% elif src.status == 'idle' %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800">✓ idle</span>
             {% elif src.status == 'halted' %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700">⏸ halted</span>
             {% elif src.status == 'error' %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800" title="{{ src.last_error }}">⚠ error</span>
             {% else %}<span class="text-xs text-gray-400">{{ src.status }}</span>{% endif %}
           </td>
-          <td class="px-4 py-2 text-xs text-gray-500">{% if src.last_poll_at %}<time data-utc="{{ src.last_poll_at }}">{{ src.last_poll_at }}</time>{% else %}—{% endif %}</td>
-          <td class="px-4 py-2 font-mono text-xs">{{ src.last_fetched or '—' }}</td>
-          <td class="px-4 py-2 font-mono text-xs">{% if src.interval_sec %}{{ src.interval_sec }}s{% else %}—{% endif %}</td>
-          <td class="px-4 py-2 font-mono text-xs">
+          <td class="px-3 py-2 text-xs text-gray-500">{% if src.last_poll_at %}<time data-utc="{{ src.last_poll_at }}">{{ src.last_poll_at }}</time>{% else %}—{% endif %}</td>
+          <td class="px-3 py-2 font-mono text-xs">{{ src.last_fetched or '—' }}</td>
+          <td class="px-3 py-2 font-mono text-xs">{% if src.interval_sec %}{{ src.interval_sec }}s{% else %}—{% endif %}</td>
+          <td class="px-3 py-2 font-mono text-xs">
             {% if src.run_now_pending %}<span class="text-blue-500">queued</span>
             {% elif src.seconds_until_next is none %}—
             {% elif src.seconds_until_next <= 0 %}<span class="text-emerald-500">now</span>
             {% else %}{{ src.seconds_until_next }}s{% endif %}
           </td>
-          <td class="px-4 py-2 text-right whitespace-nowrap">
+          <td class="px-3 py-2 text-[11px] text-gray-500 max-w-md leading-snug">{{ verify_hints.get(src.name, '—') }}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
             <form method="post" action="/news/source/{{ src.name }}/run_now" class="inline">
               <button type="submit" class="text-xs text-blue-500 hover:underline mr-3" title="Force this source to poll on the next 2-second tick.">▶ Run now</button>
             </form>

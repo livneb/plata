@@ -2,6 +2,10 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.134 — 2026-05-29
+- **🐛 Fix `/news/` source schedule disappearing after a few seconds.** The v2.24.133 auto-refresh JS was rebuilding the wrapper element on every tick — the regex grabbed the inner table, then the replacement inserted a new outer wrapper inside the existing one, doubling the header and eventually emptying the table. Removed the broken auto-refresh; the schedule now stays put. Added a simple "↻ refresh" link so the user can force a re-render manually after clicking ▶ Run now.
+- **🔢 Row IDs + verification hints in the source schedule.** Each row now has a visible ID (1–4) and a "How to verify" column with a concrete check. You can reference rows by ID when reporting an issue ("row 3 didn't fetch") instead of source name.
+
 ## 2.24.133 — 2026-05-29
 - **🩺 `/agents/` and `/activity/history` now agree.** The Agent Health cards showed every agent as `RUNNING` even when the orchestrator was emitting `Agent X appears dead` warnings for hours — the pill was reading `agent_status:<name>.halted` but never checked the heartbeat age. Now if `last_heartbeat` is older than 120s, the card shows a `STALE` pill in red, matching the orchestrator's death detector. The two pages tell the same story.
 - **📰 News page = source schedule + "Run now".** Top of `/news/` now shows a per-source row: status (idle/polling/halted/error), last poll, last fetched count, interval, **seconds until next poll**, plus **▶ Run now** and Halt/Resume buttons. The scraper loop ticks every 2s checking a `run_now` flag, so manual triggers fire within seconds instead of waiting up to a poll interval. Auto-refreshes every 5s.
