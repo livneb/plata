@@ -2,6 +2,19 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.142 — 2026-05-29
+- **🤖 Settings → Models tab with free/paid/auto modes + per-agent overrides.** When OpenRouter runs out of credit, Plata can now keep working on free OpenRouter models.
+  - **`paid`** (default): use the per-agent paid model (Claude/GPT/etc.). Fails if credits are exhausted.
+  - **`auto`**: start on paid; on a 402/credit/insufficient-balance error, automatically fall back to the agent's free model and **pin "free" for 1h** so subsequent calls skip the paid retry. Sticky pin auto-clears after 1h, or use the "Clear pin now" button after topping up credits.
+  - **`free`**: every call uses the curated free model.
+  - **Per-agent override**: an input under each agent lets you pick any OpenRouter model ID. Datalist suggestions surface the curated paid + free catalogs.
+- **🎯 Curated free-model defaults per agent** (`AGENT_MODELS_FREE`):
+  - `graph_ingestion` → `meta-llama/llama-3.3-70b-instruct:free` (most reliable free for structured JSON)
+  - `strategist` / `reviewer` / `historian` → `deepseek/deepseek-r1:free` (long context, strong reasoning)
+  - `risk_manager` / `position_monitor` / `translator` → `google/gemini-2.0-flash-exp:free` (fast, cheap, short prompts)
+  - `scraper` → `qwen/qwen-2.5-72b-instruct:free`
+- **🔄 LLMClient resolves the model per call**, not at construction, so live config changes take effect on the next message without a restart.
+
 ## 2.24.141 — 2026-05-29
 - **🗄️ LLM cost moved to Postgres (durable). Redis becomes a fast tally only.** The old setup stored every cost in `cost:daily:*` Redis keys with **36-hour / 35-day TTLs** — meaning historical spend was being silently deleted as keys expired. Now:
   - New `llm_cost` table (alembic migration `20260529_0000`) — one row per LLM call with ts, agent, model, prompt_tokens, completion_tokens, cost_usd. Indexed on `(agent, ts)` and `(ts, agent)`.
