@@ -42,6 +42,23 @@ async def index(request: Request, tab: str = "controls"):
     by_key = {r["provider"]: r for r in creds_rows}
     creds_view = [{**p, **by_key.get(p["key"], {})} for p in PROVIDERS]
 
+    # LLM model config — mode + per-agent overrides + suggestion catalog.
+    from plata.core.llm import (
+        AGENT_MODELS, AGENT_MODELS_FREE,
+        MODEL_CATALOG_FREE, MODEL_CATALOG_PAID,
+    )
+    llm_cfg = await redis.hgetall("llm_config") or {}
+    auto_active_free = await redis.get("llm_config:auto_active_free")
+    agent_names = sorted(set(AGENT_MODELS) | set(AGENT_MODELS_FREE))
+    models_view = []
+    for ag in agent_names:
+        models_view.append({
+            "agent": ag,
+            "paid": AGENT_MODELS.get(ag, ""),
+            "free": AGENT_MODELS_FREE.get(ag, ""),
+            "override": llm_cfg.get(f"override:{ag}", ""),
+        })
+
     return templates.TemplateResponse(
         request,
         "pages/settings.html",
@@ -67,8 +84,44 @@ async def index(request: Request, tab: str = "controls"):
             ),
             "alpaca_mode": "PAPER" if s.alpaca_paper else "LIVE",
             "creds_view": creds_view,
+            "llm_mode": (llm_cfg.get("mode") or "paid").lower(),
+            "llm_auto_active_free": bool(auto_active_free),
+            "models_view": models_view,
+            "model_catalog_paid": MODEL_CATALOG_PAID,
+            "model_catalog_free": MODEL_CATALOG_FREE,
         },
     )
+
+
+@router.post("/llm/save")
+async def llm_save(request: Request):
+    """Save LLM mode + per-agent model overrides."""
+    redis = get_redis()
+    form = await request.form()
+    mode = (form.get("llm_mode") or "paid").lower()
+    if mode not in ("paid", "auto", "free"):
+        mode = "paid"
+    await redis.hset("llm_config", "mode", mode)
+    # Per-agent overrides — empty string means "clear override".
+    from plata.core.llm import AGENT_MODELS, AGENT_MODELS_FREE
+    for ag in sorted(set(AGENT_MODELS) | set(AGENT_MODELS_FREE)):
+        val = (form.get(f"override:{ag}") or "").strip()
+        if val:
+            await redis.hset("llm_config", f"override:{ag}", val)
+        else:
+            await redis.hdel("llm_config", f"override:{ag}")
+    # When switching to a non-auto mode, clear the sticky free pin so the
+    # next call goes straight to the paid model.
+    if mode != "auto":
+        await redis.delete("llm_config:auto_active_free")
+    return RedirectResponse(url="/settings/?tab=models", status_code=303)
+
+
+@router.post("/llm/clear_free_pin")
+async def llm_clear_free_pin():
+    """Force-clear the sticky `auto-active-free` pin (e.g. after topping up credits)."""
+    await get_redis().delete("llm_config:auto_active_free")
+    return RedirectResponse(url="/settings/?tab=models", status_code=303)
 
 
 @router.post("/news/save")

@@ -34,7 +34,7 @@ class BudgetExceededError(RuntimeError):
     """Raised when an agent's daily LLM budget is hit (circuit-breaker)."""
 
 
-# Per-agent model defaults — overridable from risk_config later.
+# Per-agent paid-model defaults.
 AGENT_MODELS: dict[str, str] = {
     "graph_ingestion": "anthropic/claude-haiku-4-5",
     "strategist": "anthropic/claude-sonnet-4-6",
@@ -42,10 +42,79 @@ AGENT_MODELS: dict[str, str] = {
     "historian": "anthropic/claude-sonnet-4-6",
     "risk_manager": "openai/o3-mini",
     "scraper": "anthropic/claude-haiku-4-5",
-    # Position monitor — runs frequently across every open position, so
-    # we use Haiku to keep cost sane. Override on /settings/?tab=risk.
     "position_monitor": "anthropic/claude-haiku-4-5",
+    "translator": "openai/gpt-4o-mini",
 }
+
+# Per-agent FREE OpenRouter models (the ":free" suffix triggers the free tier).
+# Tradeoffs per agent:
+#   graph_ingestion needs reliable structured-output → llama 3.3 70B is the
+#     most reliable free option for JSON; Qwen also works.
+#   strategist / reviewer want long context + reasoning → DeepSeek R1 or
+#     Llama 3.3 70B; Gemini 2.0 Flash Exp also fine.
+#   historian seeds with many events → DeepSeek R1 free has very high context.
+#   risk_manager is mostly structured rules → small fast model is fine.
+#   position_monitor / translator are short prompts → Gemini Flash or Qwen.
+AGENT_MODELS_FREE: dict[str, str] = {
+    "graph_ingestion": "meta-llama/llama-3.3-70b-instruct:free",
+    "strategist":      "deepseek/deepseek-r1:free",
+    "reviewer":        "deepseek/deepseek-r1:free",
+    "historian":       "deepseek/deepseek-r1:free",
+    "risk_manager":    "google/gemini-2.0-flash-exp:free",
+    "scraper":         "qwen/qwen-2.5-72b-instruct:free",
+    "position_monitor":"google/gemini-2.0-flash-exp:free",
+    "translator":      "google/gemini-2.0-flash-exp:free",
+}
+
+# Curated suggestions surfaced in the Settings → Models tab so the user
+# can pick from a vetted list per agent without typing model strings.
+MODEL_CATALOG_FREE: list[str] = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-r1:free",
+    "deepseek/deepseek-chat:free",
+    "google/gemini-2.0-flash-exp:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "mistralai/mistral-small-24b-instruct-2501:free",
+]
+MODEL_CATALOG_PAID: list[str] = [
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5",
+    "anthropic/claude-opus-4-8",
+    "openai/o3-mini",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "google/gemini-2.5-pro",
+    "google/gemini-2.5-flash",
+    "deepseek/deepseek-chat-v3",
+]
+
+
+# Resolve the model to use for a given agent based on Redis-stored config.
+# Reads `llm_config` hash: `mode` (paid|auto|free) and `override:<agent>`.
+async def resolve_model(agent: str) -> tuple[str, str]:
+    """Return (model_id, mode) — mode is the effective mode after resolution."""
+    redis = get_redis()
+    try:
+        cfg = await redis.hgetall("llm_config") or {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    mode = (cfg.get("mode") or "paid").lower()
+    # Per-agent explicit override beats the mode rule.
+    override = cfg.get(f"override:{agent}")
+    if override:
+        return override, mode
+    if mode == "free":
+        return AGENT_MODELS_FREE.get(agent, "google/gemini-2.0-flash-exp:free"), mode
+    if mode == "auto":
+        # If we recently hit 402, stay on free until the sticky pin expires.
+        try:
+            pinned = await redis.get("llm_config:auto_active_free")
+        except Exception:  # noqa: BLE001
+            pinned = None
+        if pinned:
+            return AGENT_MODELS_FREE.get(agent, "google/gemini-2.0-flash-exp:free"), "auto-free"
+    return AGENT_MODELS.get(agent, "anthropic/claude-haiku-4-5"), mode
 
 
 # Approximate prices (USD per 1M tokens) — updated by hand or via OpenRouter pricing API.
@@ -189,9 +258,23 @@ class LLMClient:
 
     def __init__(self, agent: str, model: str | None = None):
         self.agent = agent
+        # Explicit override at construction time wins. Otherwise resolved
+        # per-call via resolve_model() so live config edits take effect.
+        self._explicit_model = model
         self.model = model or AGENT_MODELS.get(agent, "anthropic/claude-haiku-4-5")
         self._openai = _client()
         self._langfuse = get_langfuse_client()
+
+    async def _refresh_model(self) -> str:
+        """Resolve the current model from Redis llm_config; returns it and updates self.model."""
+        if self._explicit_model:
+            return self._explicit_model
+        try:
+            picked, _mode = await resolve_model(self.agent)
+            self.model = picked
+        except Exception:  # noqa: BLE001
+            pass
+        return self.model
 
     async def complete(
         self,
@@ -203,6 +286,8 @@ class LLMClient:
         metadata: dict[str, Any] | None = None,
     ) -> ChatCompletion:
         """Run a chat completion. Records cost and enforces budget caps."""
+        # Pick up live config changes (mode / per-agent override).
+        await self._refresh_model()
         trace = None
         if self._langfuse and hasattr(self._langfuse, "trace"):
             try:
@@ -253,12 +338,41 @@ class LLMClient:
                         _log.warning("llm_max_tokens_shrunk", new_max=affordable)
                         continue
                 # Flag the provider as out-of-credits so the Activity page lights up.
-                if "402" in msg or "credit" in low or "billing" in low or "payment" in low:
+                is_credit_error = ("402" in msg or "credit" in low or "billing" in low
+                                   or "payment" in low or "insufficient" in low)
+                if is_credit_error:
                     try:
                         from plata.core.error_reporter import flag_api_limit
                         await flag_api_limit("openrouter", msg)
                     except Exception:  # noqa: BLE001
                         pass
+                    # AUTO mode: fall back to the free model for this agent and
+                    # retry once. Sticky for 1h so we don't keep hitting 402.
+                    try:
+                        cfg = await get_redis().hgetall("llm_config") or {}
+                    except Exception:  # noqa: BLE001
+                        cfg = {}
+                    if (cfg.get("mode") or "paid").lower() == "auto" \
+                            and not kwargs.get("_already_fallback"):
+                        free_model = AGENT_MODELS_FREE.get(
+                            self.agent, "google/gemini-2.0-flash-exp:free"
+                        )
+                        _log.warning("llm_auto_fallback_to_free",
+                                     agent=self.agent, from_model=self.model,
+                                     to_model=free_model)
+                        kwargs["model"] = free_model
+                        kwargs["_already_fallback"] = True
+                        try:
+                            # Sticky pin: until openrouter credits return,
+                            # subsequent calls also go to free immediately.
+                            await get_redis().set(
+                                "llm_config:auto_active_free", "1", ex=3600
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                        # Don't count this as a retry; reset try counter.
+                        self.model = free_model
+                        continue
                 if _try == 2:
                     raise
                 await asyncio.sleep(1 + _try * 2)

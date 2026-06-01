@@ -38,6 +38,12 @@
           🔑 API Keys
         </button>
       </li>
+      <li class="me-2" role="presentation">
+        <button class="inline-block p-3 border-b-2 rounded-t-lg" id="models-tab"
+                data-tabs-target="#tab-models" type="button" role="tab" aria-controls="tab-models" aria-selected="false">
+          🤖 Models
+        </button>
+      </li>
     </ul>
   </div>
 
@@ -438,6 +444,73 @@
       <p class="text-[11px] text-gray-500 mt-3">⚠ If you rotate <span class="font-mono">DASHBOARD_SESSION_SECRET</span>, every stored credential becomes unreadable and must be re-entered.</p>
     </div>
 
+    <!-- ===== Models ===== -->
+    <div class="hidden p-3" id="tab-models" role="tabpanel" aria-labelledby="models-tab">
+      <form method="post" action="/settings/llm/save" class="space-y-4 max-w-4xl">
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+          <h3 class="font-semibold mb-2">Mode</h3>
+          <p class="text-xs text-gray-500 mb-3">Controls which model each agent uses by default. Per-agent overrides below always win.</p>
+          <div class="space-y-2 text-sm">
+            <label class="flex items-start gap-2">
+              <input type="radio" name="llm_mode" value="paid" {% if llm_mode == 'paid' %}checked{% endif %} class="mt-1">
+              <span><b>💰 Paid</b> — use the per-agent paid default (Claude / GPT / etc.). Fails if OpenRouter has no credits.</span>
+            </label>
+            <label class="flex items-start gap-2">
+              <input type="radio" name="llm_mode" value="auto" {% if llm_mode == 'auto' %}checked{% endif %} class="mt-1">
+              <span><b>⚖ Auto</b> — start on paid; on a 402/credit error, automatically fall back to the agent's free model and pin that for 1h. Best for "keep working when credits run out".</span>
+            </label>
+            <label class="flex items-start gap-2">
+              <input type="radio" name="llm_mode" value="free" {% if llm_mode == 'free' %}checked{% endif %} class="mt-1">
+              <span><b>🆓 Free</b> — every call uses the agent's free model. Lower quality but $0 cost.</span>
+            </label>
+          </div>
+          {% if llm_auto_active_free %}
+          <div class="mt-3 p-2 rounded border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-xs">
+            ⚠ Auto mode is currently <b>pinned to free</b> (OpenRouter returned an out-of-credits error within the last hour).
+            <form method="post" action="/settings/llm/clear_free_pin" class="inline">
+              <button type="submit" class="text-blue-500 hover:underline ml-2">Clear pin now</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 overflow-x-auto">
+          <h3 class="font-semibold mb-2">Per-agent models</h3>
+          <p class="text-xs text-gray-500 mb-3">Leave "override" empty to use the default for the selected mode. Any OpenRouter model ID works; the dropdown shows curated suggestions.</p>
+          <table class="w-full text-sm text-left">
+            <thead class="text-[10px] uppercase text-gray-500">
+              <tr>
+                <th class="px-2 py-2">Agent</th>
+                <th class="px-2 py-2">Paid default</th>
+                <th class="px-2 py-2">Free default</th>
+                <th class="px-2 py-2">Override</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in models_view %}
+              <tr class="border-t border-gray-100 dark:border-gray-700">
+                <td class="px-2 py-2 font-mono">{{ m.agent }}</td>
+                <td class="px-2 py-2 text-[11px] font-mono text-gray-500">{{ m.paid or '—' }}</td>
+                <td class="px-2 py-2 text-[11px] font-mono text-emerald-500">{{ m.free or '—' }}</td>
+                <td class="px-2 py-2">
+                  <input list="model-catalog" name="override:{{ m.agent }}" value="{{ m.override }}"
+                         placeholder="(default)"
+                         class="w-72 text-[11px] font-mono p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <datalist id="model-catalog">
+            {% for opt in model_catalog_paid %}<option value="{{ opt }}">💰 paid</option>{% endfor %}
+            {% for opt in model_catalog_free %}<option value="{{ opt }}">🆓 free</option>{% endfor %}
+          </datalist>
+        </div>
+
+        <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">Save model config</button>
+      </form>
+    </div>
+
     <!-- ===== Environment ===== -->
     <div class="hidden p-3" id="tab-env" role="tabpanel" aria-labelledby="env-tab">
       <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 max-w-2xl space-y-2 text-sm">
@@ -480,7 +553,7 @@
 <script>
   // Initialise Flowbite tabs manually so deep-links (?tab=risk) work even before the autoinit fires.
   (function () {
-    const tabs = ['controls', 'risk', 'account', 'env', 'api'];
+    const tabs = ['controls', 'risk', 'account', 'env', 'api', 'models'];
     const params = new URLSearchParams(location.search);
     const want = (params.get('tab') || 'controls').toLowerCase();
     const active = tabs.includes(want) ? want : 'controls';
