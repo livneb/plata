@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.136 — 2026-05-29
+- **🌐 Translate-all now covers the Reasoning textarea and the Risk-snapshot `summary` field.** The batch translator previously read/wrote only plain text via `textContent`, so the re-submit form's reasoning `<textarea>` and the JSON dump in the Risk snapshot card were skipped. Two extensions:
+  1. Element handlers now switch on `tagName` — `TEXTAREA`/`INPUT` use `.value` instead of `textContent`, so the reasoning field translates and you can re-submit the translated version.
+  2. New `data-translate-json="<field>"` attribute lets a `<pre>` cell containing JSON have just one string field (e.g. `summary`) translated in-place while the surrounding JSON structure is preserved. Risk-snapshot pre tags get `data-translate-json="summary"`.
+- Toggle-off still reverts both kinds back to originals via stashed `data-original-text` / `data-original-json-field`.
+
 ## 2.24.135 — 2026-05-29
 - **📜 "Last results" link per source.** Each row of the `/news/` source schedule now has a `📜 Last results` button that opens `/history/?hours=24&source=<name>` — a filtered view showing the actual last N signals fetched by that source (title, URL, dedup status, fetched-at). Lets you confirm at a glance that a source is really producing usable signals after clicking ▶ Run now.
 - **🔍 `/history/` accepts a `source` query param.** When set, only `SignalArchive` rows from that source are shown (trade/error/decision branches suppressed) so the page becomes a pure last-fetched view for one source. A blue banner explains the filter and links back to `/news/`.
