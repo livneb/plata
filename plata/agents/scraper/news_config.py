@@ -141,3 +141,35 @@ def should_drop(title: str | None, body: str | None, cfg: dict[str, Any]) -> str
         if not any(term in hay for term in require):
             return "no_required_keyword"
     return None
+
+
+async def record_poll_probe(source: str, **fields) -> None:
+    """Persist a small `last_probe` record per source so the dashboard can
+    show actual HTTP-level evidence (status, final URL, items, errors)
+    instead of guessing why a source returned 0.
+
+    Fields accepted (all optional):
+        http_status: int / str
+        url: str (the URL we hit)
+        response_size: int (bytes)
+        sample: str (first ~300 chars of the body)
+        item_count: int (items returned by the API before our dedup/filter)
+        error_type: str (exception class name when the request failed)
+        error_message: str (exception message tail)
+        ts: ISO string (defaults to now)
+    """
+    from datetime import datetime, timezone
+    redis = get_redis()
+    key = f"scraper:source:{source}:probe"
+    payload = {k: ("" if v is None else str(v)) for k, v in fields.items()}
+    payload.setdefault("ts", datetime.now(timezone.utc).isoformat())
+    # Drop empty values so a successful run doesn't carry forward old error text.
+    payload = {k: v for k, v in payload.items() if v != ""}
+    if not payload:
+        return
+    # Replace the probe wholesale on each poll (small hash, ~6 fields).
+    pipe = redis.pipeline()
+    pipe.delete(key)
+    pipe.hset(key, mapping=payload)
+    pipe.expire(key, 60 * 60 * 24 * 7)
+    await pipe.execute()

@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from plata.agents.scraper.news_config import get_config as get_news_config
+from plata.agents.scraper.news_config import get_config as get_news_config, record_poll_probe
 from plata.agents.scraper.sources.base_source import BaseSource
 from plata.core.observability import get_logger
 from plata.core.schemas import RawSignal, SignalSource
@@ -35,14 +35,20 @@ class RssSource(BaseSource):
             return []
         feeds: list[dict[str, Any]] = cfg.get("rss_feeds") or []
         if not feeds:
+            await record_poll_probe("rss", error_type="NoFeedsConfigured",
+                                     error_message="rss_feeds list is empty — add at least one feed under 'RSS feeds' in /news/")
             return []
         try:
             import feedparser  # local import — optional dep
         except ImportError:  # pragma: no cover
             _log.warning("feedparser_not_installed")
+            await record_poll_probe("rss", error_type="ImportError",
+                                     error_message="feedparser is not installed")
             return []
 
         signals: list[RawSignal] = []
+        per_feed_results: list[str] = []
+        last_error: tuple[str, str] | None = None
         async with httpx.AsyncClient(timeout=20, follow_redirects=True,
                                      headers={"User-Agent": "Plata/1.0 (+rss)"}) as client:
             for feed in feeds:
@@ -58,9 +64,12 @@ class RssSource(BaseSource):
                     r = await client.get(url)
                     r.raise_for_status()
                     parsed = feedparser.parse(r.content)
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
                     _log.exception("rss_fetch_failed", url=url)
+                    last_error = (type(exc).__name__, f"{name}: {str(exc)[:160]}")
+                    per_feed_results.append(f"{name}=ERR({type(exc).__name__})")
                     continue
+                per_feed_results.append(f"{name}={len(parsed.entries)}")
                 for entry in parsed.entries[:50]:
                     link = getattr(entry, "link", "") or ""
                     if not link or link in self._seen_urls:
@@ -83,6 +92,12 @@ class RssSource(BaseSource):
                         source_published_at=pub_at,
                         metadata={"feed_name": name, "feed_url": url},
                     ))
+        probe: dict = {"item_count": len(signals),
+                       "per_feed": "; ".join(per_feed_results)[:300]}
+        if last_error:
+            probe["error_type"] = last_error[0]
+            probe["error_message"] = last_error[1]
+        await record_poll_probe("rss", **probe)
         if len(self._seen_urls) > 10000:
             self._seen_urls = set(list(self._seen_urls)[-5000:])
         return signals
