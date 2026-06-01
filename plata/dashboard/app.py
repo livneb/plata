@@ -220,14 +220,19 @@ async def _lifespan(_app: FastAPI):
                             age = (now_utc - _dt.fromisoformat(last_hb)).total_seconds()
                         except Exception:  # noqa: BLE001
                             continue
-                        if age > 180 and (hb.get("halted") or "").lower() != "true":
+                        if age > 180:
+                            halted_part = ""
+                            if (hb.get("halted") or "").lower() == "true":
+                                halted_part = " (process was also flagged halted before going stale — likely died after a halt)"
                             await _maybe_warn(
                                 f"stale_heartbeat:{agent_name}",
                                 "AgentStaleHeartbeat",
                                 f"`{agent_name}` heartbeat is {int(age)}s old "
-                                f"(threshold 180s) but not flagged halted. "
-                                f"Service may be wedged.",
-                                {"agent": agent_name, "age_sec": str(int(age))},
+                                f"(threshold 180s){halted_part}. "
+                                f"The container is probably dead — restart it on Railway. "
+                                f"Resume from the dashboard cannot bring back a dead process.",
+                                {"agent": agent_name, "age_sec": str(int(age)),
+                                 "was_halted": (hb.get("halted") or "false")},
                             )
 
                 # 3. Venue regulatory blocks (Bybit / Alpaca returned 10024 etc.).
@@ -453,14 +458,29 @@ def create_app() -> FastAPI:
     @app.get("/api/agents/halted")
     async def api_agents_halted():
         """Returns the list of agents currently halted (per their own status hashes)
-        plus the global system:state for the topbar banner."""
+        plus the global system:state for the topbar banner.
+
+        Stale agents (heartbeat older than 2 min) are excluded — they're dead
+        processes, not halted, and the banner is for actionable halts only.
+        """
+        from datetime import datetime as _dt, timezone as _tz
         from plata.core.bus import get_redis
         redis = get_redis()
         halted: list[str] = []
+        now_utc = _dt.now(_tz.utc)
         async for k in redis.scan_iter(match="agent_status:*", count=100):
             data = await redis.hgetall(k)
-            if (data.get("halted") or "").lower() == "true":
-                halted.append(k.split(":")[-1])
+            if (data.get("halted") or "").lower() != "true":
+                continue
+            # Exclude stale processes — they're dead, not pausable.
+            hb = data.get("last_heartbeat")
+            if hb:
+                try:
+                    if (now_utc - _dt.fromisoformat(hb)).total_seconds() > 120:
+                        continue
+                except Exception:  # noqa: BLE001
+                    continue
+            halted.append(k.split(":")[-1])
         system_state = await redis.get("system:state") or "RUNNING"
         return {"count": len(halted), "names": sorted(halted), "system_state": system_state}
 
