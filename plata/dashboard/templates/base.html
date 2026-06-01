@@ -535,22 +535,63 @@
             const prev = btn.innerHTML;
             btn.innerHTML = '⏳ <span>Translating…</span>';
             try {
+              // Per-element read/write helpers — textareas/inputs use .value;
+              // everything else uses textContent. JSON cells (data-translate-json
+              // with a target field name) extract one string field from the JSON
+              // displayed in <pre>, translate just that field, and write it back.
+              const readText = (el) => {
+                if (el.dataset.translateJson) {
+                  try {
+                    const j = JSON.parse(el.dataset.originalText || el.textContent);
+                    return String(j[el.dataset.translateJson] || '');
+                  } catch { return ''; }
+                }
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return el.value;
+                return el.textContent;
+              };
+              const writeText = (el, text, isRevert) => {
+                if (el.dataset.translateJson) {
+                  try {
+                    const j = JSON.parse(el.dataset.originalText || el.textContent);
+                    j[el.dataset.translateJson] = isRevert ? (el.dataset.originalJsonField || '') : text;
+                    el.textContent = JSON.stringify(j, null, 2);
+                  } catch { /* ignore */ }
+                  return;
+                }
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') { el.value = text; return; }
+                el.textContent = text;
+              };
               // Toggle-off path: if ALL items are already translated, revert.
               const allOn = Array.from(items).every(el => el.dataset.translated === '1');
               if (allOn) {
                 items.forEach(el => {
-                  if (el.dataset.originalText) { el.textContent = el.dataset.originalText; el.dataset.translated = '0'; }
+                  if (el.dataset.originalText !== undefined) {
+                    writeText(el, el.dataset.originalText, true);
+                    el.dataset.translated = '0';
+                  }
                 });
                 return;
               }
               // Stash originals + collect texts (skip already-translated cells).
               const todo = [];
               items.forEach(el => {
-                if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
+                if (el.dataset.originalText === undefined) {
+                  if (el.dataset.translateJson) {
+                    el.dataset.originalText = el.textContent;
+                    try {
+                      const j = JSON.parse(el.textContent);
+                      el.dataset.originalJsonField = String(j[el.dataset.translateJson] || '');
+                    } catch { el.dataset.originalJsonField = ''; }
+                  } else if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                    el.dataset.originalText = el.value;
+                  } else {
+                    el.dataset.originalText = el.textContent;
+                  }
+                }
                 if (el.dataset.translated !== '1') todo.push(el);
               });
               if (!todo.length) return;
-              const texts = todo.map(el => el.dataset.originalText || el.textContent);
+              const texts = todo.map(el => readText(el));
               const r = await fetch('/api/translate/', {
                 method: 'POST', credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
@@ -569,9 +610,11 @@
               (j.texts || []).forEach((t, i) => {
                 const el = todo[i];
                 if (!el || !t) return;
-                el.textContent = t;
+                writeText(el, t);
                 el.dataset.translated = '1';
-                el.dir = lang === 'he' ? 'rtl' : 'ltr';
+                if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
+                  el.dir = lang === 'he' ? 'rtl' : 'ltr';
+                }
               });
             } catch (e) {
               plataToast('Translate failed: ' + e.message, 'error');

@@ -292,7 +292,7 @@
               {% endif %}
               {% if p.extras %}
               <h3 class="text-[10px] uppercase text-gray-500 mt-3 mb-1">Risk snapshot</h3>
-              <pre class="text-[10px] bg-white dark:bg-gray-800 rounded p-2 border border-gray-200 dark:border-gray-700 overflow-x-auto">{{ p.extras | tojson(indent=2) }}</pre>
+              <pre data-translate-item data-translate-json="summary" class="text-[10px] bg-white dark:bg-gray-800 rounded p-2 border border-gray-200 dark:border-gray-700 overflow-x-auto">{{ p.extras | tojson(indent=2) }}</pre>
               {% endif %}
             </div>
             <!-- Clone & edit -->
@@ -332,7 +332,7 @@
                 </div>
                 <label class="block">
                   <span class="text-[10px] text-gray-500">Reasoning (optional)</span>
-                  <textarea name="reasoning" rows="2"
+                  <textarea name="reasoning" rows="2" data-translate-item
                             class="w-full p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">{{ p.reasoning or '' }}</textarea>
                 </label>
                 <label class="flex items-center gap-2 text-[11px] p-2 rounded border border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/20">
