@@ -68,6 +68,10 @@ async def _source_cards() -> list[dict[str, Any]]:
     redis = get_redis()
     cards: list[dict[str, Any]] = []
     async for k in redis.scan_iter(match="scraper:source:*", count=100):
+        # v2.24.137 added `scraper:source:<name>:log` LISTS (recent-polls ring).
+        # The SCAN pattern matches them too — skip so HGETALL doesn't WRONGTYPE.
+        if k.endswith(":log"):
+            continue
         data = await redis.hgetall(k)
         name = k.split(":")[-1]
         raw = data.get("status") or "sleeping"
@@ -521,6 +525,8 @@ async def resume_all_sources():
     redis = get_redis()
     cleared: list[str] = []
     async for k in redis.scan_iter(match="scraper:source:*", count=100):
+        if k.endswith(":log"):
+            continue
         data = await redis.hgetall(k)
         if (data.get("status") or "").lower() == "halted":
             await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
