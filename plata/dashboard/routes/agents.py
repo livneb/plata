@@ -52,6 +52,9 @@ async def index(request: Request):
         except Exception:  # noqa: BLE001
             pass
 
+    from datetime import datetime as _dt, timezone as _tz
+    STALE_AFTER_SEC = 120  # heartbeat older than this → STALE (red on /agents/)
+    now_utc = _dt.now(_tz.utc)
     agents_data = []
     for name in sorted(agent_names):
         data = dict(status_by_name.get(name) or {})
@@ -61,6 +64,21 @@ async def index(request: Request):
         if not status_by_name.get(name):
             data["last_heartbeat"] = None
             data["halted"] = "stopped"
+        else:
+            # Compute staleness so the pill reflects what the orchestrator's
+            # death detector is alerting on. Previously a 1h-stale heartbeat
+            # still rendered as "RUNNING" while /activity/history showed
+            # "Agent X appears dead" — those two views are now consistent.
+            hb = data.get("last_heartbeat")
+            age = None
+            if hb:
+                try:
+                    age = (now_utc - _dt.fromisoformat(hb)).total_seconds()
+                except Exception:  # noqa: BLE001
+                    age = None
+            data["heartbeat_age_sec"] = age
+            if age is None or age > STALE_AFTER_SEC:
+                data["stale"] = True
         async def _per_agent(days: list[str]) -> float:
             return await _sum([f"cost:daily:{d}:agent:{name}" for d in days])
         data["spend_today_usd"]      = await _per_agent([today.isoformat()])

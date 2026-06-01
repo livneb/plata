@@ -37,8 +37,13 @@ DEFAULTS: dict[str, Any] = {
     # --- Content filter (applied to every signal before publish) ---
     # Drop if title length < this (junk one-word headlines).
     "min_title_len": 20,
-    # If non-empty: signal MUST match at least one of these (case-insensitive
-    # substring). Empty list = no allowlist requirement.
+    # If false, the require_keywords allowlist is treated as advisory and signals
+    # that don't match it still pass through (blocklist alone is enforced). Set
+    # true to make the allowlist a hard gate. Default false so the strategist
+    # doesn't starve from a too-narrow allowlist.
+    "require_keywords_enforce": False,
+    # If non-empty AND require_keywords_enforce=true: signal MUST match at least
+    # one of these (case-insensitive substring). Otherwise this list is unused.
     "require_keywords": [
         "bitcoin", "btc", "ethereum", "eth", "crypto", "stablecoin",
         "fed", "ecb", "boj", "interest rate", "inflation", "cpi", "ppi",
@@ -132,7 +137,7 @@ def should_drop(title: str | None, body: str | None, cfg: dict[str, Any]) -> str
         if term in hay:
             return f"blocked:{term}"
     require = [s.strip().lower() for s in (cfg.get("require_keywords") or []) if s and s.strip()]
-    if require:
+    if require and bool(cfg.get("require_keywords_enforce")):
         if not any(term in hay for term in require):
             return "no_required_keyword"
     return None

@@ -46,31 +46,32 @@ class Scraper(BaseAgent):
         await asyncio.sleep(2)
         while True:
             if self._halted.is_set():
-                # Mark this halt as "system" so the resume action can clear it
-                # automatically (vs a user-clicked cancel which stays sticky).
                 await redis.hset(key, mapping={"status": "halted", "halted_by": "system"})
                 await asyncio.sleep(5)
                 continue
-            # Per-source manual cancel from the Kanban: if the status was set to
-            # "halted" by /workflow/cancel/source/<name>, honour it. The user can
-            # POST it back to "idle" (or remove the field) to resume.
             current = (await redis.hget(key, "status")) or ""
             if current == "halted":
                 await asyncio.sleep(5)
                 continue
-            now = datetime.now(timezone.utc).isoformat()
+            now_dt = datetime.now(timezone.utc)
+            now = now_dt.isoformat()
+            interval = src.poll_interval_sec
             await redis.hset(key, mapping={
-                "status": "polling", "started_at": now, "interval_sec": src.poll_interval_sec,
+                "status": "polling", "started_at": now, "interval_sec": interval,
             })
+            await redis.hdel(key, "run_now")
             try:
                 signals = await src.poll()
                 for s in signals:
                     await self._process_one(s)
+                next_at = (datetime.now(timezone.utc).timestamp() + interval)
                 await redis.hset(key, mapping={
                     "status": "idle", "last_poll_at": now,
                     "last_fetched": len(signals), "last_error": "",
+                    "next_poll_at": str(int(next_at)),
                 })
             except Exception as e:
+                next_at = (datetime.now(timezone.utc).timestamp() + interval)
                 await self.error_reporter.capture_exception(
                     e, agent=self.name, severity="ERROR",
                     context={"source": src.name},
@@ -78,8 +79,20 @@ class Scraper(BaseAgent):
                 await redis.hset(key, mapping={
                     "status": "error", "last_poll_at": now,
                     "last_error": f"{type(e).__name__}: {str(e)[:200]}",
+                    "next_poll_at": str(int(next_at)),
                 })
-            await asyncio.sleep(src.poll_interval_sec)
+            # Tick-sleep so the user's "Run now" or a config change is picked up
+            # within ~2s instead of waiting up to poll_interval_sec.
+            elapsed = 0
+            while elapsed < interval:
+                if self._halted.is_set():
+                    break
+                if (await redis.hget(key, "run_now")) == "1":
+                    break
+                if (await redis.hget(key, "status")) == "halted":
+                    break
+                await asyncio.sleep(2)
+                elapsed += 2
 
     async def _process_one(self, signal: RawSignal) -> None:
         # Sanitize body in place so archive stores clean content too.

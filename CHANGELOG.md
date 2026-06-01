@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.133 — 2026-05-29
+- **🩺 `/agents/` and `/activity/history` now agree.** The Agent Health cards showed every agent as `RUNNING` even when the orchestrator was emitting `Agent X appears dead` warnings for hours — the pill was reading `agent_status:<name>.halted` but never checked the heartbeat age. Now if `last_heartbeat` is older than 120s, the card shows a `STALE` pill in red, matching the orchestrator's death detector. The two pages tell the same story.
+- **📰 News page = source schedule + "Run now".** Top of `/news/` now shows a per-source row: status (idle/polling/halted/error), last poll, last fetched count, interval, **seconds until next poll**, plus **▶ Run now** and Halt/Resume buttons. The scraper loop ticks every 2s checking a `run_now` flag, so manual triggers fire within seconds instead of waiting up to a poll interval. Auto-refreshes every 5s.
+- **🔁 Position-monitor no longer spams `offtrack:close` proposals.** When a BTC long sat off-track for 16h, the monitor was creating a new `adjustment_suggested` row every 30 minutes (the LLM cooldown was throttling the LLM call but not the proposal row). Now: if there's already an open `adjustment_suggested` for the same trade, the monitor skips creating another one. `/proposals/` stays clean.
+- **🪣 Allowlist is advisory by default.** Added `require_keywords_enforce` toggle (default OFF) to news config. When OFF, the allowlist no longer hard-gates signals — only the blocklist enforces. Prevents the strategist from starving on a too-narrow keyword list (the previous default was tossing 286+ "too quiet" stories, of which many would have been valid macro/equity content the strategist could have judged on its own).
+
 ## 2.24.132 — 2026-05-29
 - **📰 News pipeline page moved out of Settings into sidebar → Knowledge → News pipeline.** Settings is for operator knobs (risk, API keys, environment); the news editor is a knowledge-domain workflow (which feeds to ingest, what to allow through), so it lives next to History / Graph / Historian seed. New page at `/news/`. Legacy `/settings/news/save` + `/settings/news/filter_drops/reset` POSTs 307-redirect to the new URL for any open tab.
 
