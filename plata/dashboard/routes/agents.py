@@ -18,57 +18,70 @@ async def index(request: Request):
     redis = get_redis()
     today = date.today()
     yesterday = today - timedelta(days=1)
-    last_7 = [(today - timedelta(days=i)).isoformat() for i in range(0, 7)]
-    last_30 = [(today - timedelta(days=i)).isoformat() for i in range(0, 30)]
+    last_7 = set((today - timedelta(days=i)).isoformat() for i in range(0, 7))
+    last_30 = set((today - timedelta(days=i)).isoformat() for i in range(0, 30))
 
-    async def _sum(keys: list[str]) -> float:
-        if not keys:
-            return 0.0
-        vals = await redis.mget(*keys)
-        total = 0.0
-        for v in vals:
-            try:
-                total += float(v or 0.0)
-            except (TypeError, ValueError):
-                pass
-        return total
-
-    # Union of agents we know about:
-    #   • currently-running (have an `agent_status:<name>` heartbeat hash)
-    #   • have ever spent money (have any `cost:daily:*:agent:<name>` key)
-    # Without the cost-scan, agents that crashed or were renamed disappear
-    # from the grid but their historical spend stays in the daily totals,
-    # which is why "sum of visible agents < total" used to happen.
+    # Single pass over the cost keyspace: build per-agent and global-day tallies
+    # in one SCAN. The old route did 12+ SCANs (one global + one per agent +
+    # one all-time global) which took ~15s with a few thousand keys.
+    per_agent: dict[str, dict[str, float]] = {}   # name -> {date_iso -> usd}
+    per_day_global: dict[str, float] = {}         # date_iso -> usd (excludes per-agent rows)
     agent_names: set[str] = set()
+    cost_keys: list[str] = []
+    async for ck in redis.scan_iter(match="cost:daily:*", count=1000):
+        cost_keys.append(ck)
+    if cost_keys:
+        vals = await redis.mget(*cost_keys)
+        for k, v in zip(cost_keys, vals):
+            try:
+                f = float(v or 0.0)
+            except (TypeError, ValueError):
+                continue
+            # Expected formats:
+            #   cost:daily:<YYYY-MM-DD>
+            #   cost:daily:<YYYY-MM-DD>:agent:<name>
+            parts = k.split(":")
+            if len(parts) == 3:                       # global day row
+                per_day_global[parts[2]] = per_day_global.get(parts[2], 0.0) + f
+            elif len(parts) == 5 and parts[3] == "agent":
+                date_iso = parts[2]
+                name = parts[4]
+                agent_names.add(name)
+                per_agent.setdefault(name, {})[date_iso] = per_agent.setdefault(name, {}).get(date_iso, 0.0) + f
+
+    # Status hashes (one HSCAN-style pass via scan_iter + hgetall per match).
     status_by_name: dict[str, dict] = {}
+    status_keys: list[str] = []
     async for k in redis.scan_iter(match="agent_status:*", count=100):
-        name = k.split(":")[-1]
-        agent_names.add(name)
-        status_by_name[name] = await redis.hgetall(k)
-    async for ck in redis.scan_iter(match="cost:daily:*:agent:*", count=500):
-        # cost:daily:<YYYY-MM-DD>:agent:<name>
-        try:
-            agent_names.add(ck.rsplit(":", 1)[-1])
-        except Exception:  # noqa: BLE001
-            pass
+        status_keys.append(k)
+    # Pipeline the HGETALLs.
+    if status_keys:
+        pipe = redis.pipeline()
+        for k in status_keys:
+            pipe.hgetall(k)
+        results = await pipe.execute()
+        for k, hh in zip(status_keys, results):
+            name = k.split(":")[-1]
+            status_by_name[name] = hh or {}
+            agent_names.add(name)
 
     from datetime import datetime as _dt, timezone as _tz
-    STALE_AFTER_SEC = 120  # heartbeat older than this → STALE (red on /agents/)
+    STALE_AFTER_SEC = 120
     now_utc = _dt.now(_tz.utc)
+
+    def _sum_window(days: set[str], by_date: dict[str, float]) -> float:
+        return sum(v for d, v in by_date.items() if d in days)
+
     agents_data = []
+    today_iso = today.isoformat()
+    yesterday_iso = yesterday.isoformat()
     for name in sorted(agent_names):
         data = dict(status_by_name.get(name) or {})
         data["name"] = name
-        # If we only know this agent from cost keys, mark it as stopped so the
-        # UI can render it greyed out instead of falsely "RUNNING".
         if not status_by_name.get(name):
             data["last_heartbeat"] = None
             data["halted"] = "stopped"
         else:
-            # Compute staleness so the pill reflects what the orchestrator's
-            # death detector is alerting on. Previously a 1h-stale heartbeat
-            # still rendered as "RUNNING" while /activity/history showed
-            # "Agent X appears dead" — those two views are now consistent.
             hb = data.get("last_heartbeat")
             age = None
             if hb:
@@ -79,29 +92,19 @@ async def index(request: Request):
             data["heartbeat_age_sec"] = age
             if age is None or age > STALE_AFTER_SEC:
                 data["stale"] = True
-        async def _per_agent(days: list[str]) -> float:
-            return await _sum([f"cost:daily:{d}:agent:{name}" for d in days])
-        data["spend_today_usd"]      = await _per_agent([today.isoformat()])
-        data["spend_yesterday_usd"]  = await _per_agent([yesterday.isoformat()])
-        data["spend_7d_usd"]         = await _per_agent(last_7)
-        data["spend_30d_usd"]        = await _per_agent(last_30)
-        # All-time per-agent: SCAN cost:daily:*:agent:<name> (cheap, agents stay few).
-        atvals: list[str] = []
-        async for ck in redis.scan_iter(match=f"cost:daily:*:agent:{name}", count=200):
-            atvals.append(ck)
-        data["spend_all_usd"] = await _sum(atvals)
+        bd = per_agent.get(name, {})
+        data["spend_today_usd"]     = bd.get(today_iso, 0.0)
+        data["spend_yesterday_usd"] = bd.get(yesterday_iso, 0.0)
+        data["spend_7d_usd"]        = _sum_window(last_7, bd)
+        data["spend_30d_usd"]       = _sum_window(last_30, bd)
+        data["spend_all_usd"]       = sum(bd.values())
         agents_data.append(data)
 
-    daily_total      = await _sum([f"cost:daily:{today.isoformat()}"])
-    yesterday_total  = await _sum([f"cost:daily:{yesterday.isoformat()}"])
-    last_7_total     = await _sum([f"cost:daily:{d}" for d in last_7])
-    last_30_total    = await _sum([f"cost:daily:{d}" for d in last_30])
-    all_keys: list[str] = []
-    async for ck in redis.scan_iter(match="cost:daily:*", count=500):
-        # filter out per-agent rows for the global all-time sum
-        if ":agent:" not in ck:
-            all_keys.append(ck)
-    all_time_total = await _sum(all_keys)
+    daily_total      = per_day_global.get(today_iso, 0.0)
+    yesterday_total  = per_day_global.get(yesterday_iso, 0.0)
+    last_7_total     = _sum_window(last_7, per_day_global)
+    last_30_total    = _sum_window(last_30, per_day_global)
+    all_time_total   = sum(per_day_global.values())
 
     return templates.TemplateResponse(
         request,
