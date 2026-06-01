@@ -410,6 +410,9 @@ def create_app() -> FastAPI:
         cleared: list[str] = []
         try:
             async for k in redis.scan_iter(match="scraper:source:*", count=100):
+                # Skip the per-source log lists (lpush keys end in :log).
+                if k.endswith(":log"):
+                    continue
                 data = await redis.hgetall(k)
                 if (data.get("status") or "").lower() != "halted":
                     continue
@@ -418,8 +421,22 @@ def create_app() -> FastAPI:
                     cleared.append(k.rsplit(":", 1)[-1])
         except Exception:  # noqa: BLE001
             pass
+        # Clear the per-agent halted flag so the /agents/ card pill no longer
+        # shows HALTED for a process that may already be dead — STALE (the
+        # heartbeat-age check) is the more honest signal. The pub/sub message
+        # above wakes any live agent; dead ones get marked correctly here.
+        agents_cleared: list[str] = []
+        try:
+            async for k in redis.scan_iter(match="agent_status:*", count=100):
+                data = await redis.hgetall(k)
+                if (data.get("halted") or "").lower() == "true":
+                    await redis.hset(k, "halted", "False")
+                    agents_cleared.append(k.split(":", 1)[-1])
+        except Exception:  # noqa: BLE001
+            pass
         await publish_channel("dashboard:events", {"kind": "system_state", "state": "RUNNING"})
-        return {"ok": True, "state": "RUNNING", "sources_cleared": cleared}
+        return {"ok": True, "state": "RUNNING",
+                "sources_cleared": cleared, "agents_cleared": agents_cleared}
 
     @app.post("/api/agents/{name}/resume")
     async def api_agent_resume(name: str):

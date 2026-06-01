@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.138 — 2026-05-29
+- **🐛 Resume-all wasn't clearing HALTED on dead-process agents.** The Resume button publishes `Channels.SYSTEM_RESUME` over pub/sub. Live agents clear their local `_halted` flag and report back. **Dead processes never receive the message**, so their `agent_status:<name>.halted=True` flag stayed set forever — the UI kept showing `HALTED` even after the container was restarted. Now `/api/resume` also clears the `halted` field on every `agent_status:*` hash; live agents overwrite it correctly via the existing pub/sub path, dead ones get correctly downgraded to `STALE` (the heartbeat-age signal). The Resume-all confirm dialog also calls out that STALE = dead process, not halted, and that Railway needs to restart the container.
+- **🩺 STALE now wins over HALTED on the agent card.** Was: a halted-then-dead agent rendered `HALTED` and the user kept clicking Resume hoping it would help. Now: if heartbeat is older than 2 minutes, the pill is `STALE` regardless of the halted flag — honest signal that the process is unreachable.
+- **🔁 Resume-all toast reports what changed.** Old: `Resume-all sent.` New: `Cleared halted flag on N agent(s), M source(s). Refreshing…` plus an auto-reload so the user sees the new state instead of having to refresh manually.
+
 ## 2.24.137 — 2026-05-29
 - **🔬 Per-source poll telemetry.** "Fetched = 0" was hiding three different stories (source returned nothing / everything was a dup / everything got filtered). Each poll now records `raw / published / dup / filtered` plus the filter reasons, and the scraper writes them to the source's Redis hash + a 20-entry ring (`scraper:source:<name>:log`). The `/news/` source-schedule table now shows the per-poll and lifetime counts side by side, colour-coded (emerald = published, gray = dup, amber = filtered).
 - **📊 New "Recent polls" page per source.** `/news/source/<name>/log` lists the last 20 polls of one source with per-poll raw/published/dup/filtered, the filter-reason breakdown, and a sample of titles. New "📊 Recent polls" action on each schedule row. The page also surfaces lifetime totals (polls / raw / published / dup / filtered) at the top so you can spot a source that's polling regularly but never publishing — and see why.
