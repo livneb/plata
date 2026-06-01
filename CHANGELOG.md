@@ -2,7 +2,6 @@
 
 Each entry is one deployed version. Most recent first.
 
-<<<<<<< HEAD
 ## 2.24.148 — 2026-06-01
 - **🐛 Stop flooding `/activity/history` with `Agent X appears dead` rows.** The orchestrator's death detector ran every 30s and wrote one `err` row per dead agent per cycle — five dead agents = ~600 rows/hour, drowning everything else. Now: log once per "dead spell" using a `orchestrator:dead_logged` Redis hash as a per-agent marker. When the agent's heartbeat returns, the marker clears so a future death is reported normally. Same one-shot semantics applied to the `HALT triggered: critical agent dead` notice.
 
