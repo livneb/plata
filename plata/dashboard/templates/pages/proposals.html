@@ -313,7 +313,7 @@
                     </select>
                   </label>
                   <label class="block">
-                    <span class="text-[10px] text-gray-500">Conviction (0–1)</span>
+                    <span class="text-[10px] text-gray-500">Conviction (0–1){% if p.conviction is none %} <span class="text-amber-500" title="Original proposal had no conviction (it was rejected before the strategist scored it). 0.70 here is just a placeholder for the re-submit — edit if needed.">⚠ placeholder</span>{% endif %}</span>
                     <input name="conviction" type="number" step="0.01" min="0" max="1"
                            value="{{ '%.2f' % p.conviction if p.conviction is not none else '0.70' }}" required
                            class="w-full p-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 font-mono" />

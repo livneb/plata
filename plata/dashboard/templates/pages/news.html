@@ -27,10 +27,10 @@
       </thead>
       <tbody>
         {% set verify_hints = {
-          'gdelt':       'Click ▶ Run now → status flips to ⏳ polling, then idle. "Fetched" > 0 if any new GDELT article matched the query. Cross-check on /history/ — a new event tagged source=gdelt should appear within ~10s.',
-          'reddit':      'Click ▶ Run now → status flips to ⏳ polling, then idle. Needs Reddit creds in /settings/?tab=api. "Fetched" > 0 means a new post arrived from a listed subreddit. Cross-check /history/ for source=reddit.',
-          'cryptopanic': 'Click ▶ Run now → status flips to ⏳ polling. Free tier returns ~30 titles per call; "Fetched" should be small but ≥ 0. Cross-check /history/ for source=cryptopanic.',
-          'rss':         'Add a feed under "RSS feeds" below, save, click ▶ Run now. Status reaches ⏳ polling and "Fetched" > 0 if the feed has new entries since last poll. Cross-check /history/ for source=rss.',
+          'gdelt':       'Click ▶ Run now → status flips to ⏳ polling → idle. "Fetched" > 0 if any new GDELT article matched the query. Click 📜 Last results to see the actual rows.',
+          'reddit':      'Click ▶ Run now → status flips to ⏳ polling → idle. Needs Reddit creds in /settings/?tab=api. "Fetched" > 0 = new post from a listed subreddit. Click 📜 Last results to see titles.',
+          'cryptopanic': 'Click ▶ Run now → status flips to ⏳ polling. Free tier returns ~30 titles per call; "Fetched" should be small but ≥ 0. Click 📜 Last results to see titles.',
+          'rss':         'Add a feed under "RSS feeds" below, save, click ▶ Run now. Status reaches ⏳ polling and "Fetched" > 0 if the feed has new entries since last poll. Click 📜 Last results to inspect.',
         } %}
         {% for src in sources %}
         <tr id="src-row-{{ loop.index }}" class="border-t border-gray-100 dark:border-gray-700">
@@ -54,6 +54,7 @@
           </td>
           <td class="px-3 py-2 text-[11px] text-gray-500 max-w-md leading-snug">{{ verify_hints.get(src.name, '—') }}</td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
+            <a href="/history/?hours=24&source={{ src.name }}" class="text-xs text-blue-500 hover:underline mr-3" title="Show the actual signals fetched from this source in the last 24h.">📜 Last results</a>
             <form method="post" action="/news/source/{{ src.name }}/run_now" class="inline">
               <button type="submit" class="text-xs text-blue-500 hover:underline mr-3" title="Force this source to poll on the next 2-second tick.">▶ Run now</button>
             </form>

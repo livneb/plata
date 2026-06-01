@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.135 — 2026-05-29
+- **📜 "Last results" link per source.** Each row of the `/news/` source schedule now has a `📜 Last results` button that opens `/history/?hours=24&source=<name>` — a filtered view showing the actual last N signals fetched by that source (title, URL, dedup status, fetched-at). Lets you confirm at a glance that a source is really producing usable signals after clicking ▶ Run now.
+- **🔍 `/history/` accepts a `source` query param.** When set, only `SignalArchive` rows from that source are shown (trade/error/decision branches suppressed) so the page becomes a pure last-fetched view for one source. A blue banner explains the filter and links back to `/news/`.
+- **🐛 Re-submit form no longer pretends a rejected proposal had 0.70 conviction.** When a proposal was dropped before the strategist scored it (e.g. `below_threshold: sentiment_magnitude 0.30 < threshold 0.35`), `p.conviction` is `None` but the clone-&-edit form was pre-filling the conviction field with `0.70` — making the row's `CONV —` and the expanded view's `0.70` look inconsistent. Now the form still uses `0.70` as a placeholder (so the field is valid) but labels it `⚠ placeholder` with a tooltip explaining the original had no conviction.
+
 ## 2.24.134 — 2026-05-29
 - **🐛 Fix `/news/` source schedule disappearing after a few seconds.** The v2.24.133 auto-refresh JS was rebuilding the wrapper element on every tick — the regex grabbed the inner table, then the replacement inserted a new outer wrapper inside the existing one, doubling the header and eventually emptying the table. Removed the broken auto-refresh; the schedule now stays put. Added a simple "↻ refresh" link so the user can force a re-render manually after clicking ▶ Run now.
 - **🔢 Row IDs + verification hints in the source schedule.** Each row now has a visible ID (1–4) and a "How to verify" column with a concrete check. You can reference rows by ID when reporting an issue ("row 3 didn't fetch") instead of source name.

@@ -26,18 +26,20 @@ KINDS = {
 
 
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request, hours: int = 24, kind: str | None = None):
+async def index(request: Request, hours: int = 24, kind: str | None = None,
+                source: str | None = None):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     events: list[dict[str, Any]] = []
 
     async with session_scope() as session:
         if kind in (None, "signal"):
-            rows = (await session.execute(
-                select(SignalArchive)
-                .where(SignalArchive.fetched_at >= cutoff)
-                .order_by(desc(SignalArchive.fetched_at))
-                .limit(200)
-            )).scalars().all()
+            stmt = (select(SignalArchive)
+                    .where(SignalArchive.fetched_at >= cutoff)
+                    .order_by(desc(SignalArchive.fetched_at))
+                    .limit(200))
+            if source:
+                stmt = stmt.where(SignalArchive.source == source)
+            rows = (await session.execute(stmt)).scalars().all()
             for r in rows:
                 # Try a few common spots for an image: metadata fields or a URL ending in .jpg/.png/etc.
                 image_url = None
@@ -59,7 +61,11 @@ async def index(request: Request, hours: int = 24, kind: str | None = None):
                     "url": r.url,
                     "image_url": image_url,
                 })
-        if kind in (None, "decision"):
+        if source:
+            # When filtering by signal source, suppress the other event types
+            # so the page is a pure last-N-signals view for that source.
+            pass
+        elif kind in (None, "decision"):
             rows = (await session.execute(
                 select(AuditLog)
                 .where(AuditLog.ts >= cutoff)
@@ -76,7 +82,7 @@ async def index(request: Request, hours: int = 24, kind: str | None = None):
                     "ref": r.target,
                     "url": None,
                 })
-        if kind in (None, "trade"):
+        if not source and kind in (None, "trade"):
             rows = (await session.execute(
                 select(TradeLedger)
                 .where(TradeLedger.opened_at >= cutoff)
@@ -96,7 +102,7 @@ async def index(request: Request, hours: int = 24, kind: str | None = None):
                     "ref": r.trade_ulid,
                     "url": None,
                 })
-        if kind in (None, "error"):
+        if not source and kind in (None, "error"):
             rows = (await session.execute(
                 select(ErrorLog)
                 .where(ErrorLog.ts >= cutoff)
@@ -124,5 +130,6 @@ async def index(request: Request, hours: int = 24, kind: str | None = None):
             "hours": hours,
             "kind": kind,
             "kinds": KINDS,
+            "source_filter": source,
         },
     )
