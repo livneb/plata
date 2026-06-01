@@ -2,6 +2,18 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.146 — 2026-06-01
+- **🩺 Per-source Diagnosis column on `/news/`** replaces the static "How to verify" text. Each row now tells you concretely why it's producing zero results. Ladder of checks (first match wins):
+  1. Scraper agent heartbeat older than 180s → "Scraper agent heartbeat is Nm old — ingestion_hub container is probably dead. Restart on Railway; no source will poll until then."
+  2. Last poll older than `interval × 3` (and > 10 min) → "Last poll was Nh Nm ago — interval is Xs, so this should have polled multiple times. Scraper task is wedged."
+  3. Reddit creds missing → tells you exactly where to set them.
+  4. RSS feeds list empty → tells you exactly where to add one.
+  5. Source disabled in config → tells you which checkbox to enable.
+  6. Last poll errored → surfaces the exact error message.
+  7. Polled 5+ times with raw=0 → "the upstream API may be returning empty for the current query/config" (for GDELT: query too narrow / rate-limit).
+  8. Otherwise: ✓ Healthy.
+- Color-coded: 🛑 red for actionable errors (restart needed / wedged), ⚠ amber for config gaps (missing creds, empty feeds, narrow query), ℹ gray for informational.
+
 ## 2.24.145 — 2026-06-01
 - **⚡ `/workflow/` kanban loads in ~1s instead of ~7s.** `_gather` did **nine sequential awaits** (state, sources, active, doing, done, historian, batches, pending HITL, ready streams) — each waiting on the previous. Now they run with one `asyncio.gather` and the page waits on max(slowest), not the sum.
 - **⚡ Per-key Redis reads now pipelined inside the hot card-builders.** `_source_cards`, `_active_cards`, `_doing_cards`, `_done_cards` were doing N+1 round-trips (SCAN → for each key: HGETALL, LRANGE). Now: collect keys with one SCAN, batch all HGETALLs in one pipeline, batch all LRANGEs in a second pipeline. Same data, ~10× fewer round-trips.
