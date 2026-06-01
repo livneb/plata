@@ -18,16 +18,70 @@ from plata.dashboard import templates
 router = APIRouter(prefix="/news", tags=["news"])
 
 
+SOURCE_NAMES = ["gdelt", "reddit", "cryptopanic", "rss"]
+
+
+async def _source_rows(redis) -> list[dict]:
+    import time
+    rows = []
+    now_ts = time.time()
+    for name in SOURCE_NAMES:
+        h = await redis.hgetall(f"scraper:source:{name}") or {}
+        next_poll_at = h.get("next_poll_at")
+        seconds_until = None
+        if next_poll_at:
+            try:
+                seconds_until = int(next_poll_at) - int(now_ts)
+            except ValueError:
+                pass
+        rows.append({
+            "name": name,
+            "status": h.get("status") or "—",
+            "last_poll_at": h.get("last_poll_at"),
+            "last_fetched": h.get("last_fetched"),
+            "last_error": h.get("last_error"),
+            "interval_sec": h.get("interval_sec"),
+            "seconds_until_next": seconds_until,
+            "run_now_pending": h.get("run_now") == "1",
+        })
+    return rows
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     redis = get_redis()
     cfg = await get_news_config()
     drops = await redis.hgetall("scraper:filter_drops") or {}
+    sources = await _source_rows(redis)
     return templates.TemplateResponse(
         request, "pages/news.html",
         {"active": "news", "news_cfg": cfg, "news_drops": drops,
-         "news_defaults": NEWS_DEFAULTS},
+         "news_defaults": NEWS_DEFAULTS, "sources": sources},
     )
+
+
+@router.post("/source/{name}/run_now")
+async def run_now(name: str):
+    if name not in SOURCE_NAMES:
+        return RedirectResponse(url="/news/", status_code=303)
+    redis = get_redis()
+    await redis.hset(f"scraper:source:{name}", "run_now", "1")
+    # Also flip status off "halted" if user is forcing a run.
+    if (await redis.hget(f"scraper:source:{name}", "status")) == "halted":
+        await redis.hset(f"scraper:source:{name}", "status", "idle")
+    return RedirectResponse(url="/news/", status_code=303)
+
+
+@router.post("/source/{name}/toggle")
+async def toggle_source(name: str):
+    """Halt/resume a single source from the news page."""
+    if name not in SOURCE_NAMES:
+        return RedirectResponse(url="/news/", status_code=303)
+    redis = get_redis()
+    cur = (await redis.hget(f"scraper:source:{name}", "status")) or "idle"
+    new = "halted" if cur != "halted" else "idle"
+    await redis.hset(f"scraper:source:{name}", "status", new)
+    return RedirectResponse(url="/news/", status_code=303)
 
 
 @router.post("/save")
@@ -35,7 +89,8 @@ async def save(request: Request):
     form = await request.form()
     updates: dict = {}
     for k in ("gdelt_enabled", "reddit_enabled", "cryptopanic_enabled",
-              "rss_enabled", "telegram_channels_enabled"):
+              "rss_enabled", "telegram_channels_enabled",
+              "require_keywords_enforce"):
         if k in NEWS_DEFAULTS:
             updates[k] = (form.get(k) == "on")
     if "gdelt_query" in form:

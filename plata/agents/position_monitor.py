@@ -439,6 +439,30 @@ class PositionMonitor(BaseAgent):
                              milestones: list[dict], cur_price: float,
                              actual_pct: float, expected_pct: float,
                              deviation_pct: float) -> None:
+        # De-dup: if there's already an open adjustment_suggested for this trade,
+        # don't create another one. Previously the LLM cooldown only throttled the
+        # LLM call, not the proposal row creation — so off-track BTC positions
+        # produced dozens of "offtrack:close" rows on /proposals/ as they sat open.
+        try:
+            from plata.core.db import Proposal as _Prop, session_scope as _ss
+            from sqlalchemy import desc as _desc, select as _select
+            async with _ss() as session:
+                existing = (await session.execute(
+                    _select(_Prop)
+                    .where(_Prop.state == "adjustment_suggested")
+                    .order_by(_desc(_Prop.created_at))
+                    .limit(50)
+                )).scalars().all()
+                for p in existing:
+                    extras = p.extras or {}
+                    if extras.get("adjustment_target_trade_ulid") == trade.trade_ulid:
+                        self.log.debug("offtrack_skip_existing_open_adjustment",
+                                       trade_ulid=trade.trade_ulid,
+                                       existing_proposal=p.ulid)
+                        return
+        except Exception:  # noqa: BLE001
+            pass
+
         user_msg = (
             f"OPEN TRADE: {trade.symbol} {trade.side} qty={trade.qty} @ {trade.entry_price}\n"
             f"Current: {cur_price}  ({actual_pct:+.2f}% from entry)\n"
