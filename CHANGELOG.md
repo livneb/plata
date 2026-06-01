@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.143 — 2026-05-29
+- **🐛 Fix `/agents/` 500 (`KeyError: 'reviewer'`).** v2.24.141 had `per_agent.setdefault(agent, {})[date_iso] = per_agent[agent].get(...)` — Python evaluates the RHS before running `setdefault` on the LHS, so the lookup fired on a missing key. Refactored to capture the dict in a local first.
+
 ## 2.24.142 — 2026-05-29
 - **🤖 Settings → Models tab with free/paid/auto modes + per-agent overrides.** When OpenRouter runs out of credit, Plata can now keep working on free OpenRouter models.
   - **`paid`** (default): use the per-agent paid model (Claude/GPT/etc.). Fails if credits are exhausted.
