@@ -72,20 +72,36 @@
               <span class="text-emerald-500">✓ Healthy.</span>
             {% endif %}
             {% if src.probe %}
-              <details class="mt-2 text-[10px]">
-                <summary class="cursor-pointer text-gray-500 hover:text-gray-300">Last poll probe ↓</summary>
-                <div class="mt-1 p-1.5 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-mono space-y-0.5">
-                  {% if src.probe.ts %}<div class="text-gray-400">when: {{ src.probe.ts }}</div>{% endif %}
-                  {% if src.probe.http_status %}<div>HTTP <b class="{% if src.probe.http_status[:1] == '2' %}text-emerald-500{% elif src.probe.http_status[:1] == '4' or src.probe.http_status[:1] == '5' %}text-red-500{% else %}text-gray-400{% endif %}">{{ src.probe.http_status }}</b></div>{% endif %}
-                  {% if src.probe.final_url %}<div class="break-all">url: <a href="{{ src.probe.final_url }}" target="_blank" rel="noopener" class="text-blue-500 hover:underline">{{ src.probe.final_url[:80] }}{% if src.probe.final_url|length > 80 %}…{% endif %}</a></div>{% endif %}
-                  {% if src.probe.item_count %}<div>items returned by API: <b>{{ src.probe.item_count }}</b></div>{% endif %}
-                  {% if src.probe.response_size %}<div>response size: {{ src.probe.response_size }} bytes</div>{% endif %}
-                  {% if src.probe.per_feed %}<div class="break-words">per-feed: {{ src.probe.per_feed }}</div>{% endif %}
-                  {% if src.probe.subreddits %}<div class="break-words">subreddits: {{ src.probe.subreddits }}</div>{% endif %}
-                  {% if src.probe.error_type %}<div class="text-red-500">error: {{ src.probe.error_type }} — {{ src.probe.error_message }}</div>{% endif %}
-                  {% if src.probe.sample %}<div class="text-gray-400 break-all">sample: <span class="text-gray-300">{{ src.probe.sample[:200] }}{% if src.probe.sample|length > 200 %}…{% endif %}</span></div>{% endif %}
-                </div>
-              </details>
+              <div class="mt-2 p-1.5 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-[10px] font-mono space-y-0.5">
+                <div class="text-[9px] uppercase text-gray-500 mb-0.5">Last poll evidence</div>
+                {% if src.probe.ts %}<div class="text-gray-400">when: <time data-utc="{{ src.probe.ts }}">{{ src.probe.ts }}</time></div>{% endif %}
+                {% if src.probe.http_status %}
+                  <div>HTTP <b class="{% if src.probe.http_status[:1] == '2' %}text-emerald-500{% elif src.probe.http_status[:1] == '4' or src.probe.http_status[:1] == '5' %}text-red-500{% else %}text-gray-400{% endif %}">{{ src.probe.http_status }}</b></div>
+                {% endif %}
+                {% if src.probe.final_url %}
+                  <div class="break-all">url: <a href="{{ src.probe.final_url }}" target="_blank" rel="noopener" class="text-blue-500 hover:underline">{{ src.probe.final_url[:90] }}{% if src.probe.final_url|length > 90 %}…{% endif %}</a></div>
+                {% endif %}
+                {% if src.probe.item_count is defined and src.probe.item_count not in (None, '') %}
+                  <div>items returned by API: <b class="{% if (src.probe.item_count|int) > 0 %}text-emerald-500{% else %}text-amber-500{% endif %}">{{ src.probe.item_count }}</b></div>
+                {% endif %}
+                {% if src.probe.response_size %}<div>response: {{ src.probe.response_size }} bytes</div>{% endif %}
+                {% if src.probe.per_feed %}<div class="break-words">per-feed: <span class="text-gray-300">{{ src.probe.per_feed }}</span></div>{% endif %}
+                {% if src.probe.subreddits %}<div class="break-words">subreddits tried: <span class="text-gray-400">{{ src.probe.subreddits }}</span></div>{% endif %}
+                {% if src.probe.query %}<div class="break-words">query: <span class="text-gray-400">{{ src.probe.query[:120] }}{% if src.probe.query|length > 120 %}…{% endif %}</span></div>{% endif %}
+                {% if src.probe.error_type %}
+                  <div class="text-red-500">⚠ {{ src.probe.error_type }}{% if src.probe.error_message %} — <span class="text-red-400">{{ src.probe.error_message }}</span>{% endif %}</div>
+                {% endif %}
+                {% if src.probe.sample %}
+                  <details class="mt-1">
+                    <summary class="cursor-pointer text-gray-500 hover:text-gray-300 text-[9px]">response sample ↓</summary>
+                    <pre class="mt-1 p-1 text-[10px] bg-black/30 rounded whitespace-pre-wrap break-all text-gray-300">{{ src.probe.sample[:300] }}{% if src.probe.sample|length > 300 %}…{% endif %}</pre>
+                  </details>
+                {% endif %}
+              </div>
+            {% else %}
+              <div class="mt-2 p-1.5 rounded bg-gray-50 dark:bg-gray-900 border border-amber-300 dark:border-amber-700 text-[10px] text-amber-500">
+                ⚠ No poll probe recorded yet — either the source has never polled since v2.24.147, or the agent crashed before reaching the source. Click ▶ Run now to trigger a probed run.
+              </div>
             {% endif %}
           </td>
           <td class="px-3 py-2 text-right whitespace-nowrap">

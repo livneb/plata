@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.149 — 2026-06-01
+- **🔬 Last poll evidence shown inline (no click).** Was: probe data was buried in a "Last poll probe ↓" details element you had to expand. Now: HTTP status, final URL, item count, response size, per-feed breakdown, subreddits tried, query, and error message render directly inside each Diagnosis cell, color-coded (2xx green, 4xx/5xx red, item_count > 0 green). Response sample is the only thing still behind a click. Empty case shows an amber "No poll probe recorded yet" hint so you can tell the source hasn't run yet vs producing zero.
+
 ## 2.24.148 — 2026-06-01
 - **🐛 Stop flooding `/activity/history` with `Agent X appears dead` rows.** The orchestrator's death detector ran every 30s and wrote one `err` row per dead agent per cycle — five dead agents = ~600 rows/hour, drowning everything else. Now: log once per "dead spell" using a `orchestrator:dead_logged` Redis hash as a per-agent marker. When the agent's heartbeat returns, the marker clears so a future death is reported normally. Same one-shot semantics applied to the `HALT triggered: critical agent dead` notice.
 
