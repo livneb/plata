@@ -13,13 +13,15 @@ from plata.agents.scraper.sources.cryptopanic import CryptoPanicSource
 from plata.agents.scraper.sources.gdelt import GdeltSource
 from plata.agents.scraper.sources.reddit import RedditSource
 from plata.agents.scraper.sources.rss import RssSource
+from plata.agents.scraper.sources.market_ticker import MarketTickerSource
 from plata.core.bus import Streams, publish
 from plata.core.db import SignalArchive, session_scope
 from plata.core.schemas import RawSignal
 
 
 def all_sources() -> list[BaseSource]:
-    return [RedditSource(), CryptoPanicSource(), GdeltSource(), RssSource()]
+    return [RedditSource(), CryptoPanicSource(), GdeltSource(), RssSource(),
+            MarketTickerSource()]
 
 
 class Scraper(BaseAgent):
@@ -172,9 +174,14 @@ class Scraper(BaseAgent):
             return "injection"
 
         # Content filter — drop off-topic stories before they reach the LLM.
+        # Market-ticker signals are deterministic price-action alerts, not
+        # news — bypass the news keyword filter for them.
         try:
             news_cfg = await get_news_config()
-            drop_reason = should_drop(signal.title, signal.body, news_cfg)
+            if str(signal.source) == "market_ticker":
+                drop_reason = None
+            else:
+                drop_reason = should_drop(signal.title, signal.body, news_cfg)
         except Exception:  # noqa: BLE001
             drop_reason = None
         if drop_reason:

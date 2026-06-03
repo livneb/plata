@@ -31,6 +31,7 @@ class SignalSource(StrEnum):
     HISTORIAN = "historian"
     RSS = "rss"
     TELEGRAM = "telegram"
+    MARKET_TICKER = "market_ticker"
     MANUAL = "manual"
 
 
@@ -50,6 +51,7 @@ class EventCategory(StrEnum):
     EARNINGS = "earnings"
     SOCIAL_VIRALITY = "social_virality"
     WHALE_MOVE = "whale_move"
+    PRICE_ACTION = "price_action"
     OTHER = "other"
 
 

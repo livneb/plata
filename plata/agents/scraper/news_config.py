@@ -19,6 +19,17 @@ DEFAULTS: dict[str, Any] = {
     "cryptopanic_enabled": True,
     "rss_enabled": True,
     "telegram_channels_enabled": False,
+    # Market-ticker source: poll live prices for top crypto + stocks; emit a
+    # PRICE_ACTION signal when a tracked symbol moves > threshold % in window.
+    # Gives the strategist momentum/breakout signals independent of news.
+    "market_ticker_enabled": True,
+    "market_ticker_threshold_pct": 3.0,
+    "market_ticker_window_min": 60,
+    "market_ticker_crypto_ids": [
+        "bitcoin", "ethereum", "solana", "binancecoin", "ripple",
+        "cardano", "dogecoin", "tron", "avalanche-2", "polkadot",
+    ],
+    "market_ticker_stock_symbols": ["SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT"],
     # Chat IDs of Telegram channels / groups to listen on. The bot must be
     # added to each channel (use /joininfo in DM for instructions). Negative
     # numbers for groups/channels (e.g. -1001234567890).

@@ -18,7 +18,7 @@ from plata.dashboard import templates
 router = APIRouter(prefix="/news", tags=["news"])
 
 
-SOURCE_NAMES = ["gdelt", "reddit", "cryptopanic", "rss"]
+SOURCE_NAMES = ["gdelt", "reddit", "cryptopanic", "rss", "market_ticker"]
 
 
 async def _diagnose(name: str, h: dict, cfg: dict, now_ts: float,
@@ -203,6 +203,7 @@ async def save(request: Request):
     updates: dict = {}
     for k in ("gdelt_enabled", "reddit_enabled", "cryptopanic_enabled",
               "rss_enabled", "telegram_channels_enabled",
+              "market_ticker_enabled",
               "require_keywords_enforce"):
         if k in NEWS_DEFAULTS:
             updates[k] = (form.get(k) == "on")
@@ -220,6 +221,20 @@ async def save(request: Request):
 
     if "reddit_subreddits" in form:
         updates["reddit_subreddits"] = _lines("reddit_subreddits")
+    if "market_ticker_threshold_pct" in form:
+        try:
+            updates["market_ticker_threshold_pct"] = float(form.get("market_ticker_threshold_pct") or 3.0)
+        except ValueError:
+            pass
+    if "market_ticker_window_min" in form:
+        try:
+            updates["market_ticker_window_min"] = int(form.get("market_ticker_window_min") or 60)
+        except ValueError:
+            pass
+    if "market_ticker_crypto_ids" in form:
+        updates["market_ticker_crypto_ids"] = _lines("market_ticker_crypto_ids")
+    if "market_ticker_stock_symbols" in form:
+        updates["market_ticker_stock_symbols"] = [s.upper() for s in _lines("market_ticker_stock_symbols")]
     if "require_keywords" in form:
         updates["require_keywords"] = _lines("require_keywords")
     if "block_keywords" in form:
