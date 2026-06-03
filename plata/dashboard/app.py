@@ -305,11 +305,80 @@ async def _lifespan(_app: FastAPI):
                             f"venue's support or switch IP region.",
                             {"venue": venue, "msg": (blocked.get("message") or "")[:200]},
                         )
+
+                # 4. PIPELINE SILENCE alerts — the user-facing pain.
+                # Each check runs every minute; cooldown_sec dedup keeps the
+                # alert from spamming. Pushes to /errors/ AND the bell badge
+                # (severity=WARN so it shows up in red).
+                if state == "RUNNING":
+                    # 4a. No signal published by ANY source in 30 min while RUNNING.
+                    last_pub_ts = None
+                    async for sk in redis.scan_iter(match="scraper:source:*", count=100):
+                        if sk.endswith(":log") or sk.endswith(":probe"):
+                            continue
+                        h = await redis.hgetall(sk)
+                        lp = h.get("last_poll_at")
+                        if not lp:
+                            continue
+                        try:
+                            t = _dt.fromisoformat(lp)
+                            if (last_pub_ts is None) or t > last_pub_ts:
+                                last_pub_ts = t
+                        except Exception:  # noqa: BLE001
+                            pass
+                    # No poll AT ALL recently → upstream pipeline is dark.
+                    if last_pub_ts is None or (now_utc - last_pub_ts).total_seconds() > 30 * 60:
+                        await _maybe_warn(
+                            "news_pipeline_silent",
+                            "NewsPipelineSilent",
+                            "No scraper source has polled in the last 30 min. "
+                            "Open `/news/` and check the Diagnosis column for each "
+                            "row — the probe will show the HTTP status / error. "
+                            "Most common causes: (a) ingestion_hub container is "
+                            "dead, (b) all sources halted, (c) source creds missing.",
+                            {"last_poll_ts": str(last_pub_ts) if last_pub_ts else "never"},
+                        )
+                    # 4b. No new proposal in last 2h while RUNNING and pipeline is alive.
+                    try:
+                        from plata.core.db import Proposal as _Prop, session_scope as _ss
+                        from sqlalchemy import desc as _desc, select as _select
+                        async with _ss() as session:
+                            latest = (await session.execute(
+                                _select(_Prop)
+                                .order_by(_desc(_Prop.created_at))
+                                .limit(1)
+                            )).scalar_one_or_none()
+                        if latest is None:
+                            age_min = 99999
+                        else:
+                            age_min = (now_utc - latest.created_at).total_seconds() / 60.0
+                        if age_min > 120:
+                            await _maybe_warn(
+                                "no_proposal_in_2h",
+                                "NoProposalsEmitted",
+                                f"No new trade proposal in the last {int(age_min)} min. "
+                                "Strategist is running but either: (a) every event is "
+                                "below sentiment_magnitude threshold, (b) every event "
+                                "is dedup'd or hits the cooldown guard, (c) news pipeline "
+                                "is silent (see other alerts). Check `/proposals/` filter "
+                                "by 'Why not traded' to see the breakdown.",
+                                {"last_proposal_age_min": str(int(age_min))},
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        _log.debug("no_proposal_check_failed", error=str(exc)[:120])
             except Exception as exc:  # noqa: BLE001
                 _log.warning("health_watchdog_failed", error=str(exc)[:160])
             await _asyncio.sleep(60)
     _watchdog_task = _asyncio.create_task(_health_watchdog(), name="health-watchdog")
     _app.state._health_watchdog = _watchdog_task
+
+    # Improver: nightly self-survey that writes a digest row to /errors/.
+    try:
+        from plata.agents import improver as _improver
+        _improver_task = _asyncio.create_task(_improver.run(), name="improver")
+        _app.state._improver = _improver_task
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("improver_start_failed", error=str(exc)[:160])
 
     # Server-side push relay: subscribe to dashboard:events and, for
     # actionable kinds, deliver a web push to every saved subscription
