@@ -57,14 +57,26 @@ AGENT_MODELS: dict[str, str] = {
 #   position_monitor / translator are short prompts → Gemini Flash or Qwen.
 AGENT_MODELS_FREE: dict[str, str] = {
     "graph_ingestion": "meta-llama/llama-3.3-70b-instruct:free",
-    "strategist":      "deepseek/deepseek-r1:free",
-    "reviewer":        "deepseek/deepseek-r1:free",
-    "historian":       "deepseek/deepseek-r1:free",
+    "strategist":      "deepseek/deepseek-chat:free",
+    "reviewer":        "deepseek/deepseek-chat:free",
+    "historian":       "deepseek/deepseek-chat:free",
     "risk_manager":    "google/gemini-2.0-flash-exp:free",
     "scraper":         "qwen/qwen-2.5-72b-instruct:free",
     "position_monitor":"google/gemini-2.0-flash-exp:free",
     "translator":      "google/gemini-2.0-flash-exp:free",
 }
+
+# Fallback chain for any free model that's currently 404 / "No endpoints found".
+# OpenRouter's free tier rotates providers; the listed model can have zero
+# active endpoints for hours. The LLM client tries the next one in this list.
+FREE_FALLBACKS: list[str] = [
+    "deepseek/deepseek-chat:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemini-2.0-flash-exp:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "mistralai/mistral-small-24b-instruct-2501:free",
+]
 
 # Curated suggestions surfaced in the Settings → Models tab so the user
 # can pick from a vetted list per agent without typing model strings.
@@ -336,6 +348,28 @@ class LLMClient:
                     if affordable < int(kwargs.get("max_tokens") or 0):
                         kwargs["max_tokens"] = affordable
                         _log.warning("llm_max_tokens_shrunk", new_max=affordable)
+                        continue
+                # Free-pool 404 / "No endpoints found": the model's free tier
+                # has no provider serving it right now (common on OpenRouter's
+                # rotating free pool). Walk the FREE_FALLBACKS chain.
+                is_free_404 = (
+                    ":free" in (kwargs.get("model") or "")
+                    and ("no endpoints found" in low or "404" in msg)
+                )
+                if is_free_404:
+                    tried = set(kwargs.setdefault("_tried_free", []))
+                    tried.add(kwargs.get("model"))
+                    next_model = None
+                    for cand in FREE_FALLBACKS:
+                        if cand not in tried:
+                            next_model = cand; break
+                    if next_model:
+                        _log.warning("llm_free_404_fallback",
+                                     from_model=kwargs.get("model"),
+                                     to_model=next_model)
+                        kwargs["model"] = next_model
+                        kwargs["_tried_free"] = list(tried)
+                        self.model = next_model
                         continue
                 # Flag the provider as out-of-credits so the Activity page lights up.
                 is_credit_error = ("402" in msg or "credit" in low or "billing" in low

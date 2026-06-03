@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.150 — 2026-06-01
+- **🐛 Fix `historian batch 4: NotFoundError 404 — No endpoints found for deepseek/deepseek-r1:free`.** OpenRouter's free pool for R1 is intermittent (the model exists but its free providers can have zero active endpoints for hours at a time). Two changes:
+  - Free reasoning default flipped from `deepseek/deepseek-r1:free` → `deepseek/deepseek-chat:free` (V3 free is more stable than R1 free).
+  - New `FREE_FALLBACKS` chain in `LLMClient`: when a `:free` model returns 404 / "No endpoints found", the client transparently retries with the next free model in the list (`deepseek/deepseek-chat:free` → `meta-llama/llama-3.3-70b-instruct:free` → `google/gemini-2.0-flash-exp:free` → `qwen/qwen-2.5-72b-instruct:free` → …). Same call, different provider — no user action needed.
+- **🚨 Proactive pipeline-silence alerts.** Two new health-watchdog checks (one row per silent stretch, deduped for 10 min so it doesn't spam):
+  - **`NewsPipelineSilent`** — fires if no scraper source has polled in the last 30 min while the system is RUNNING. Tells you to open `/news/` and read the Diagnosis column.
+  - **`NoProposalsEmitted`** — fires if no new `Proposal` row has been created in 2h. Points you at `/proposals/` Why-not-traded filter to see the rejection breakdown.
+- **🤖 New `improver` background agent** — runs once at boot then every 24h. Surveys: agent heartbeats, news pipeline output, 24h proposal/trade/PnL counts, recent error counts, LLM spend. Writes a single digest row to `ErrorLog` (severity `INFO` when healthy, `WARN` when something's off) so it shows up on `/errors/` like any other alert. Each finding has a concrete suggested fix. v1 is deterministic survey; v2 will hand the survey to an LLM and have it propose specific config tweaks via the existing `/tuning/` flow.
+
 ## 2.24.149 — 2026-06-01
 - **🔬 Last poll evidence shown inline (no click).** Was: probe data was buried in a "Last poll probe ↓" details element you had to expand. Now: HTTP status, final URL, item count, response size, per-feed breakdown, subreddits tried, query, and error message render directly inside each Diagnosis cell, color-coded (2xx green, 4xx/5xx red, item_count > 0 green). Response sample is the only thing still behind a click. Empty case shows an amber "No poll probe recorded yet" hint so you can tell the source hasn't run yet vs producing zero.
 
