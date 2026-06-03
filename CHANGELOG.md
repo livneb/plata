@@ -2,7 +2,6 @@
 
 Each entry is one deployed version. Most recent first.
 
-<<<<<<< HEAD
 ## 2.24.152 — 2026-06-01
 - **📈 New `MarketTickerSource` — direct market data, not news.** Polls live prices for top crypto (CoinGecko free tier, no auth) + top stocks (Alpaca data v2, uses existing creds when present). Stores a 24h rolling history per symbol in Redis sorted sets, computes the % change over the configured window, and **emits a `RawSignal` when |% change| crosses the threshold** — direct breakout/momentum events the news pipeline alone misses.
   - New `EventCategory.PRICE_ACTION` so the strategist can recognise these are deterministic price moves, not news.
