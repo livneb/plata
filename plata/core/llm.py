@@ -327,8 +327,11 @@ class LLMClient:
             kwargs["response_format"] = response_format
 
         # If OpenRouter says "402 — can only afford N tokens", parse N and shrink.
+        # Strip internal sentinel keys (anything starting with "_") before the
+        # SDK call — the OpenAI client rejects unknown kwargs.
         async def _attempt_once():
-            return await self._openai.chat.completions.create(**kwargs)
+            clean = {k: v for k, v in kwargs.items() if not k.startswith("_")}
+            return await self._openai.chat.completions.create(**clean)
 
         response = None
         for _try in range(3):

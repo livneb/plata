@@ -22,7 +22,10 @@ BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
 class GdeltSource(BaseSource):
     name = "gdelt"
-    poll_interval_sec = 15 * 60  # GDELT updates every 15 min
+    # GDELT updates every 15 min, but enforces a 5s minimum BETWEEN REQUESTS
+    # at the IP level. On shared egress (Railway) other tenants may exhaust
+    # the budget — 30 min keeps us a good citizen and below 429 territory.
+    poll_interval_sec = 30 * 60
 
     def __init__(self) -> None:
         self._seen_urls: set[str] = set()
@@ -44,13 +47,39 @@ class GdeltSource(BaseSource):
         }
         signals: list[RawSignal] = []
         probe_kwargs: dict = {"url": BASE_URL, "query": query[:200]}
+        # GDELT enforces a 5s minimum between requests across the *whole IP*.
+        # On shared infra (Railway egress IP), other tenants hitting GDELT mean
+        # we see frequent 429s. When we hit one, back off long enough that the
+        # next scheduled poll has a fresh budget.
+        redis = get_redis() if False else None  # placeholder, set below
+        from plata.core.bus import get_redis as _gr
+        redis = _gr()
+        if await redis.exists("gdelt:backoff_until"):
+            probe_kwargs["error_type"] = "BackingOff"
+            probe_kwargs["error_message"] = "GDELT 429'd recently; skipping this poll to let the rate-limit window clear."
+            await record_poll_probe("gdelt", **probe_kwargs)
+            return []
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(
+                timeout=30,
+                headers={
+                    # Identify ourselves so GDELT can rate-limit per-app instead
+                    # of per-IP if/when they support it.
+                    "User-Agent": "Plata/1.0 (+https://github.com/livneb/plata)",
+                }
+            ) as client:
                 r = await client.get(BASE_URL, params=params)
                 probe_kwargs["http_status"] = r.status_code
                 probe_kwargs["final_url"] = str(r.url)
                 probe_kwargs["response_size"] = len(r.content or b"")
                 probe_kwargs["sample"] = (r.text or "")[:300]
+                if r.status_code == 429:
+                    # Treat as soft failure; back off for 10 min.
+                    await redis.set("gdelt:backoff_until", "1", ex=10 * 60)
+                    probe_kwargs["error_type"] = "RateLimited"
+                    probe_kwargs["error_message"] = "GDELT returned 429 (IP-level limit). Backing off 10 min."
+                    await record_poll_probe("gdelt", **probe_kwargs)
+                    return []
                 r.raise_for_status()
                 data = r.json()
         except Exception as exc:
