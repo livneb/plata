@@ -354,3 +354,35 @@ class LLMCost(Base):
         Index("ix_llm_cost_agent_ts", "agent", "ts"),
         Index("ix_llm_cost_ts_agent", "ts", "agent"),
     )
+
+
+class SysopFinding(Base):
+    """One row per issue the sysop agent detected and surfaced.
+
+    Lifecycle: new → (auto-applied | approved | dismissed | manual_only).
+    The /sysop/ page lists `new` rows; user clicks Approve/Dismiss or copies
+    the evidence to escalate to a human (or to me, in chat).
+    """
+    __tablename__ = "sysop_findings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    pattern: Mapped[str] = mapped_column(String(64), index=True)
+    severity: Mapped[str] = mapped_column(String(16), index=True)  # info|warn|critical
+    title: Mapped[str] = mapped_column(String(255))
+    evidence: Mapped[dict] = mapped_column(JSONB, default=dict)
+    proposed_fix: Mapped[str] = mapped_column(Text)
+    fix_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    fix_action_args: Mapped[dict] = mapped_column(JSONB, default=dict)
+    state: Mapped[str] = mapped_column(String(24), index=True, default="new")
+    actor: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+
+    __table_args__ = (
+        Index("ix_sysop_findings_state_created", "state", "created_at"),
+    )

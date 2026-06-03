@@ -12,6 +12,7 @@ from plata.core.db.models import (
     LLMCost,
     Proposal,
     SignalArchive,
+    SysopFinding,
     TradeLedger,
     User,
 )
@@ -30,7 +31,7 @@ async def ensure_aux_tables() -> None:
     """
     import logging
     log = logging.getLogger("db.ensure_aux_tables")
-    tables = [Proposal, AgentActivityLog, ApiCredential, LLMCost]
+    tables = [Proposal, AgentActivityLog, ApiCredential, LLMCost, SysopFinding]
     try:
         engine = get_engine()
         async with engine.begin() as conn:
@@ -49,6 +50,7 @@ __all__ = [
     "SignalArchive",
     "EventPriceWindow",
     "LLMCost",
+    "SysopFinding",
     "ConfigSetting",
     "User",
     "AuditLog",

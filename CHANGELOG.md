@@ -2,6 +2,22 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.151 — 2026-06-01
+- **🛠 New Sysop agent + `/sysop/` page** — exactly what you asked for.
+  - Runs every 5 min. Detects stale agents per container, news pipeline silent, individual sources never publishing, venue regulatory blocks, OpenRouter 402 while in `paid` mode, 2h+ without a new proposal, and repeated `ERROR/CRITICAL` log entries.
+  - Each issue becomes a `SysopFinding` row in Postgres with stable fingerprint (re-detecting the same issue updates the row instead of spamming).
+  - Findings carry **raw evidence** — probe data, error excerpts, agent statuses, config snapshots — so a human reading them can act without further digging.
+  - **Curated auto-fix registry** (gated by your approval click):
+    - `force_resume_all` — publish RESUME + clear all halted flags
+    - `clear_venue_block` — delete the regulatory-block flag for a venue
+    - `set_llm_mode_auto` — switch to auto-fallback to free models
+    - `clear_orchestrator_dead` — clear the dead-logged marker (re-alert if still dead)
+    - `resume_source` — clear halted flag on one source and queue an immediate run
+    - `lower_sentiment_threshold` — set `min_sentiment_magnitude = 0.3`
+  - **📋 Copy for chat** button per finding produces a markdown block (title + severity + evidence JSON + proposed fix) ready to paste here so I can act on it.
+  - Sidebar → Diagnostics → 🛠 Sysop. New `sysop_findings` Postgres table + alembic migration `20260601_0000`.
+  - **Manual fix actions**: Approve & apply (runs the auto-fix), Mark fixed (you fixed it yourself), Dismiss (silenced for 1h then re-evaluated).
+
 ## 2.24.150 — 2026-06-01
 - **🐛 Fix `historian batch 4: NotFoundError 404 — No endpoints found for deepseek/deepseek-r1:free`.** OpenRouter's free pool for R1 is intermittent (the model exists but its free providers can have zero active endpoints for hours at a time). Two changes:
   - Free reasoning default flipped from `deepseek/deepseek-r1:free` → `deepseek/deepseek-chat:free` (V3 free is more stable than R1 free).

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Sysop · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">🛠 Sysop findings</h1>
+    <div class="flex items-center gap-2 text-xs">
+      <a href="/sysop/?show=open" class="px-2 py-1 rounded {% if show == 'open' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">Open</a>
+      <a href="/sysop/?show=history" class="px-2 py-1 rounded {% if show == 'history' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">History</a>
+      <a href="/sysop/?show=all" class="px-2 py-1 rounded {% if show == 'all' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">All</a>
+    </div>
+  </div>
+  <p class="text-xs text-gray-500">Sysop runs every 5 min, scanning agent heartbeats, scraper probes, error log, venue blocks, proposal output, and OpenRouter status. Each detected issue is one row. Approve to auto-fix where possible, dismiss to suppress for 1h, or copy the evidence into chat.</p>
+
+  {% if not findings %}
+  <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-lg p-6 text-center text-emerald-700 dark:text-emerald-300">
+    ✓ No open findings. System looks healthy from sysop's vantage point.
+  </div>
+  {% endif %}
+
+  {% for f in findings %}
+  {% set scolor = 'red' if f.severity == 'critical' else ('amber' if f.severity == 'warn' else 'gray') %}
+  <div id="finding-{{ f.id }}" class="bg-white dark:bg-gray-800 rounded-lg border border-{{ scolor }}-300 dark:border-{{ scolor }}-700 overflow-hidden">
+    <div class="px-4 py-3 border-b border-{{ scolor }}-200 dark:border-{{ scolor }}-700 bg-{{ scolor }}-50 dark:bg-{{ scolor }}-900/30 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium uppercase
+          {% if f.severity == 'critical' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200
+          {% elif f.severity == 'warn' %}bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200
+          {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+          {{ f.severity }}
+        </span>
+        <span class="font-mono text-[10px] text-gray-400">#{{ f.id }} · {{ f.pattern }}</span>
+        {% if f.state != 'new' %}
+        <span class="font-mono text-[10px] text-gray-500">[{{ f.state }}{% if f.actor %} by {{ f.actor }}{% endif %}]</span>
+        {% endif %}
+        <span class="text-[10px] text-gray-400" title="{{ f.created_at.isoformat() }}"><time data-utc="{{ f.created_at.isoformat() }}">{{ f.created_at | time_ago }}</time></span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" data-copy-finding="{{ f.id }}"
+                class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Copy a markdown-formatted finding (title, evidence, proposed fix) to clipboard — paste into chat with Claude.">📋 Copy for chat</button>
+        {% if f.state == 'new' and f.fix_action %}
+        <button type="button" data-apply-finding="{{ f.id }}"
+                data-confirm="Apply automatic fix `{{ f.fix_action }}` for: {{ f.title }}?"
+                data-confirm-title="Approve sysop fix" data-confirm-label="Apply"
+                class="text-xs px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white">✓ Approve &amp; apply</button>
+        {% endif %}
+        {% if f.state == 'new' %}
+        <form method="post" action="/sysop/{{ f.id }}/resolve" class="inline"
+              data-confirm="Mark as fixed manually? (will hide from Open view)"
+              data-confirm-title="Mark fixed" data-confirm-label="Mark fixed">
+          <button type="submit" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">Mark fixed</button>
+        </form>
+        <form method="post" action="/sysop/{{ f.id }}/dismiss" class="inline"
+              data-confirm="Dismiss this finding? (will reappear in 1h if still applicable)"
+              data-confirm-title="Dismiss" data-confirm-label="Dismiss" data-confirm-danger>
+          <button type="submit" class="text-xs px-2 py-1 rounded border border-red-300 dark:border-red-700 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30">Dismiss</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <div class="p-4 space-y-3 text-sm">
+      <div class="font-medium">{{ f.title }}</div>
+      <div>
+        <div class="text-[10px] uppercase text-gray-500 mb-1">Proposed fix</div>
+        <p class="whitespace-pre-line text-gray-700 dark:text-gray-300">{{ f.proposed_fix }}</p>
+        {% if f.fix_action %}
+        <div class="mt-1 text-[10px] text-gray-500">Automatic action available: <span class="font-mono">{{ f.fix_action }}</span></div>
+        {% endif %}
+      </div>
+      <details>
+        <summary class="cursor-pointer text-[11px] text-gray-500 hover:text-gray-300">Evidence ↓</summary>
+        <pre class="mt-2 p-2 text-[10px] bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 overflow-x-auto">{{ f.evidence | tojson(indent=2) }}</pre>
+      </details>
+      <!-- Hidden clipboard payload -->
+      <textarea id="clipboard-{{ f.id }}" class="hidden">{{ f.clipboard }}</textarea>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+  // Copy-for-chat handler
+  document.querySelectorAll('[data-copy-finding]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-copy-finding');
+      const ta = document.getElementById('clipboard-' + id);
+      if (!ta) return;
+      try {
+        await navigator.clipboard.writeText(ta.value);
+        const prev = btn.innerHTML;
+        btn.innerHTML = '✓ Copied';
+        setTimeout(() => { btn.innerHTML = prev; }, 1500);
+      } catch (e) {
+        plataToast('Copy failed: ' + e.message, 'error');
+      }
+    });
+  });
+
+  // Approve & apply handler — POSTs to /sysop/<id>/apply, shows result
+  document.querySelectorAll('[data-apply-finding]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const msg = btn.getAttribute('data-confirm');
+      const ok = await plataConfirm({ title: 'Approve sysop fix', message: msg, confirmLabel: 'Apply' });
+      if (!ok) return;
+      btn.disabled = true; const prev = btn.innerHTML; btn.innerHTML = '⏳ Applying…';
+      const id = btn.getAttribute('data-apply-finding');
+      try {
+        const r = await fetch('/sysop/' + id + '/apply', { method: 'POST', credentials: 'same-origin' });
+        const j = await r.json();
+        if (j.ok) {
+          plataToast('Applied: ' + (j.result || 'ok'), 'success');
+          setTimeout(() => location.reload(), 800);
+        } else {
+          plataToast('Apply failed: ' + (j.error || 'unknown'), 'error');
+          btn.disabled = false; btn.innerHTML = prev;
+        }
+      } catch (e) {
+        plataToast('Network error: ' + e.message, 'error');
+        btn.disabled = false; btn.innerHTML = prev;
+      }
+    });
+  });
+</script>
+{% endblock %}
