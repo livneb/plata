@@ -2,7 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
-<<<<<<< HEAD
+## 2.24.152 — 2026-06-01
+- **📈 New `MarketTickerSource` — direct market data, not news.** Polls live prices for top crypto (CoinGecko free tier, no auth) + top stocks (Alpaca data v2, uses existing creds when present). Stores a 24h rolling history per symbol in Redis sorted sets, computes the % change over the configured window, and **emits a `RawSignal` when |% change| crosses the threshold** — direct breakout/momentum events the news pipeline alone misses.
+  - New `EventCategory.PRICE_ACTION` so the strategist can recognise these are deterministic price moves, not news.
+  - New `SignalSource.MARKET_TICKER`.
+  - Defaults: 3% threshold, 60min window, top 10 crypto (BTC/ETH/SOL/BNB/XRP/ADA/DOGE/TRX/AVAX/DOT) + SPY/QQQ/NVDA/TSLA/AAPL/MSFT.
+  - Cooldown per symbol (half the window, min 15min) so a sustained move emits once, not repeatedly.
+  - **Bypasses the news content filter** since this is a deterministic price event, not a news headline that needs keyword vetting.
+  - Editable from `/news/` like every other source: enable toggle + threshold + window + crypto-ids list + stock-symbols list. Also gets a row in the Source schedule table with HTTP probe (CoinGecko response status), "warming" state until the window's worth of price history has accumulated.
+
 ## 2.24.151 — 2026-06-01
 - **🛠 New Sysop agent + `/sysop/` page** — exactly what you asked for.
   - Runs every 5 min. Detects stale agents per container, news pipeline silent, individual sources never publishing, venue regulatory blocks, OpenRouter 402 while in `paid` mode, 2h+ without a new proposal, and repeated `ERROR/CRITICAL` log entries.
