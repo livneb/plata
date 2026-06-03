@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.153 — 2026-06-03
+- **🐛 Fix `reviewer · TypeError: AsyncCompletions.create() got an unexpected keyword argument '_tried_free'`** (17× recurrences in the last hour according to sysop). The v2.24.150 free-pool fallback stashed internal sentinel keys (`_tried_free`, `_already_fallback`) inside the same `kwargs` dict passed to the OpenAI SDK. The SDK rejects unknown kwargs. Now: a `clean = {k: v for k, v in kwargs.items() if not k.startswith("_")}` filter strips them before the call.
+- **🐛 GDELT `HTTP 429 — limit requests to one every 5 seconds`** (Railway shared egress IP, other tenants exhaust the budget). Two changes:
+  - GDELT poll interval doubled from 15 → 30 min (well above the 5s minimum, plenty of slack).
+  - When a 429 IS returned, we now set a `gdelt:backoff_until` Redis key for 10 min and the next poll(s) short-circuit with `BackingOff` in the probe instead of hammering.
+  - Added a `User-Agent: Plata/1.0` header so GDELT can rate-limit per-app if/when they support it.
+- **🪣 CryptoPanic disabled by default.** It requires a paid API key now — the "free" tier still needs an `auth_token` from signup. Sat there flagging `MissingApiKey` forever. Toggle back on after setting the key in `/settings/?tab=api`.
+- **📰 RSS feeds pre-populated with 6 reliable public feeds** (CoinDesk, Cointelegraph, Decrypt, Yahoo Finance, CNBC, MarketWatch). New deployments get real signal flow from minute one instead of an empty list begging for input. Users can edit on `/news/`.
+
 ## 2.24.152 — 2026-06-01
 - **📈 New `MarketTickerSource` — direct market data, not news.** Polls live prices for top crypto (CoinGecko free tier, no auth) + top stocks (Alpaca data v2, uses existing creds when present). Stores a 24h rolling history per symbol in Redis sorted sets, computes the % change over the configured window, and **emits a `RawSignal` when |% change| crosses the threshold** — direct breakout/momentum events the news pipeline alone misses.
   - New `EventCategory.PRICE_ACTION` so the strategist can recognise these are deterministic price moves, not news.

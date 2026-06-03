@@ -16,7 +16,10 @@ DEFAULTS: dict[str, Any] = {
     # --- Source enable flags ---
     "gdelt_enabled": True,
     "reddit_enabled": True,
-    "cryptopanic_enabled": True,
+    # CryptoPanic requires an API key now (their "free" tier wants signup).
+    # Default off so it doesn't sit there flagging "MissingApiKey" forever.
+    # Set the key on /settings/?tab=api and toggle this back on.
+    "cryptopanic_enabled": False,
     "rss_enabled": True,
     "telegram_channels_enabled": False,
     # Market-ticker source: poll live prices for top crypto + stocks; emit a
@@ -41,9 +44,16 @@ DEFAULTS: dict[str, Any] = {
         '"interest rate" OR fed OR ecb OR earnings OR tariff)'
     ),
     "reddit_subreddits": ["CryptoCurrency", "wallstreetbets", "Bitcoin", "ethfinance"],
+    # Default RSS feeds — public, no-auth, generally reliable. Users can edit
+    # this list on /news/. Picked for: high volume of finance/macro headlines,
+    # don't 401 / require partner agreements, return well-formed RSS.
     "rss_feeds": [
-        # name, url, enabled — list of dicts
-        # {"name": "Reuters Business", "url": "https://...", "enabled": True}
+        {"name": "CoinDesk",          "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",   "enabled": True},
+        {"name": "Cointelegraph",     "url": "https://cointelegraph.com/rss",                      "enabled": True},
+        {"name": "Decrypt",           "url": "https://decrypt.co/feed",                            "enabled": True},
+        {"name": "Yahoo Finance",     "url": "https://finance.yahoo.com/news/rssindex",            "enabled": True},
+        {"name": "CNBC Top News",     "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "enabled": True},
+        {"name": "MarketWatch Top",   "url": "https://feeds.marketwatch.com/marketwatch/topstories/", "enabled": True},
     ],
     # --- Content filter (applied to every signal before publish) ---
     # Drop if title length < this (junk one-word headlines).
