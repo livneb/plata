@@ -2,6 +2,7 @@
 
 Each entry is one deployed version. Most recent first.
 
+<<<<<<< HEAD
 ## 2.24.151 — 2026-06-01
 - **🛠 New Sysop agent + `/sysop/` page** — exactly what you asked for.
   - Runs every 5 min. Detects stale agents per container, news pipeline silent, individual sources never publishing, venue regulatory blocks, OpenRouter 402 while in `paid` mode, 2h+ without a new proposal, and repeated `ERROR/CRITICAL` log entries.
@@ -18,6 +19,8 @@ Each entry is one deployed version. Most recent first.
   - Sidebar → Diagnostics → 🛠 Sysop. New `sysop_findings` Postgres table + alembic migration `20260601_0000`.
   - **Manual fix actions**: Approve & apply (runs the auto-fix), Mark fixed (you fixed it yourself), Dismiss (silenced for 1h then re-evaluated).
 
+=======
+>>>>>>> origin/master
 ## 2.24.150 — 2026-06-01
 - **🐛 Fix `historian batch 4: NotFoundError 404 — No endpoints found for deepseek/deepseek-r1:free`.** OpenRouter's free pool for R1 is intermittent (the model exists but its free providers can have zero active endpoints for hours at a time). Two changes:
   - Free reasoning default flipped from `deepseek/deepseek-r1:free` → `deepseek/deepseek-chat:free` (V3 free is more stable than R1 free).
