@@ -32,6 +32,7 @@ from plata.dashboard.routes import (
     translate as translate_route,
     risk_config,
     settings as settings_route,
+    sysop as sysop_route,
     trades,
     tuning as tuning_route,
     workflow,
@@ -379,6 +380,14 @@ async def _lifespan(_app: FastAPI):
         _app.state._improver = _improver_task
     except Exception as exc:  # noqa: BLE001
         _log.warning("improver_start_failed", error=str(exc)[:160])
+
+    # Sysop: continuous monitor → SysopFinding rows on /sysop/.
+    try:
+        from plata.agents import sysop as _sysop
+        _sysop_task = _asyncio.create_task(_sysop.run(), name="sysop")
+        _app.state._sysop = _sysop_task
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("sysop_start_failed", error=str(exc)[:160])
 
     # Server-side push relay: subscribe to dashboard:events and, for
     # actionable kinds, deliver a web push to every saved subscription
@@ -846,6 +855,7 @@ def create_app() -> FastAPI:
     app.include_router(dlq.router)
     app.include_router(settings_route.router)
     app.include_router(tuning_route.router)
+    app.include_router(sysop_route.router)
     app.include_router(push_route.router)
     app.include_router(sse_route.router)
     app.include_router(translate_route.router)
