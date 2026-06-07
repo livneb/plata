@@ -66,17 +66,52 @@ AGENT_MODELS_FREE: dict[str, str] = {
     "translator":      "google/gemini-2.0-flash-exp:free",
 }
 
-# Fallback chain for any free model that's currently 404 / "No endpoints found".
-# OpenRouter's free tier rotates providers; the listed model can have zero
-# active endpoints for hours. The LLM client tries the next one in this list.
+# Fallback chain for any free model that's currently 404 / 429 / dead.
+# Kept short and battle-tested. mistral-small-24b-instruct-2501 used to be
+# here but OpenRouter retired its free variant — left out so we don't waste
+# attempts on it. Dynamically-discovered dead models are cached in Redis
+# (key `llm:dead_free_models`, set, 24h TTL) and pre-filtered before each
+# call, so this static list is the safety net, not the only mechanism.
 FREE_FALLBACKS: list[str] = [
     "deepseek/deepseek-chat:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemini-2.0-flash-exp:free",
     "qwen/qwen-2.5-72b-instruct:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
-    "mistralai/mistral-small-24b-instruct-2501:free",
 ]
+
+
+async def _is_dead_free(model: str) -> bool:
+    """Cached lookup: did OpenRouter recently tell us this `:free` model is
+    permanently unavailable? Updated whenever we hit a 'unavailable for free'
+    or 'no endpoints found' error. 24h TTL — model may come back."""
+    if ":free" not in (model or ""):
+        return False
+    try:
+        return bool(await get_redis().sismember("llm:dead_free_models", model))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _mark_dead_free(model: str) -> None:
+    try:
+        r = get_redis()
+        await r.sadd("llm:dead_free_models", model)
+        await r.expire("llm:dead_free_models", 24 * 3600)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _next_free_candidate(tried: set[str]) -> str | None:
+    """Walk FREE_FALLBACKS for the next candidate that's neither tried nor
+    cached as dead."""
+    for cand in FREE_FALLBACKS:
+        if cand in tried:
+            continue
+        if await _is_dead_free(cand):
+            continue
+        return cand
+    return None
 
 # Curated suggestions surfaced in the Settings → Models tab so the user
 # can pick from a vetted list per agent without typing model strings.
@@ -300,6 +335,17 @@ class LLMClient:
         """Run a chat completion. Records cost and enforces budget caps."""
         # Pick up live config changes (mode / per-agent override).
         await self._refresh_model()
+        # If the selected model is a `:free` one that we've previously
+        # marked as permanently dead, walk to a healthy candidate up
+        # front instead of consuming an attempt only to retry. Avoids
+        # the 10-times-an-hour error spam pattern we just shipped a fix for.
+        if ":free" in (self.model or "") and await _is_dead_free(self.model):
+            next_model = await _next_free_candidate({self.model})
+            if next_model:
+                _log.info("llm_skip_known_dead_free",
+                          agent=self.agent,
+                          from_model=self.model, to_model=next_model)
+                self.model = next_model
         trace = None
         if self._langfuse and hasattr(self._langfuse, "trace"):
             try:
@@ -358,30 +404,49 @@ class LLMClient:
                         kwargs["max_tokens"] = affordable
                         _log.warning("llm_max_tokens_shrunk", new_max=affordable)
                         continue
-                # Free-pool 404 / 429 / "No endpoints found" / "rate limit":
-                # the model's free tier is unavailable or capped right now
-                # (e.g. llama-3.3-70b-instruct:free has 8 RPM — fills fast).
-                # Walk the FREE_FALLBACKS chain to a different free provider.
-                is_free_404 = (
-                    ":free" in (kwargs.get("model") or "")
-                    and ("no endpoints found" in low or "404" in msg
-                          or "rate limit" in low or "429" in msg)
+                # Free-pool failure classification:
+                #   PERMANENT (model is dead for free tier; cache as dead 24h)
+                #     - "unavailable for free" (OpenRouter explicit retirement)
+                #     - "no endpoints found" (no providers active right now)
+                #     - "404"
+                #   TRANSIENT (model alive but capped; don't cache as dead)
+                #     - "rate limit" / "429"
+                # Both walk FREE_FALLBACKS to the next non-tried non-dead model.
+                current_model = kwargs.get("model") or ""
+                is_free = ":free" in current_model
+                is_perm_unavail = is_free and (
+                    "unavailable for free" in low
+                    or "no endpoints found" in low
+                    or "404" in msg
                 )
-                if is_free_404:
+                is_transient = is_free and (
+                    "rate limit" in low or "429" in msg
+                )
+                if is_perm_unavail:
+                    await _mark_dead_free(current_model)
+                if is_perm_unavail or is_transient:
                     tried = set(kwargs.setdefault("_tried_free", []))
-                    tried.add(kwargs.get("model"))
-                    next_model = None
-                    for cand in FREE_FALLBACKS:
-                        if cand not in tried:
-                            next_model = cand; break
+                    tried.add(current_model)
+                    next_model = await _next_free_candidate(tried)
                     if next_model:
-                        _log.warning("llm_free_404_fallback",
-                                     from_model=kwargs.get("model"),
-                                     to_model=next_model)
+                        _log.warning("llm_free_fallback",
+                                     from_model=current_model,
+                                     to_model=next_model,
+                                     reason=("perm_unavail" if is_perm_unavail
+                                              else "rate_limited"))
                         kwargs["model"] = next_model
                         kwargs["_tried_free"] = list(tried)
                         self.model = next_model
                         continue
+                    # Chain exhausted — bail with a clear message rather than
+                    # spinning on the same failing model.
+                    raise RuntimeError(
+                        f"All free models exhausted while trying to serve "
+                        f"agent={self.agent}. Tried: {sorted(tried)}. "
+                        f"Switch llm_mode to `paid` on /settings/?tab=models "
+                        f"if you have OpenRouter credits, or wait ~1h for free "
+                        f"quotas / endpoints to recover."
+                    ) from exc
                 # Flag the provider as out-of-credits so the Activity page lights up.
                 is_credit_error = ("402" in msg or "credit" in low or "billing" in low
                                    or "payment" in low or "insufficient" in low)
