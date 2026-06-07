@@ -14,11 +14,11 @@ HASH = "news_config"
 
 DEFAULTS: dict[str, Any] = {
     # --- Source enable flags ---
-    "gdelt_enabled": True,
+    # GDELT 429s on Railway's shared egress IP (other tenants exhaust the
+    # 1-req-per-5s budget). Disabled by default — RSS is the primary feed now.
+    # Re-enable on /news/ if you're hosting from an IP that GDELT will accept.
+    "gdelt_enabled": False,
     "reddit_enabled": True,
-    # CryptoPanic requires an API key now (their "free" tier wants signup).
-    # Default off so it doesn't sit there flagging "MissingApiKey" forever.
-    # Set the key on /settings/?tab=api and toggle this back on.
     "cryptopanic_enabled": False,
     "rss_enabled": True,
     "telegram_channels_enabled": False,
@@ -51,9 +51,13 @@ DEFAULTS: dict[str, Any] = {
         {"name": "CoinDesk",          "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",   "enabled": True},
         {"name": "Cointelegraph",     "url": "https://cointelegraph.com/rss",                      "enabled": True},
         {"name": "Decrypt",           "url": "https://decrypt.co/feed",                            "enabled": True},
+        {"name": "The Block",         "url": "https://www.theblock.co/rss.xml",                    "enabled": True},
         {"name": "Yahoo Finance",     "url": "https://finance.yahoo.com/news/rssindex",            "enabled": True},
         {"name": "CNBC Top News",     "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "enabled": True},
         {"name": "MarketWatch Top",   "url": "https://feeds.marketwatch.com/marketwatch/topstories/", "enabled": True},
+        {"name": "Reuters Business",  "url": "https://www.reuters.com/business/rss",               "enabled": True},
+        {"name": "Bloomberg Markets", "url": "https://feeds.bloomberg.com/markets/news.rss",       "enabled": True},
+        {"name": "Investing.com",     "url": "https://www.investing.com/rss/news.rss",             "enabled": True},
     ],
     # --- Content filter (applied to every signal before publish) ---
     # Drop if title length < this (junk one-word headlines). Was 20 which
