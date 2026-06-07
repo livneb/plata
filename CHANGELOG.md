@@ -2,7 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
-<<<<<<< HEAD
+## 2.24.157 — 2026-06-07
+- **🐛 Fix `RuntimeError: LLM call returned no response` from graph_ingestion + reviewer.** Root cause: the retry loop was `for _try in range(3)` but each free-model fallback `continue` still advanced `_try`. With all 6 free providers 429'd at the same time (llama/deepseek/gemini/qwen/hermes/mistral all under high demand), the loop walked the chain, exhausted its 3 slots before finding a working model, and bailed out. Now:
+  - Budget bumped to `len(FREE_FALLBACKS) + 3` so we have room to walk the chain AND retry on the survivor.
+  - New `consumed_retry` counter: only increments on attempts that didn't trigger a fallback swap. Chain walking doesn't burn the budget.
+  - **`Retry-After` honored** when the provider returns one (OpenRouter sends `retry_after_seconds: 30` for 429s — we now actually wait that long).
+  - Final error message lists which free models were tried + suggests switching `llm_mode` to paid or waiting for free quotas to reset.
+
 ## 2.24.156 — 2026-06-07
 - **🤖 Sysop now auto-fixes safe actions without confirmation.** New `AUTO_APPLY_SAFE` whitelist contains fix actions that can't lose data, can't trade, can't cost money, and either reverse cleanly or have a built-in floor: `lower_sentiment_threshold` (halves, floor 0.1), `clear_orchestrator_dead`, `resume_source`, `restart_strategist_consume`, `set_llm_mode_auto`. When a detector creates a finding whose `fix_action` is in this set, the fix runs immediately and the result lands on the row as `auto_applied` — no approval click needed. Findings with riskier actions still wait for your approve.
 - **🤖 New sysop detector `signal_to_proposal_gap`** — exactly what you asked for. Watches: scrapers published signals in the last poll BUT 0 proposals were created in the last hour. Concludes the strategist is rejecting everything via `below_threshold` and **auto-halves `min_sentiment_magnitude`** (floor 0.1). If next hour still 0 proposals, runs again. Re-tightens itself nowhere — only you can raise the threshold back.

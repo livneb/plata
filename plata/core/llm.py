@@ -334,7 +334,13 @@ class LLMClient:
             return await self._openai.chat.completions.create(**clean)
 
         response = None
-        for _try in range(3):
+        # Headroom needs to cover the free-fallback chain (6 models) PLUS
+        # 3 actual retry attempts on the survivor model. Was range(3) — when
+        # every free model 429'd, the loop ran out of attempts before reaching
+        # one that worked and raised RuntimeError("LLM call returned no response").
+        max_attempts = len(FREE_FALLBACKS) + 3
+        consumed_retry = 0
+        for _try in range(max_attempts):
             try:
                 response = await _attempt_once()
                 break
@@ -412,11 +418,31 @@ class LLMClient:
                         # Don't count this as a retry; reset try counter.
                         self.model = free_model
                         continue
-                if _try == 2:
+                # Only count attempts that DIDN'T trigger a model swap as
+                # "real" retries — otherwise the chain walk burns through
+                # our budget instead of giving the new model a chance.
+                consumed_retry += 1
+                if consumed_retry >= 3:
                     raise
-                await asyncio.sleep(1 + _try * 2)
+                # Honor Retry-After when the provider gives one (OpenRouter
+                # surfaces it in the error metadata for 429s).
+                retry_after = 0.0
+                import re as _re_local
+                ra = _re_local.search(r"retry_after_seconds[^0-9]+([0-9.]+)", msg)
+                if ra:
+                    try:
+                        retry_after = min(60.0, float(ra.group(1)))
+                    except ValueError:
+                        retry_after = 0.0
+                await asyncio.sleep(max(retry_after, 1 + consumed_retry * 2))
         if response is None:
-            raise RuntimeError("LLM call returned no response")
+            raise RuntimeError(
+                f"LLM call returned no response after {max_attempts} attempts "
+                f"(tried free models: {kwargs.get('_tried_free', [])}). "
+                f"All free providers may be rate-limited; switch llm_mode to "
+                f"paid on /settings/?tab=models if you have credits, or wait "
+                f"~1 min for free quotas to reset."
+            )
 
         usage = response.usage
         if usage:
