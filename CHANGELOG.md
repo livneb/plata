@@ -2,6 +2,17 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.158 — 2026-06-07
+- **🛠 Redesign of the free-model fallback path** (instead of another incremental patch — your point landed). What was wrong:
+  1. `mistralai/mistral-small-24b-instruct-2501:free` was retired by OpenRouter ("This model is unavailable for free"). Static `FREE_FALLBACKS` kept retrying it — 10+ errors/hour caught by sysop's `repeated_error` detector.
+  2. Chain walks fell through on chain exhaustion → re-tried the same dead model 3 more times → raised the dead model's exception instead of a clean "all exhausted" message.
+- **What's fixed**
+  - Removed mistral-small from the static list. New helper `_is_dead_free(model)` checks a Redis set `llm:dead_free_models` (24h TTL) so any model OpenRouter retires gets auto-blacklisted on the first NotFound.
+  - New helper `_next_free_candidate(tried)` walks the chain AND skips cached-dead models — there's no way to hit a known-dead one twice.
+  - Classification split: **PERMANENT** ("unavailable for free", "no endpoints found", "404") marks dead in Redis. **TRANSIENT** ("rate limit", "429") doesn't.
+  - Chain-exhaustion now raises a clear `RuntimeError("All free models exhausted while trying to serve agent=X. Tried: [...]. Switch llm_mode to paid or wait ~1h.")` instead of letting the last failing model's exception leak.
+  - Pre-call check: if the configured model is already known dead, the client switches to a healthy candidate up front — no SDK round-trip wasted.
+
 ## 2.24.157 — 2026-06-07
 - **🐛 Fix `RuntimeError: LLM call returned no response` from graph_ingestion + reviewer.** Caused by the auto/free fallback machinery added in v2.24.150/156. The retry loop was `for _try in range(3)` but each free-model fallback `continue` still advanced `_try`. With all 6 free providers 429'd at the same time (llama/deepseek/gemini/qwen/hermes/mistral all under high demand), the loop walked the chain, exhausted its 3 slots before finding a working model, and bailed out. Now:
   - Budget bumped to `len(FREE_FALLBACKS) + 3` so we have room to walk the chain AND retry on the survivor.
