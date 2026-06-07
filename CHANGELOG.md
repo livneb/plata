@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+<<<<<<< HEAD
+## 2.24.154 — 2026-06-03
+- **🔧 `min_title_len` default 20 → 10.** Yahoo Finance and MarketWatch headlines are often 10-19 chars (e.g. "Oil falls 3%"). The 20-char cutoff was killing legit market news. Anything shorter than 10 is genuinely useless (single-word headlines).
+- **📥 `/dlq/` now explains itself.** Top of the page has a "What is a Dead Letter?" disclosure: when an agent's `handle()` raises 3+ times on the same message, the message lands in a per-agent DLQ stream so it doesn't keep crashing the consumer. Replay re-publishes after a fix; Discard drops it. **Empty DLQ list = healthy state.**
+
+=======
+>>>>>>> origin/master
 ## 2.24.153 — 2026-06-03
 - **🐛 Fix `reviewer · TypeError: AsyncCompletions.create() got an unexpected keyword argument '_tried_free'`** (17× recurrences in the last hour according to sysop). The v2.24.150 free-pool fallback stashed internal sentinel keys (`_tried_free`, `_already_fallback`) inside the same `kwargs` dict passed to the OpenAI SDK. The SDK rejects unknown kwargs. Now: a `clean = {k: v for k, v in kwargs.items() if not k.startswith("_")}` filter strips them before the call.
 - **🐛 GDELT `HTTP 429 — limit requests to one every 5 seconds`** (Railway shared egress IP, other tenants exhaust the budget). Two changes:
