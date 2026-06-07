@@ -542,6 +542,54 @@ async def _detect_signal_to_proposal_gap() -> list[dict[str, Any]]:
     return out
 
 
+async def _detect_all_free_exhausted() -> list[dict[str, Any]]:
+    """If a `RuntimeError("All free models exhausted")` recurred recently,
+    surface a finding suggesting paid-mode rescue."""
+    out = []
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=30)
+    async with session_scope() as session:
+        rows = (await session.execute(
+            select(func.count(ErrorLog.id), func.max(ErrorLog.ts))
+            .where(
+                ErrorLog.ts >= cutoff,
+                ErrorLog.error_type == "RuntimeError",
+                ErrorLog.message.like("%All free models exhausted%"),
+            )
+        )).one_or_none()
+    if not rows:
+        return out
+    count, latest = rows
+    if not count or count < 1:
+        return out
+    redis = get_redis()
+    mode = (await redis.hget("llm_config", "mode")) or "paid"
+    dead_set = list(await redis.smembers("llm:dead_free_models") or [])
+    catalog = list(await redis.smembers("llm:free_catalog") or [])
+    out.append({
+        "pattern": "all_free_exhausted",
+        "severity": "critical",
+        "title": f"All free LLM models exhausted ({count}× in last 30 min)",
+        "evidence": {
+            "count_30m": count,
+            "latest_ts": latest.isoformat() if latest else None,
+            "llm_mode": mode,
+            "dead_free_models": dead_set,
+            "live_catalog_size": len(catalog),
+            "note": "OpenRouter's free pool is under heavy load OR your tracked free models have all been retired. The catalog auto-refreshes daily but until then, paid mode is the only path to recovery.",
+        },
+        "proposed_fix": (
+            f"Switch llm_mode to `paid` on /settings/?tab=models if you have "
+            f"OpenRouter credits (current mode: {mode}). Auto-mode will keep "
+            "preferring free for new calls when they're available."
+        ),
+        "fix_action": "set_llm_mode_auto" if mode != "auto" else None,
+        "fix_action_args": {},
+        "fingerprint": _fp("all_free_exhausted"),
+    })
+    return out
+
+
 DETECTORS = [
     _detect_stale_agents,
     _detect_news_silent,
@@ -551,6 +599,7 @@ DETECTORS = [
     _detect_repeated_errors,
     _detect_supervisor_crashloop,
     _detect_signal_to_proposal_gap,
+    _detect_all_free_exhausted,
 ]
 
 

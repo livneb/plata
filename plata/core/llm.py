@@ -81,6 +81,55 @@ FREE_FALLBACKS: list[str] = [
 ]
 
 
+async def refresh_free_catalog() -> int:
+    """Pull OpenRouter's current model catalog, filter to free models, cache.
+
+    OpenRouter retires/adds free models often (mistral-small example). A static
+    FREE_FALLBACKS list goes stale. This task — run daily from the dashboard
+    lifespan — keeps the in-memory catalog current.
+
+    Returns the number of free models discovered, or 0 on failure (static list
+    remains the fallback).
+    """
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=20) as client:
+            r = await client.get("https://openrouter.ai/api/v1/models")
+            r.raise_for_status()
+            data = r.json() or {}
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("free_catalog_refresh_failed", error=str(exc)[:160])
+        return 0
+    free: list[str] = []
+    for m in (data.get("data") or []):
+        slug = (m.get("id") or "")
+        if not slug.endswith(":free"):
+            continue
+        pricing = m.get("pricing") or {}
+        try:
+            prompt_p = float(pricing.get("prompt") or 0)
+            comp_p = float(pricing.get("completion") or 0)
+        except (TypeError, ValueError):
+            continue
+        if prompt_p == 0 and comp_p == 0:
+            free.append(slug)
+    if not free:
+        _log.warning("free_catalog_refresh_empty", item_count=len(data.get("data") or []))
+        return 0
+    try:
+        r_ = get_redis()
+        pipe = r_.pipeline()
+        pipe.delete("llm:free_catalog")
+        pipe.sadd("llm:free_catalog", *free)
+        pipe.expire("llm:free_catalog", 48 * 3600)  # 2-day safety margin
+        await pipe.execute()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("free_catalog_redis_write_failed", error=str(exc)[:160])
+        return 0
+    _log.info("free_catalog_refreshed", count=len(free))
+    return len(free)
+
+
 async def _is_dead_free(model: str) -> bool:
     """Cached lookup: did OpenRouter recently tell us this `:free` model is
     permanently unavailable? Updated whenever we hit a 'unavailable for free'
@@ -103,9 +152,18 @@ async def _mark_dead_free(model: str) -> None:
 
 
 async def _next_free_candidate(tried: set[str]) -> str | None:
-    """Walk FREE_FALLBACKS for the next candidate that's neither tried nor
-    cached as dead."""
-    for cand in FREE_FALLBACKS:
+    """Walk OpenRouter's live free catalog (refreshed daily) for the next
+    candidate that's neither tried nor cached as dead. Falls back to the
+    static FREE_FALLBACKS list if the catalog is empty or unreachable."""
+    # 1) Prefer the live catalog (set on Redis, refreshed daily).
+    try:
+        live = list(await get_redis().smembers("llm:free_catalog") or [])
+    except Exception:  # noqa: BLE001
+        live = []
+    # Putting the static list at the END means: try fresh-from-OR models first,
+    # then the curated-known-good list as a safety net.
+    candidates = live + [m for m in FREE_FALLBACKS if m not in live]
+    for cand in candidates:
         if cand in tried:
             continue
         if await _is_dead_free(cand):
@@ -438,14 +496,37 @@ class LLMClient:
                         kwargs["_tried_free"] = list(tried)
                         self.model = next_model
                         continue
-                    # Chain exhausted — bail with a clear message rather than
-                    # spinning on the same failing model.
+                    # Free chain exhausted. In auto mode → reach for paid (the
+                    # whole point of auto: "use free when possible, else paid").
+                    # In free mode → raise (user explicitly opted in).
+                    try:
+                        cfg = await get_redis().hgetall("llm_config") or {}
+                    except Exception:  # noqa: BLE001
+                        cfg = {}
+                    mode = (cfg.get("mode") or "paid").lower()
+                    if mode == "auto" and not kwargs.get("_paid_rescue_tried"):
+                        paid = AGENT_MODELS.get(self.agent, "anthropic/claude-haiku-4-5")
+                        if paid and paid != current_model:
+                            _log.warning("llm_free_exhausted_paid_rescue",
+                                         agent=self.agent,
+                                         tried_free=list(tried),
+                                         paid=paid)
+                            kwargs["model"] = paid
+                            kwargs["_paid_rescue_tried"] = True
+                            self.model = paid
+                            # Clear the sticky free pin so subsequent calls go
+                            # to paid first rather than free.
+                            try:
+                                await get_redis().delete("llm_config:auto_active_free")
+                            except Exception:  # noqa: BLE001
+                                pass
+                            continue
                     raise RuntimeError(
                         f"All free models exhausted while trying to serve "
                         f"agent={self.agent}. Tried: {sorted(tried)}. "
-                        f"Switch llm_mode to `paid` on /settings/?tab=models "
-                        f"if you have OpenRouter credits, or wait ~1h for free "
-                        f"quotas / endpoints to recover."
+                        f"Mode={mode}. Switch llm_mode to `paid` on "
+                        f"/settings/?tab=models if you have OpenRouter credits, "
+                        f"or wait ~1h for free quotas / endpoints to recover."
                     ) from exc
                 # Flag the provider as out-of-credits so the Activity page lights up.
                 is_credit_error = ("402" in msg or "credit" in low or "billing" in low

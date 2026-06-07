@@ -389,6 +389,24 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _log.warning("sysop_start_failed", error=str(exc)[:160])
 
+    # OpenRouter free-model catalog refresh: once at boot then every 24h.
+    # Keeps `llm:free_catalog` Redis set current so when OpenRouter retires
+    # or adds free models, Plata picks the change up the next day.
+    async def _free_catalog_refresher() -> None:
+        from plata.core.llm import refresh_free_catalog
+        await _asyncio.sleep(5)  # let the dashboard finish booting
+        while True:
+            try:
+                await refresh_free_catalog()
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("free_catalog_loop_error", error=str(exc)[:160])
+            await _asyncio.sleep(24 * 60 * 60)
+    try:
+        _cat_task = _asyncio.create_task(_free_catalog_refresher(), name="free-catalog-refresh")
+        _app.state._free_catalog_refresher = _cat_task
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("free_catalog_task_start_failed", error=str(exc)[:160])
+
     # Server-side push relay: subscribe to dashboard:events and, for
     # actionable kinds, deliver a web push to every saved subscription
     # (iOS PWA / Chrome). Browsers wake even when the tab is closed.
