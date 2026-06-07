@@ -3,12 +3,24 @@
 Each entry is one deployed version. Most recent first.
 
 <<<<<<< HEAD
+## 2.24.160 — 2026-06-07
+- **🐛 Fix `LLM structured response was not valid JSON (finish_reason=length, tail='\\t\\t\\t…')`.** Some free models on OpenRouter get into a degenerate state and emit hundreds of whitespace chars in a row until they hit `max_tokens`, producing JSON that never closes. Two-part fix:
+  - New `_looks_like_loop_output()` detector: any single non-syntax character repeating 50+ times in a row is treated as loop garbage.
+  - `structured()` now retries up to 5 times, each time on a different free model (the offending one gets cached as a `llm:garbage_producer:<slug>` Redis key with 10-min TTL so `_next_free_candidate()` skips it). 5 garbage outputs in a row from different models → clean error suggesting paid mode.
+- **🩺 `_is_dead_free()` extended** to also treat garbage-producer cooldowns as "dead for now" — same skip semantics across the chain walk and pre-call check.
+
+=======
+<<<<<<< HEAD
+>>>>>>> origin/master
 ## 2.24.159 — 2026-06-07
 - **🌐 Daily refresh of OpenRouter's free-model catalog.** Static `FREE_FALLBACKS` was always going to go stale (mistral-small example). New `refresh_free_catalog()` hits `https://openrouter.ai/api/v1/models` once at boot then every 24h, filters to models where `pricing.prompt == 0 AND pricing.completion == 0 AND slug.endswith(":free")`, stores them in Redis `llm:free_catalog` (48h TTL). `_next_free_candidate()` prefers the live catalog over the static list. When OpenRouter adds a new free model, Plata picks it up the next day with zero code change.
 - **🛟 Auto-mode paid rescue.** When all free models are exhausted (rate-limited, retired, no endpoints) AND `llm_mode = auto`, the client falls back to the configured paid model for that call (the whole point of auto: "use free when possible, else paid"). Clears the sticky `llm_config:auto_active_free` pin so subsequent calls go straight to paid until free recovers. `free` mode still raises (user opted into free-only).
 - **🩺 New sysop detector `all_free_exhausted`** fires when `RuntimeError("All free models exhausted")` recurred in the last 30 min. Surfaces the current `llm_mode`, the dead-model cache, and the live catalog size, with `set_llm_mode_auto` as a one-click fix (in `AUTO_APPLY_SAFE`). User-friendly path out when the OpenRouter free pool is genuinely down.
 
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> origin/master
 >>>>>>> origin/master
 ## 2.24.158 — 2026-06-07
 - **🛠 Redesign of the free-model fallback path** (instead of another incremental patch — your point landed). What was wrong:
@@ -35,8 +47,6 @@ Each entry is one deployed version. Most recent first.
 - **🐛 Reviewer / graph_ingestion `RateLimitError 429 from meta-llama/llama-3.3-70b-instruct:free` (8 RPM cap, "High demand")** — extended the v2.24.150 free-pool fallback to fire on 429 / "rate limit" too (was only catching 404 / "no endpoints found"). Reviewer & graph_ingestion now transparently walk `deepseek-chat:free → gemini-2.0-flash-exp:free → qwen-2.5-72b:free → …` until a non-rate-limited free model serves the request. No user action needed.
 - **🐛 RSS items dup'd but never published.** Layer-2 (entity Jaccard) + Layer-3 (embedding cosine) dedup were catching legit different stories that shared tickers or topic vocabulary. RSS, market_ticker, and telegram now use Layer-1 (URL hash) **only** — a literal re-broadcast still dups, but two news outlets covering the same story both reach the strategist.
 
-=======
->>>>>>> origin/master
 ## 2.24.155 — 2026-06-07
 - **🛠 ROOT CAUSE of "nothing works for 6 days": agent loops crashed once → stayed dead until container redeploy.** `_supervise` in `entrypoints.py` caught the exception and logged it but did NOT restart. So when the strategist threw once, position_monitor and trade_sampler kept running (sibling tasks in the same container) but the strategist task was gone forever — that's why the dashboard shows container "up" while specific agents heartbeat from days ago. Now: supervisor is a real forever-loop with exponential backoff (2s → 60s cap), records `last_crash_at`/`last_crash_error`/`restart_count` to `agent_supervisor:<name>` Redis hash so `/sysop/` shows the crash trail.
 - **🛠 `consume()` no longer dies on a transient Redis hiccup.** The iterator's `xreadgroup` call wasn't wrapped; a connection drop or timeout propagated up and killed the consume loop entirely. Now caught + logged + retried after 1s. Consumer-group state preserved, resumes cleanly.
@@ -83,8 +93,6 @@ Each entry is one deployed version. Most recent first.
   - Sidebar → Diagnostics → 🛠 Sysop. New `sysop_findings` Postgres table + alembic migration `20260601_0000`.
   - **Manual fix actions**: Approve & apply (runs the auto-fix), Mark fixed (you fixed it yourself), Dismiss (silenced for 1h then re-evaluated).
 
-=======
->>>>>>> origin/master
 ## 2.24.150 — 2026-06-01
 - **🐛 Fix `historian batch 4: NotFoundError 404 — No endpoints found for deepseek/deepseek-r1:free`.** OpenRouter's free pool for R1 is intermittent (the model exists but its free providers can have zero active endpoints for hours at a time). Two changes:
   - Free reasoning default flipped from `deepseek/deepseek-r1:free` → `deepseek/deepseek-chat:free` (V3 free is more stable than R1 free).
@@ -113,8 +121,6 @@ Each entry is one deployed version. Most recent first.
 - **🔎 `/news/` shows a "Last poll probe ↓" disclosure** under each Diagnosis cell. Click to expand and see HTTP code, final URL (clickable), item count, response sample, and any error. This is what should have been there from the start — concrete evidence per source.
 - Wired into all four sources: gdelt, cryptopanic, reddit, rss.
 
-=======
->>>>>>> origin/master
 ## 2.24.146 — 2026-06-01
 - **🩺 Per-source Diagnosis column on `/news/`** replaces the static "How to verify" text. Each row now tells you concretely why it's producing zero results. Ladder of checks (first match wins):
   1. Scraper agent heartbeat older than 180s → "Scraper agent heartbeat is Nm old — ingestion_hub container is probably dead. Restart on Railway; no source will poll until then."
