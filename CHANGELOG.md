@@ -8,6 +8,7 @@ Each entry is one deployed version. Most recent first.
 - **🛠 New sysop pattern `supervisor_crashloop`** — surfaces every agent the supervisor has restarted, with `restart_count`, `last_crash_at`, and the actual error message so the underlying bug can be fixed instead of just discovering "stale heartbeat" days later.
 - **📰 GDELT disabled by default.** It keeps 429ing from Railway's shared egress IP (other tenants exhaust the budget). The retry+backoff is in place but isn't enough when the IP itself is rate-limited. Disabled out of the box; toggle back on at `/news/` if you're hosting elsewhere and want to test.
 - **📰 RSS feed list expanded from 6 → 10**: added Reuters Business, Bloomberg Markets, The Block, and Investing.com headlines. RSS is now the primary news pipeline — self-controlled, no shared-IP rate limits, no API keys.
+- **📈 Market ticker threshold lowered 3% → 1.5%, window 60min → 30min** so signals actually fire in normal volatility. UI now clarifies `items returned by API` = "symbols polled" for market_ticker, not "signals emitted".
 
 ## 2.24.154 — 2026-06-03
 - **🔧 `min_title_len` default 20 → 10.** Yahoo Finance and MarketWatch headlines are often 10-19 chars (e.g. "Oil falls 3%"). The 20-char cutoff was killing legit market news. Anything shorter than 10 is genuinely useless (single-word headlines).
