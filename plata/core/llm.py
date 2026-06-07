@@ -130,16 +130,33 @@ async def refresh_free_catalog() -> int:
     return len(free)
 
 
+def _looks_like_loop_output(content: str) -> bool:
+    """Detect the pathological output some free models produce: long runs of
+    a single whitespace or character (tabs, spaces, newlines, dots, dashes)
+    that fill up max_tokens and never close the JSON. Heuristic: any single
+    character (excluding common JSON syntax) repeats 50+ times in a row.
+    """
+    if not content or len(content) < 50:
+        return False
+    import re as _re
+    return bool(_re.search(r"([^{}\[\],:\"0-9a-zA-Z_])\1{49,}", content))
+
+
 async def _is_dead_free(model: str) -> bool:
     """Cached lookup: did OpenRouter recently tell us this `:free` model is
-    permanently unavailable? Updated whenever we hit a 'unavailable for free'
-    or 'no endpoints found' error. 24h TTL — model may come back."""
+    permanently unavailable, OR did it recently produce loopy garbage output?
+    Two TTLs: dead-cache is 24h, garbage-producer is 10 min."""
     if ":free" not in (model or ""):
         return False
     try:
-        return bool(await get_redis().sismember("llm:dead_free_models", model))
+        r = get_redis()
+        if await r.sismember("llm:dead_free_models", model):
+            return True
+        if await r.exists(f"llm:garbage_producer:{model}"):
+            return True
     except Exception:  # noqa: BLE001
         return False
+    return False
 
 
 async def _mark_dead_free(model: str) -> None:
@@ -647,30 +664,67 @@ class LLMClient:
         in the historian. Caller can override with a smaller cap when the
         schema is known to be small.
         """
-        response = await self.complete(
-            messages=messages,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": schema_name, "schema": _sanitize_schema(schema), "strict": True},
-            },
-            temperature=temperature,
-            max_tokens=max_tokens,
-            metadata=metadata,
-        )
-        content = response.choices[0].message.content or "{}"
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError as exc:
-            # Truncated mid-string almost always means we hit max_tokens. Give
-            # the caller a usable error instead of a raw decode trace, and
-            # include the finish_reason + content tail so it's diagnosable.
-            finish = "?"
+        # Structured calls can produce degenerate output on cheap/free models:
+        # loops of whitespace or a single character that fill up max_tokens
+        # without ever closing the JSON. Treat that as a model-quality failure
+        # and walk to the next free model (same machinery as 404 / 429). Cap
+        # attempts so we don't spin forever.
+        tried_garbage: set[str] = set()
+        last_error: tuple[str, str] | None = None
+        for attempt in range(5):
+            response = await self.complete(
+                messages=messages,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": schema_name, "schema": _sanitize_schema(schema), "strict": True},
+                },
+                temperature=temperature,
+                max_tokens=max_tokens,
+                metadata=metadata,
+            )
+            content = response.choices[0].message.content or "{}"
             try:
-                finish = response.choices[0].finish_reason or "?"
-            except Exception:  # noqa: BLE001
-                pass
-            tail = content[-200:].replace("\n", " ")
-            raise RuntimeError(
-                f"LLM structured response was not valid JSON "
-                f"(finish_reason={finish}, tail={tail!r}, original={exc.msg})"
-            ) from exc
+                return json.loads(content)
+            except json.JSONDecodeError as exc:
+                finish = "?"
+                try:
+                    finish = response.choices[0].finish_reason or "?"
+                except Exception:  # noqa: BLE001
+                    pass
+                tail = content[-200:].replace("\n", " ")
+                is_garbage = _looks_like_loop_output(content) or finish == "length"
+                if is_garbage and self.model not in tried_garbage:
+                    # Mark the model as a temporary "bad output" producer so the
+                    # next free-candidate walk picks something else. Use a short
+                    # cooldown — model may recover next call.
+                    try:
+                        await get_redis().setex(
+                            f"llm:garbage_producer:{self.model}", 600, "1"
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    tried_garbage.add(self.model)
+                    # Switch to a different free candidate explicitly.
+                    next_model = await _next_free_candidate(
+                        tried_garbage | {self.model}
+                    )
+                    if next_model:
+                        _log.warning("llm_structured_garbage_switch_model",
+                                      agent=self.agent, finish=finish,
+                                      from_model=self.model,
+                                      to_model=next_model)
+                        self.model = next_model
+                        last_error = (finish, tail)
+                        continue
+                last_error = (finish, tail)
+                raise RuntimeError(
+                    f"LLM structured response was not valid JSON "
+                    f"(finish_reason={finish}, tail={tail!r}, original={exc.msg})"
+                ) from exc
+        # Loop exited without return (5 garbage responses in a row)
+        finish, tail = last_error or ("?", "")
+        raise RuntimeError(
+            f"LLM structured response was not valid JSON after 5 model swaps "
+            f"(finish_reason={finish}, last_tail={tail!r}). Free pool may be "
+            f"degraded; switch llm_mode to paid on /settings/?tab=models."
+        )
