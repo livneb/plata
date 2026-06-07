@@ -2,11 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+<<<<<<< HEAD
 ## 2.24.159 — 2026-06-07
 - **🌐 Daily refresh of OpenRouter's free-model catalog.** Static `FREE_FALLBACKS` was always going to go stale (mistral-small example). New `refresh_free_catalog()` hits `https://openrouter.ai/api/v1/models` once at boot then every 24h, filters to models where `pricing.prompt == 0 AND pricing.completion == 0 AND slug.endswith(":free")`, stores them in Redis `llm:free_catalog` (48h TTL). `_next_free_candidate()` prefers the live catalog over the static list. When OpenRouter adds a new free model, Plata picks it up the next day with zero code change.
 - **🛟 Auto-mode paid rescue.** When all free models are exhausted (rate-limited, retired, no endpoints) AND `llm_mode = auto`, the client falls back to the configured paid model for that call (the whole point of auto: "use free when possible, else paid"). Clears the sticky `llm_config:auto_active_free` pin so subsequent calls go straight to paid until free recovers. `free` mode still raises (user opted into free-only).
 - **🩺 New sysop detector `all_free_exhausted`** fires when `RuntimeError("All free models exhausted")` recurred in the last 30 min. Surfaces the current `llm_mode`, the dead-model cache, and the live catalog size, with `set_llm_mode_auto` as a one-click fix (in `AUTO_APPLY_SAFE`). User-friendly path out when the OpenRouter free pool is genuinely down.
 
+=======
+>>>>>>> origin/master
 ## 2.24.158 — 2026-06-07
 - **🛠 Redesign of the free-model fallback path** (instead of another incremental patch — your point landed). What was wrong:
   1. `mistralai/mistral-small-24b-instruct-2501:free` was retired by OpenRouter ("This model is unavailable for free"). Static `FREE_FALLBACKS` kept retrying it — 10+ errors/hour caught by sysop's `repeated_error` detector.
