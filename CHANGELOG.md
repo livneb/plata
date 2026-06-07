@@ -3,7 +3,7 @@
 Each entry is one deployed version. Most recent first.
 
 ## 2.24.157 — 2026-06-07
-- **🐛 Fix `RuntimeError: LLM call returned no response` from graph_ingestion + reviewer.** Root cause: the retry loop was `for _try in range(3)` but each free-model fallback `continue` still advanced `_try`. With all 6 free providers 429'd at the same time (llama/deepseek/gemini/qwen/hermes/mistral all under high demand), the loop walked the chain, exhausted its 3 slots before finding a working model, and bailed out. Now:
+- **🐛 Fix `RuntimeError: LLM call returned no response` from graph_ingestion + reviewer.** Caused by the auto/free fallback machinery added in v2.24.150/156. The retry loop was `for _try in range(3)` but each free-model fallback `continue` still advanced `_try`. With all 6 free providers 429'd at the same time (llama/deepseek/gemini/qwen/hermes/mistral all under high demand), the loop walked the chain, exhausted its 3 slots before finding a working model, and bailed out. Now:
   - Budget bumped to `len(FREE_FALLBACKS) + 3` so we have room to walk the chain AND retry on the survivor.
   - New `consumed_retry` counter: only increments on attempts that didn't trigger a fallback swap. Chain walking doesn't burn the budget.
   - **`Retry-After` honored** when the provider returns one (OpenRouter sends `retry_after_seconds: 30` for 429s — we now actually wait that long).
