@@ -97,10 +97,43 @@ async def _fix_resume_source(args: dict) -> str:
 
 
 async def _fix_lower_sentiment_threshold(args: dict) -> str:
+    """Lower min_sentiment_magnitude. Floor-protected: never goes below 0.1
+    even if the args say to. Halves the current value when called via
+    auto-apply with no explicit `new`."""
     redis = get_redis()
-    new = float(args.get("new") or 0.3)
+    cur_raw = await redis.hget("risk_config", "min_sentiment_magnitude")
+    try:
+        cur = float(cur_raw) if cur_raw else 0.5
+    except (TypeError, ValueError):
+        cur = 0.5
+    if "new" in args:
+        try:
+            new = float(args["new"])
+        except (TypeError, ValueError):
+            new = cur / 2
+    else:
+        new = round(cur / 2, 3)
+    new = max(0.1, min(new, 0.9))
     await redis.hset("risk_config", "min_sentiment_magnitude", str(new))
-    return f"Set min_sentiment_magnitude = {new}."
+    return f"Set min_sentiment_magnitude {cur} → {new} (floor 0.1)."
+
+
+async def _fix_restart_strategist_consume(_args: dict) -> str:
+    """Mark the strategist's pending consume-group entries for re-delivery.
+    Use when the strategist appears stuck on a backlog: claims pending items
+    older than 5min back to itself, letting it process fresh ones. Safe — the
+    same item just gets retried."""
+    redis = get_redis()
+    try:
+        # Use the standard stream name
+        from plata.core.bus import Streams as _S
+        await redis.xautoclaim(
+            _S.ENRICHED_EVENTS, "strategist", "strategist-recover",
+            min_idle_time=5 * 60 * 1000, start_id="0-0", count=100,
+        )
+        return "Re-claimed strategist's stuck pending entries (≥5min idle)."
+    except Exception as exc:  # noqa: BLE001
+        return f"xautoclaim failed: {exc}"
 
 
 FIX_REGISTRY: dict[str, Callable[[dict], Awaitable[str]]] = {
@@ -110,6 +143,23 @@ FIX_REGISTRY: dict[str, Callable[[dict], Awaitable[str]]] = {
     "clear_orchestrator_dead": _fix_clear_orchestrator_dead,
     "resume_source": _fix_resume_source,
     "lower_sentiment_threshold": _fix_lower_sentiment_threshold,
+    "restart_strategist_consume": _fix_restart_strategist_consume,
+}
+
+
+# Fix actions that are SAFE to auto-apply without a human approval click.
+# Rules of thumb to be in here:
+#   - Cannot lose data
+#   - Cannot place a trade
+#   - Cannot incur cost
+#   - Reverses cleanly OR has a built-in floor (so repeated calls plateau)
+#   - The user can always undo it via the normal UI
+AUTO_APPLY_SAFE: set[str] = {
+    "lower_sentiment_threshold",   # halves the threshold, floor 0.1
+    "clear_orchestrator_dead",     # only clears markers, no side effects
+    "resume_source",               # safe — runner just polls
+    "restart_strategist_consume",  # xautoclaim is idempotent
+    "set_llm_mode_auto",           # only switches mode; user can flip back
 }
 
 
@@ -427,6 +477,71 @@ async def _detect_supervisor_crashloop() -> list[dict[str, Any]]:
     return out
 
 
+async def _detect_signal_to_proposal_gap() -> list[dict[str, Any]]:
+    """Detect: scrapers have published signals in the last hour, BUT no new
+    proposals came out. Means the chain is broken between graph_ingestion /
+    strategist and Proposal.
+
+    AUTO-FIX: halve the sentiment threshold (floor 0.1) AND re-claim
+    strategist's stuck pending entries. Both are in AUTO_APPLY_SAFE so they
+    run without confirmation.
+    """
+    out = []
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=1)
+    # Count signals published in the last hour across all sources
+    redis = get_redis()
+    pub_in_hour = 0
+    async for sk in redis.scan_iter(match="scraper:source:*", count=100):
+        if sk.endswith(":log") or sk.endswith(":probe"):
+            continue
+        h = await redis.hgetall(sk)
+        # We track lifetime_published; use last_published as recent proxy
+        try:
+            pub_in_hour += int(h.get("last_published") or 0)
+        except (TypeError, ValueError):
+            pass
+    if pub_in_hour <= 0:
+        return out  # let _detect_news_silent handle it
+    # Count proposals in the same hour
+    from plata.core.db import Proposal
+    async with session_scope() as session:
+        prop_in_hour = (await session.execute(
+            select(func.count(Proposal.id)).where(Proposal.created_at >= cutoff)
+        )).scalar() or 0
+    if prop_in_hour > 0:
+        return out  # healthy
+    # Gap: signals flowing, no proposals. Read current threshold for evidence.
+    thresh_raw = await redis.hget("risk_config", "min_sentiment_magnitude")
+    try:
+        cur_thresh = float(thresh_raw) if thresh_raw else 0.5
+    except (TypeError, ValueError):
+        cur_thresh = 0.5
+    out.append({
+        "pattern": "signal_to_proposal_gap",
+        "severity": "warn",
+        "title": (
+            f"Signals flowing ({pub_in_hour} last poll) but 0 proposals in 1h — "
+            "auto-lowering sentiment threshold"
+        ),
+        "evidence": {
+            "signals_last_poll": pub_in_hour,
+            "proposals_last_hour": prop_in_hour,
+            "current_sentiment_threshold": cur_thresh,
+            "note": "Most likely: strategist is rejecting everything as below_threshold. Auto-fix halves the threshold (floor 0.1). If still 0 proposals next hour, the strategist itself may be stuck.",
+        },
+        "proposed_fix": (
+            f"Auto-applying: halve min_sentiment_magnitude (currently "
+            f"{cur_thresh}) to surface borderline events. Floor protected at "
+            "0.1 so it won't drift away."
+        ),
+        "fix_action": "lower_sentiment_threshold",
+        "fix_action_args": {},  # use halving behaviour
+        "fingerprint": _fp("sig_to_prop_gap"),
+    })
+    return out
+
+
 DETECTORS = [
     _detect_stale_agents,
     _detect_news_silent,
@@ -435,11 +550,17 @@ DETECTORS = [
     _detect_no_proposals,
     _detect_repeated_errors,
     _detect_supervisor_crashloop,
+    _detect_signal_to_proposal_gap,
 ]
 
 
 async def _upsert(finding: dict) -> None:
-    """Upsert by fingerprint: refresh title/evidence/severity if `new`."""
+    """Upsert by fingerprint: refresh title/evidence/severity if `new`.
+    If the fix_action is in AUTO_APPLY_SAFE, run it immediately and stash
+    the result on the row so the user can see what happened — no approval
+    click needed for safe, reversible, no-cost actions.
+    """
+    new_finding_id: int | None = None
     async with session_scope() as session:
         existing = (await session.execute(
             select(SysopFinding)
@@ -454,13 +575,11 @@ async def _upsert(finding: dict) -> None:
             existing.fix_action = finding["fix_action"]
             existing.fix_action_args = finding.get("fix_action_args", {})
             return
-        # Don't re-create if user already dismissed / fixed it recently;
-        # only resurrect after 1h cool-off so persistent issues do escalate again.
         if existing is not None:
             recent = (datetime.now(timezone.utc) - existing.updated_at).total_seconds() < 3600
             if recent:
                 return
-        session.add(SysopFinding(
+        row = SysopFinding(
             pattern=finding["pattern"],
             severity=finding["severity"],
             title=finding["title"][:255],
@@ -470,9 +589,24 @@ async def _upsert(finding: dict) -> None:
             fix_action_args=finding.get("fix_action_args", {}),
             state="new",
             fingerprint=finding["fingerprint"],
-        ))
+        )
+        session.add(row)
+        await session.flush()
+        new_finding_id = row.id
         _log.info("sysop_finding_created", pattern=finding["pattern"],
                   severity=finding["severity"], title=finding["title"][:100])
+    # Auto-apply OUTSIDE the upsert transaction so the fix's own DB writes
+    # don't conflict with the row insert.
+    if new_finding_id and finding.get("fix_action") in AUTO_APPLY_SAFE:
+        try:
+            result = await apply_fix(new_finding_id, "sysop:auto")
+            _log.info("sysop_auto_applied",
+                      finding_id=new_finding_id,
+                      action=finding.get("fix_action"),
+                      result=result[:200])
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("sysop_auto_apply_failed",
+                          finding_id=new_finding_id, error=str(exc)[:160])
 
 
 async def apply_fix(finding_id: int, actor: str) -> str:

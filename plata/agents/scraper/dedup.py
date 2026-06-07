@@ -178,10 +178,20 @@ async def _layer_embedding(signal: RawSignal) -> str | None:
 
 
 async def check_duplicate(signal: RawSignal) -> tuple[bool, str | None]:
-    """Run all three layers in order. Returns (is_dup, master_ulid)."""
+    """Run all three layers in order. Returns (is_dup, master_ulid).
+
+    For RSS (and other high-rate, headline-only sources), skip the looser
+    entity + embedding layers. They were catching legit different stories that
+    shared tickers or topic vocabulary — that's why RSS lifetime_published
+    stayed at 0 while items appeared dup'd in /history/. URL-hash dedup is
+    still applied so a literal re-broadcast of the same article still dups.
+    """
     master = await _layer_hash(signal)
     if master:
         return True, master
+    is_rss_like = str(signal.source) in {"rss", "market_ticker", "telegram"}
+    if is_rss_like:
+        return False, None
     master = await _layer_entity_overlap(signal)
     if master:
         return True, master
