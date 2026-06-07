@@ -352,12 +352,14 @@ class LLMClient:
                         kwargs["max_tokens"] = affordable
                         _log.warning("llm_max_tokens_shrunk", new_max=affordable)
                         continue
-                # Free-pool 404 / "No endpoints found": the model's free tier
-                # has no provider serving it right now (common on OpenRouter's
-                # rotating free pool). Walk the FREE_FALLBACKS chain.
+                # Free-pool 404 / 429 / "No endpoints found" / "rate limit":
+                # the model's free tier is unavailable or capped right now
+                # (e.g. llama-3.3-70b-instruct:free has 8 RPM — fills fast).
+                # Walk the FREE_FALLBACKS chain to a different free provider.
                 is_free_404 = (
                     ":free" in (kwargs.get("model") or "")
-                    and ("no endpoints found" in low or "404" in msg)
+                    and ("no endpoints found" in low or "404" in msg
+                          or "rate limit" in low or "429" in msg)
                 )
                 if is_free_404:
                     tried = set(kwargs.setdefault("_tried_free", []))

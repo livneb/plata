@@ -2,6 +2,16 @@
 
 Each entry is one deployed version. Most recent first.
 
+<<<<<<< HEAD
+## 2.24.156 — 2026-06-07
+- **🤖 Sysop now auto-fixes safe actions without confirmation.** New `AUTO_APPLY_SAFE` whitelist contains fix actions that can't lose data, can't trade, can't cost money, and either reverse cleanly or have a built-in floor: `lower_sentiment_threshold` (halves, floor 0.1), `clear_orchestrator_dead`, `resume_source`, `restart_strategist_consume`, `set_llm_mode_auto`. When a detector creates a finding whose `fix_action` is in this set, the fix runs immediately and the result lands on the row as `auto_applied` — no approval click needed. Findings with riskier actions still wait for your approve.
+- **🤖 New sysop detector `signal_to_proposal_gap`** — exactly what you asked for. Watches: scrapers published signals in the last poll BUT 0 proposals were created in the last hour. Concludes the strategist is rejecting everything via `below_threshold` and **auto-halves `min_sentiment_magnitude`** (floor 0.1). If next hour still 0 proposals, runs again. Re-tightens itself nowhere — only you can raise the threshold back.
+- **🛠 `restart_strategist_consume`** — new fix action. `XAUTOCLAIM` the strategist's stuck pending entries (≥5min idle) back to itself. Use when the strategist is alive but not draining its backlog.
+- **🐛 Reviewer / graph_ingestion `RateLimitError 429 from meta-llama/llama-3.3-70b-instruct:free` (8 RPM cap, "High demand")** — extended the v2.24.150 free-pool fallback to fire on 429 / "rate limit" too (was only catching 404 / "no endpoints found"). Reviewer & graph_ingestion now transparently walk `deepseek-chat:free → gemini-2.0-flash-exp:free → qwen-2.5-72b:free → …` until a non-rate-limited free model serves the request. No user action needed.
+- **🐛 RSS items dup'd but never published.** Layer-2 (entity Jaccard) + Layer-3 (embedding cosine) dedup were catching legit different stories that shared tickers or topic vocabulary. RSS, market_ticker, and telegram now use Layer-1 (URL hash) **only** — a literal re-broadcast still dups, but two news outlets covering the same story both reach the strategist.
+
+=======
+>>>>>>> origin/master
 ## 2.24.155 — 2026-06-07
 - **🛠 ROOT CAUSE of "nothing works for 6 days": agent loops crashed once → stayed dead until container redeploy.** `_supervise` in `entrypoints.py` caught the exception and logged it but did NOT restart. So when the strategist threw once, position_monitor and trade_sampler kept running (sibling tasks in the same container) but the strategist task was gone forever — that's why the dashboard shows container "up" while specific agents heartbeat from days ago. Now: supervisor is a real forever-loop with exponential backoff (2s → 60s cap), records `last_crash_at`/`last_crash_error`/`restart_count` to `agent_supervisor:<name>` Redis hash so `/sysop/` shows the crash trail.
 - **🛠 `consume()` no longer dies on a transient Redis hiccup.** The iterator's `xreadgroup` call wasn't wrapped; a connection drop or timeout propagated up and killed the consume loop entirely. Now caught + logged + retried after 1s. Consumer-group state preserved, resumes cleanly.
