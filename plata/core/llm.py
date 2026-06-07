@@ -130,6 +130,39 @@ async def refresh_free_catalog() -> int:
     return len(free)
 
 
+def _extract_first_json_object(text: str) -> str | None:
+    """Best-effort: pull the outermost {...} block out of text that may have
+    prose around it. Used when models append commentary like "Note: truncated
+    for brevity" after their JSON. Returns None if no balanced object found.
+    """
+    if not text or "{" not in text:
+        return None
+    start = text.find("{")
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if esc:
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 def _looks_like_loop_output(content: str) -> bool:
     """Detect the pathological output some free models produce: long runs of
     a single whitespace or character (tabs, spaces, newlines, dots, dashes)
@@ -664,13 +697,18 @@ class LLMClient:
         in the historian. Caller can override with a smaller cap when the
         schema is known to be small.
         """
-        # Structured calls can produce degenerate output on cheap/free models:
-        # loops of whitespace or a single character that fill up max_tokens
-        # without ever closing the JSON. Treat that as a model-quality failure
-        # and walk to the next free model (same machinery as 404 / 429). Cap
-        # attempts so we don't spin forever.
+        # Structured output is fragile on cheap/free models. Failure modes:
+        #   1. Tab/whitespace loops until max_tokens (no JSON closure)
+        #   2. Chatty prose appended after JSON ("Note: truncated for brevity")
+        #   3. response.choices is None/empty (SDK edge case)
+        #   4. JSON parses but required keys are missing (model ignored schema)
+        # All four → walk to a different free model, same machinery as 404/429.
         tried_garbage: set[str] = set()
         last_error: tuple[str, str] | None = None
+        # Required-key inference: the JSON-schema "required" array tells us
+        # which top-level fields MUST be present. A model that returns valid
+        # JSON missing one of these is unusable — treat like loop garbage.
+        required_keys: set[str] = set(schema.get("required") or [])
         for attempt in range(5):
             response = await self.complete(
                 messages=messages,
@@ -682,49 +720,76 @@ class LLMClient:
                 max_tokens=max_tokens,
                 metadata=metadata,
             )
-            content = response.choices[0].message.content or "{}"
+
+            # 1. Defensive extraction — some providers return choices=None
+            choices = getattr(response, "choices", None) or []
+            if not choices:
+                content = ""
+                finish = "no_choices"
+            else:
+                first = choices[0]
+                msg_obj = getattr(first, "message", None)
+                content = (getattr(msg_obj, "content", None) or "") if msg_obj else ""
+                finish = getattr(first, "finish_reason", None) or "?"
+
+            # 2. Try parsing as-is, then with prose-stripping fallback
+            parsed: dict | None = None
+            parse_err: Exception | None = None
             try:
-                return json.loads(content)
+                parsed = json.loads(content) if content else None
             except json.JSONDecodeError as exc:
-                finish = "?"
+                parse_err = exc
+                # Some models add commentary after JSON: try to extract the
+                # outermost {...} block.
+                stripped = _extract_first_json_object(content)
+                if stripped:
+                    try:
+                        parsed = json.loads(stripped)
+                        parse_err = None
+                    except json.JSONDecodeError:
+                        pass
+
+            # 3. Schema-shape check: required keys present?
+            schema_ok = True
+            missing_keys: list[str] = []
+            if parsed is not None and required_keys:
+                missing_keys = sorted(required_keys - set(parsed.keys()))
+                schema_ok = not missing_keys
+
+            if parsed is not None and schema_ok:
+                return parsed
+
+            # Failure — classify and switch model.
+            tail = (content or "")[-200:].replace("\n", " ")
+            why = (
+                f"missing_keys={missing_keys}" if (parsed is not None and not schema_ok)
+                else f"json_error={parse_err.msg if parse_err else 'no_content'}"
+            )
+            last_error = (finish, f"{why} | tail={tail!r}")
+            if self.model not in tried_garbage:
                 try:
-                    finish = response.choices[0].finish_reason or "?"
+                    await get_redis().setex(
+                        f"llm:garbage_producer:{self.model}", 600, "1"
+                    )
                 except Exception:  # noqa: BLE001
                     pass
-                tail = content[-200:].replace("\n", " ")
-                is_garbage = _looks_like_loop_output(content) or finish == "length"
-                if is_garbage and self.model not in tried_garbage:
-                    # Mark the model as a temporary "bad output" producer so the
-                    # next free-candidate walk picks something else. Use a short
-                    # cooldown — model may recover next call.
-                    try:
-                        await get_redis().setex(
-                            f"llm:garbage_producer:{self.model}", 600, "1"
-                        )
-                    except Exception:  # noqa: BLE001
-                        pass
-                    tried_garbage.add(self.model)
-                    # Switch to a different free candidate explicitly.
-                    next_model = await _next_free_candidate(
-                        tried_garbage | {self.model}
-                    )
-                    if next_model:
-                        _log.warning("llm_structured_garbage_switch_model",
-                                      agent=self.agent, finish=finish,
-                                      from_model=self.model,
-                                      to_model=next_model)
-                        self.model = next_model
-                        last_error = (finish, tail)
-                        continue
-                last_error = (finish, tail)
-                raise RuntimeError(
-                    f"LLM structured response was not valid JSON "
-                    f"(finish_reason={finish}, tail={tail!r}, original={exc.msg})"
-                ) from exc
-        # Loop exited without return (5 garbage responses in a row)
+                tried_garbage.add(self.model)
+                next_model = await _next_free_candidate(tried_garbage | {self.model})
+                if next_model:
+                    _log.warning("llm_structured_garbage_switch_model",
+                                  agent=self.agent, finish=finish,
+                                  reason=why,
+                                  from_model=self.model, to_model=next_model)
+                    self.model = next_model
+                    continue
+            # Same model again or chain exhausted
+            raise RuntimeError(
+                f"LLM structured response was not valid (finish_reason={finish}, "
+                f"reason={why})"
+            )
         finish, tail = last_error or ("?", "")
         raise RuntimeError(
-            f"LLM structured response was not valid JSON after 5 model swaps "
-            f"(finish_reason={finish}, last_tail={tail!r}). Free pool may be "
+            f"LLM structured response was not valid after 5 model swaps "
+            f"(finish_reason={finish}, last_error={tail}). Free pool may be "
             f"degraded; switch llm_mode to paid on /settings/?tab=models."
         )
