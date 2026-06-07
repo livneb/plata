@@ -26,8 +26,11 @@ DEFAULTS: dict[str, Any] = {
     # PRICE_ACTION signal when a tracked symbol moves > threshold % in window.
     # Gives the strategist momentum/breakout signals independent of news.
     "market_ticker_enabled": True,
-    "market_ticker_threshold_pct": 3.0,
-    "market_ticker_window_min": 60,
+    # Was 3% in 60 min — too rare to give the strategist anything to work with
+    # most days. 1.5% in 30 min: typical BTC/ETH/SOL hit this multiple times
+    # a day in normal volatility regimes.
+    "market_ticker_threshold_pct": 1.5,
+    "market_ticker_window_min": 30,
     "market_ticker_crypto_ids": [
         "bitcoin", "ethereum", "solana", "binancecoin", "ripple",
         "cardano", "dogecoin", "tron", "avalanche-2", "polkadot",
