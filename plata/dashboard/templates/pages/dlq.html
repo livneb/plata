@@ -4,9 +4,12 @@
 <div class="space-y-4">
   <div>
     <h1 class="text-2xl font-semibold">Dead-letter queues</h1>
-    <p class="text-sm text-gray-500 mt-1">
-      Messages that crashed during processing are parked here. Click <span class="font-medium">Replay</span> to re-publish them to the source stream — useful after a bug fix.
-    </p>
+    <details class="mt-1 text-sm text-gray-500">
+      <summary class="cursor-pointer">What is a "Dead Letter"?</summary>
+      <p class="mt-2 leading-relaxed">
+        When an agent receives a message from a Redis stream and tries to process it, if processing raises an exception we acknowledge the message anyway (so it doesn't block the stream forever) but copy it to a per-agent <span class="font-mono">dlq:&lt;agent&gt;</span> stream. After 3+ failed attempts on the same message, it lands here. <span class="font-medium">Replay</span> re-publishes it to the original source stream — use after a bug fix. <span class="font-medium">Discard</span> deletes it. An empty DLQ list means no message has crashed lately — that's the healthy state.
+      </p>
+    </details>
   </div>
 
   {% for it in items %}

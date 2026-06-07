@@ -56,8 +56,10 @@ DEFAULTS: dict[str, Any] = {
         {"name": "MarketWatch Top",   "url": "https://feeds.marketwatch.com/marketwatch/topstories/", "enabled": True},
     ],
     # --- Content filter (applied to every signal before publish) ---
-    # Drop if title length < this (junk one-word headlines).
-    "min_title_len": 20,
+    # Drop if title length < this (junk one-word headlines). Was 20 which
+    # killed a lot of legit Yahoo Finance / MarketWatch headlines (often 10-19
+    # chars). Lowered to 10 — anything shorter is genuinely useless.
+    "min_title_len": 10,
     # If false, the require_keywords allowlist is treated as advisory and signals
     # that don't match it still pass through (blocklist alone is enforced). Set
     # true to make the allowlist a hard gate. Default false so the strategist
