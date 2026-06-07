@@ -83,7 +83,9 @@
                   <div class="break-all">url: <a href="{{ src.probe.final_url }}" target="_blank" rel="noopener" class="text-blue-500 hover:underline">{{ src.probe.final_url[:90] }}{% if src.probe.final_url|length > 90 %}…{% endif %}</a></div>
                 {% endif %}
                 {% if src.probe.item_count is defined and src.probe.item_count not in (None, '') %}
-                  <div>items returned by API: <b class="{% if (src.probe.item_count|int) > 0 %}text-emerald-500{% else %}text-amber-500{% endif %}">{{ src.probe.item_count }}</b></div>
+                  <div title="Items the upstream API returned on this poll. For RSS: feed entries. For market_ticker: symbols polled (NOT signals emitted — a signal is only emitted when a symbol crosses the threshold % move).">items returned by API: <b class="{% if (src.probe.item_count|int) > 0 %}text-emerald-500{% else %}text-amber-500{% endif %}">{{ src.probe.item_count }}</b>
+                    {% if src.name == 'market_ticker' %}<span class="text-[9px] text-gray-400 ml-1">(symbols polled, not signals)</span>{% endif %}
+                  </div>
                 {% endif %}
                 {% if src.probe.response_size %}<div>response: {{ src.probe.response_size }} bytes</div>{% endif %}
                 {% if src.probe.per_feed %}<div class="break-words">per-feed: <span class="text-gray-300">{{ src.probe.per_feed }}</span></div>{% endif %}

@@ -391,6 +391,42 @@ def _fp(*parts: str) -> str:
     return hashlib.sha1(("|".join(parts)).encode("utf-8")).hexdigest()[:24]
 
 
+async def _detect_supervisor_crashloop() -> list[dict[str, Any]]:
+    """Surface agents the in-container supervisor has been restarting."""
+    out = []
+    redis = get_redis()
+    async for k in redis.scan_iter(match="agent_supervisor:*", count=100):
+        data = await redis.hgetall(k)
+        try:
+            count = int(data.get("restart_count") or 0)
+        except (ValueError, TypeError):
+            count = 0
+        if count <= 0:
+            continue
+        agent = k.split(":", 1)[-1]
+        out.append({
+            "pattern": "supervisor_crashloop",
+            "severity": "warn" if count < 5 else "critical",
+            "title": f"`{agent}` has been auto-restarted {count}× by the supervisor",
+            "evidence": {
+                "agent": agent,
+                "restart_count": count,
+                "last_crash_at": data.get("last_crash_at"),
+                "last_crash_error": data.get("last_crash_error"),
+            },
+            "proposed_fix": (
+                "The container's in-process supervisor caught a crash and "
+                "auto-restarted the agent (v2.24.155+). It's running again, but "
+                "the underlying bug should be fixed so the loop stops. Copy the "
+                "`last_crash_error` from evidence into chat for a diagnosis."
+            ),
+            "fix_action": None,
+            "fix_action_args": {},
+            "fingerprint": _fp("crashloop", agent),
+        })
+    return out
+
+
 DETECTORS = [
     _detect_stale_agents,
     _detect_news_silent,
@@ -398,6 +434,7 @@ DETECTORS = [
     _detect_openrouter_402,
     _detect_no_proposals,
     _detect_repeated_errors,
+    _detect_supervisor_crashloop,
 ]
 
 

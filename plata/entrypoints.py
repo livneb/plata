@@ -62,13 +62,53 @@ async def _run_health_server(started: asyncio.Event | None = None) -> None:
 
 
 async def _supervise(name: str, coro_factory) -> None:
-    """Run an agent coroutine, logging any exception so it doesn't tear down siblings."""
+    """Run an agent coroutine FOREVER. If it crashes, sleep with exponential
+    backoff (capped at 60s) and restart. Until we added this, an unhandled
+    exception in any agent's loop killed the task permanently — its sibling
+    agents in the same container kept running, but the dead one stayed dead
+    until the next container redeploy. That's how strategist + reviewer +
+    graph_ingestion + executor + risk_manager + orchestrator have been silent
+    for 6 days while the container shows "up" and position_monitor still
+    heartbeats. Each agent is now self-healing.
+
+    Records the last crash + restart count to Redis so /sysop/ can show
+    "agent X crash-looped Y times" instead of just "stale".
+    """
+    backoff = 2
+    restarts = 0
+    from datetime import datetime, timezone
     try:
-        await coro_factory()
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        _log.error("agent_crashed", agent=name, error=str(exc))
+        from plata.core.bus import get_redis
+        redis = get_redis()
+    except Exception:  # noqa: BLE001
+        redis = None
+    while True:
+        try:
+            await coro_factory()
+            # If the coroutine returns cleanly (no agent does this currently
+            # but be safe) just exit — nothing left to supervise.
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            restarts += 1
+            _log.error("agent_crashed_will_restart",
+                       agent=name, restarts=restarts,
+                       backoff_sec=backoff,
+                       error=str(exc)[:200])
+            if redis is not None:
+                try:
+                    await redis.hset(f"agent_supervisor:{name}", mapping={
+                        "last_crash_at": datetime.now(timezone.utc).isoformat(),
+                        "last_crash_error": str(exc)[:240],
+                        "restart_count": str(restarts),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+            # Reset the exponential climb after a long-enough lull.
+            # (If we keep crashing immediately, backoff stays at 60s.)
 
 
 def _agent_task(name: str, factory) -> asyncio.Task:

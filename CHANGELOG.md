@@ -2,13 +2,18 @@
 
 Each entry is one deployed version. Most recent first.
 
-<<<<<<< HEAD
+## 2.24.155 — 2026-06-07
+- **🛠 ROOT CAUSE of "nothing works for 6 days": agent loops crashed once → stayed dead until container redeploy.** `_supervise` in `entrypoints.py` caught the exception and logged it but did NOT restart. So when the strategist threw once, position_monitor and trade_sampler kept running (sibling tasks in the same container) but the strategist task was gone forever — that's why the dashboard shows container "up" while specific agents heartbeat from days ago. Now: supervisor is a real forever-loop with exponential backoff (2s → 60s cap), records `last_crash_at`/`last_crash_error`/`restart_count` to `agent_supervisor:<name>` Redis hash so `/sysop/` shows the crash trail.
+- **🛠 `consume()` no longer dies on a transient Redis hiccup.** The iterator's `xreadgroup` call wasn't wrapped; a connection drop or timeout propagated up and killed the consume loop entirely. Now caught + logged + retried after 1s. Consumer-group state preserved, resumes cleanly.
+- **🛠 New sysop pattern `supervisor_crashloop`** — surfaces every agent the supervisor has restarted, with `restart_count`, `last_crash_at`, and the actual error message so the underlying bug can be fixed instead of just discovering "stale heartbeat" days later.
+- **📰 GDELT disabled by default.** It keeps 429ing from Railway's shared egress IP (other tenants exhaust the budget). The retry+backoff is in place but isn't enough when the IP itself is rate-limited. Disabled out of the box; toggle back on at `/news/` if you're hosting elsewhere and want to test.
+- **📰 RSS feed list expanded from 6 → 10**: added Reuters Business, Bloomberg Markets, The Block, and Investing.com headlines. RSS is now the primary news pipeline — self-controlled, no shared-IP rate limits, no API keys.
+- **📈 Market ticker threshold lowered 3% → 1.5%, window 60min → 30min** so signals actually fire in normal volatility. UI now clarifies `items returned by API` = "symbols polled" for market_ticker, not "signals emitted".
+
 ## 2.24.154 — 2026-06-03
 - **🔧 `min_title_len` default 20 → 10.** Yahoo Finance and MarketWatch headlines are often 10-19 chars (e.g. "Oil falls 3%"). The 20-char cutoff was killing legit market news. Anything shorter than 10 is genuinely useless (single-word headlines).
 - **📥 `/dlq/` now explains itself.** Top of the page has a "What is a Dead Letter?" disclosure: when an agent's `handle()` raises 3+ times on the same message, the message lands in a per-agent DLQ stream so it doesn't keep crashing the consumer. Replay re-publishes after a fix; Discard drops it. **Empty DLQ list = healthy state.**
 
-=======
->>>>>>> origin/master
 ## 2.24.153 — 2026-06-03
 - **🐛 Fix `reviewer · TypeError: AsyncCompletions.create() got an unexpected keyword argument '_tried_free'`** (17× recurrences in the last hour according to sysop). The v2.24.150 free-pool fallback stashed internal sentinel keys (`_tried_free`, `_already_fallback`) inside the same `kwargs` dict passed to the OpenAI SDK. The SDK rejects unknown kwargs. Now: a `clean = {k: v for k, v in kwargs.items() if not k.startswith("_")}` filter strips them before the call.
 - **🐛 GDELT `HTTP 429 — limit requests to one every 5 seconds`** (Railway shared egress IP, other tenants exhaust the budget). Two changes:

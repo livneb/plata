@@ -126,13 +126,26 @@ async def consume(
     await ensure_consumer_group(stream, group)
 
     while True:
-        response = await redis.xreadgroup(
-            groupname=group,
-            consumername=consumer,
-            streams={stream: ">"},
-            count=count,
-            block=block_ms,
-        )
+        try:
+            response = await redis.xreadgroup(
+                groupname=group,
+                consumername=consumer,
+                streams={stream: ">"},
+                count=count,
+                block=block_ms,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Transient Redis errors (connection drop, timeout, server reload)
+            # used to kill the iterator and bubble up to the supervisor as
+            # `agent_crashed`. Now: log, sleep briefly, retry. The consumer
+            # group / pending list are unchanged so we resume cleanly.
+            import asyncio as _asyncio_local, logging as _logging
+            _logging.getLogger("bus.consume").warning(
+                "consume_iter_redis_error stream=%s err=%s",
+                stream, str(exc)[:160],
+            )
+            await _asyncio_local.sleep(1)
+            continue
         if not response:
             continue
         for _stream_name, messages in response:
