@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # --- LLM / embeddings ---
     openrouter_api_key: SecretStr | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Google AI Studio — second free LLM provider. Uses Gemini's OpenAI-
+    # compatible endpoint so we can reuse the existing AsyncOpenAI client.
+    # Get a key at https://aistudio.google.com/app/apikey (no card needed).
+    google_ai_studio_api_key: SecretStr | None = None
+    google_ai_studio_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     voyage_api_key: SecretStr | None = None
 
     # --- Observability ---

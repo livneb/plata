@@ -30,6 +30,7 @@ async def index(request: Request, tab: str = "controls"):
         creds_rows = []
     PROVIDERS = [
         {"key": "openrouter",      "label": "OpenRouter",        "url": "https://openrouter.ai/settings/credits"},
+        {"key": "google_ai_studio","label": "Google AI Studio",  "url": "https://aistudio.google.com/app/apikey"},
         {"key": "voyage",          "label": "Voyage embeddings", "url": "https://dashboard.voyageai.com/"},
         {"key": "bybit_key",       "label": "Bybit API key",     "url": "https://www.bybit.com/app/user/api-management"},
         {"key": "bybit_secret",    "label": "Bybit API secret",  "url": "https://www.bybit.com/app/user/api-management"},

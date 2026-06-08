@@ -143,7 +143,8 @@ async def _lifespan(_app: FastAPI):
     try:
         from plata.config import credentials as _creds
         await _creds.ensure_table()
-        for p in ("openrouter", "voyage", "bybit_key", "bybit_secret",
+        for p in ("openrouter", "google_ai_studio", "voyage",
+                   "bybit_key", "bybit_secret",
                    "alpaca_key", "alpaca_secret", "telegram",
                    "langfuse_public", "langfuse_secret"):
             await _creds.get(p)

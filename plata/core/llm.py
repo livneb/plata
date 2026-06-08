@@ -74,13 +74,33 @@ AGENT_MODELS_FREE: dict[str, str] = {
 # Dynamically-discovered dead models are cached in Redis
 # (key `llm:dead_free_models`, set, 24h TTL) and pre-filtered before each
 # call, so this static list is the safety net, not the only mechanism.
+#
+# v2.24.174: chain now interleaves OpenRouter free + Google AI Studio free
+# models, so a busy OpenRouter quota doesn't drown the whole pipeline.
+# `google-ai-studio/<model>` prefix means "send to Google's API". Google AI
+# Studio's free tier is generous (Flash: ~250 RPM, Pro: ~5 RPM) with no card.
 FREE_FALLBACKS: list[str] = [
+    # Google AI Studio (likely available when OpenRouter is saturated)
+    "google-ai-studio/gemini-2.5-flash",
+    "google-ai-studio/gemini-2.0-flash",
+    "google-ai-studio/gemini-2.5-flash-lite",
+    # OpenRouter free pool
     "deepseek/deepseek-chat:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "qwen/qwen-2.5-72b-instruct:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "deepseek/deepseek-r1:free",
+    # Google AI Studio (heavier reasoning, stricter quota)
+    "google-ai-studio/gemini-2.5-pro",
 ]
+
+
+def _is_free_model(model: str) -> bool:
+    """Return True if `model` is from any free pool — OpenRouter `:free`
+    suffix or our `google-ai-studio/` prefix. Used everywhere we previously
+    just checked `":free" in model`."""
+    m = model or ""
+    return m.endswith(":free") or m.startswith(PROVIDER_PREFIX_GOOGLE_AI_STUDIO)
 
 # Permanently retired free models — always treated as dead regardless of
 # what Redis cache or OpenRouter catalog says. Belt-and-suspenders so we
@@ -247,10 +267,10 @@ def _looks_like_loop_output(content: str) -> bool:
 
 
 async def _is_dead_free(model: str) -> bool:
-    """Cached lookup: did OpenRouter recently tell us this `:free` model is
-    permanently unavailable, OR did it recently produce loopy garbage output?
-    Two TTLs: dead-cache is 24h, garbage-producer is 10 min."""
-    if ":free" not in (model or ""):
+    """Cached lookup: did the upstream provider recently tell us this free
+    model is permanently unavailable, OR did it recently produce loopy
+    garbage output? Two TTLs: dead-cache is 24h, garbage-producer is 10 min."""
+    if not _is_free_model(model):
         return False
     if model in PERMANENTLY_RETIRED_FREE:
         return True
@@ -272,7 +292,7 @@ async def _throttle_free(model: str) -> None:
     (`free_throttle_sec`, default 6s → ~10 RPM per model).
 
     Uses Redis SETNX-with-EX to coordinate across agent processes."""
-    if ":free" not in (model or ""):
+    if not _is_free_model(model):
         return
     try:
         r = get_redis()
@@ -424,25 +444,70 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
 }
 
 
-_OPENAI_CLIENT_CACHE: dict[str, AsyncOpenAI] = {}
+# Provider prefix on a model string identifies which API to hit. Default
+# (no prefix) is OpenRouter for backward compat — all existing strings like
+# "anthropic/claude-haiku-4-5" or "deepseek/deepseek-chat:free" stay valid.
+# New: "google-ai-studio/gemini-2.5-flash" routes to Google AI Studio.
+PROVIDER_PREFIX_OPENROUTER = ""  # implicit / default
+PROVIDER_PREFIX_GOOGLE_AI_STUDIO = "google-ai-studio/"
+
+
+def _provider_for(model: str) -> str:
+    """Return the provider key based on the model string's prefix."""
+    if (model or "").startswith(PROVIDER_PREFIX_GOOGLE_AI_STUDIO):
+        return "google_ai_studio"
+    return "openrouter"
+
+
+def _strip_provider_prefix(model: str) -> str:
+    """Strip our internal provider prefix so the underlying API sees the
+    bare model id it expects (Google AI Studio uses 'gemini-2.5-flash',
+    not 'google-ai-studio/gemini-2.5-flash')."""
+    if (model or "").startswith(PROVIDER_PREFIX_GOOGLE_AI_STUDIO):
+        return model[len(PROVIDER_PREFIX_GOOGLE_AI_STUDIO):]
+    return model
+
+
+# Cached AsyncOpenAI clients, keyed by `(provider, api_key)` so a credential
+# rotation invalidates only the rotated client, not all of them.
+_OPENAI_CLIENT_CACHE: dict[tuple[str, str], AsyncOpenAI] = {}
+
+
+def _client_for(provider: str) -> AsyncOpenAI:
+    """Build (and cache) the AsyncOpenAI client for a given provider."""
+    settings = get_settings()
+    from plata.config import credentials as _creds
+    if provider == "google_ai_studio":
+        api_key = _creds.get_sync("google_ai_studio") or (
+            settings.google_ai_studio_api_key.get_secret_value()
+            if settings.google_ai_studio_api_key else None
+        )
+        base_url = settings.google_ai_studio_base_url
+        if not api_key:
+            raise RuntimeError("GOOGLE_AI_STUDIO_API_KEY not configured")
+    else:  # openrouter (default)
+        api_key = _creds.get_sync("openrouter") or (
+            settings.openrouter_api_key.get_secret_value()
+            if settings.openrouter_api_key else None
+        )
+        base_url = settings.openrouter_base_url
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY not configured")
+    cached = _OPENAI_CLIENT_CACHE.get((provider, api_key))
+    if cached is not None:
+        return cached
+    cli = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    # Drop any older cache entry for this provider (likely rotated key).
+    for k in [k for k in _OPENAI_CLIENT_CACHE if k[0] == provider]:
+        _OPENAI_CLIENT_CACHE.pop(k, None)
+    _OPENAI_CLIENT_CACHE[(provider, api_key)] = cli
+    return cli
 
 
 def _client() -> AsyncOpenAI:
-    """Build (and cache) the OpenAI client. Prefers UI-set credentials over env."""
-    settings = get_settings()
-    from plata.config import credentials as _creds
-    api_key = _creds.get_sync("openrouter") or (
-        settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else None
-    )
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY not configured")
-    cached = _OPENAI_CLIENT_CACHE.get(api_key)
-    if cached is not None:
-        return cached
-    cli = AsyncOpenAI(api_key=api_key, base_url=settings.openrouter_base_url)
-    _OPENAI_CLIENT_CACHE.clear()  # only keep the current key around
-    _OPENAI_CLIENT_CACHE[api_key] = cli
-    return cli
+    """Back-compat shim: default OpenRouter client. New code should use
+    `_client_for(_provider_for(model))` to pick the right one."""
+    return _client_for("openrouter")
 
 
 _BEDROCK_INCOMPATIBLE_KEYS = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
@@ -589,7 +654,7 @@ class LLMClient:
         # marked as permanently dead, walk to a healthy candidate up
         # front instead of consuming an attempt only to retry. Avoids
         # the 10-times-an-hour error spam pattern we just shipped a fix for.
-        if ":free" in (self.model or "") and await _is_dead_free(self.model):
+        if _is_free_model(self.model) and await _is_dead_free(self.model):
             next_model = await _next_free_candidate({self.model})
             if next_model:
                 _log.info("llm_skip_known_dead_free",
@@ -625,9 +690,20 @@ class LLMClient:
         # If OpenRouter says "402 — can only afford N tokens", parse N and shrink.
         # Strip internal sentinel keys (anything starting with "_") before the
         # SDK call — the OpenAI client rejects unknown kwargs.
+        # Multi-provider: pick the AsyncOpenAI client whose base_url + key
+        # match the current model's provider, and strip our internal prefix
+        # so the upstream API sees the bare model id.
         async def _attempt_once():
             clean = {k: v for k, v in kwargs.items() if not k.startswith("_")}
-            return await self._openai.chat.completions.create(**clean)
+            current_model = clean.get("model") or ""
+            provider = _provider_for(current_model)
+            client = _client_for(provider) if provider != "openrouter" else self._openai
+            if provider == "google_ai_studio":
+                clean["model"] = _strip_provider_prefix(current_model)
+                # Google AI Studio's OpenAI-compat endpoint doesn't accept
+                # OpenRouter's extra_body.usage.include — drop it.
+                clean.pop("extra_body", None)
+            return await client.chat.completions.create(**clean)
 
         response = None
         # Headroom needs to cover the free-fallback chain (6 models) PLUS
@@ -680,7 +756,7 @@ class LLMClient:
                 #     - "rate limit" / "429"
                 # Both walk FREE_FALLBACKS to the next non-tried non-dead model.
                 current_model = kwargs.get("model") or ""
-                is_free = ":free" in current_model
+                is_free = _is_free_model(current_model)
                 is_perm_unavail = is_free and (
                     "unavailable for free" in low
                     or "response_format is not supported" in low
@@ -780,9 +856,19 @@ class LLMClient:
                         cfg = {}
                     if (cfg.get("mode") or "paid").lower() == "auto" \
                             and not kwargs.get("_already_fallback"):
+                        # When OpenRouter credits hit 402, OpenRouter free
+                        # tier is usually impacted too (shared per-account
+                        # quota). Prefer Google AI Studio if its key is set;
+                        # otherwise fall back to the agent's OpenRouter free.
                         free_model = AGENT_MODELS_FREE.get(
                             self.agent, FREE_FALLBACKS[0]
                         )
+                        try:
+                            from plata.config import credentials as _creds
+                            if await _creds.get("google_ai_studio"):
+                                free_model = "google-ai-studio/gemini-2.5-flash"
+                        except Exception:  # noqa: BLE001
+                            pass
                         _log.warning("llm_auto_fallback_to_free",
                                      agent=self.agent, from_model=self.model,
                                      to_model=free_model)

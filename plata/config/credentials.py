@@ -47,6 +47,7 @@ def _env_fallback(provider: str) -> str | None:
     s = get_settings()
     mapping = {
         "openrouter":      s.openrouter_api_key,
+        "google_ai_studio":s.google_ai_studio_api_key,
         "voyage":          s.voyage_api_key,
         "bybit_key":       s.bybit_api_key,
         "bybit_secret":    s.bybit_api_secret,
