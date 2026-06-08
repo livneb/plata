@@ -2,7 +2,6 @@
 
 Each entry is one deployed version. Most recent first.
 
-<<<<<<< HEAD
 ## 2.24.163 — 2026-06-08
 - **🐛 Free-model chain priority was backwards.** `_next_free_candidate` was walking the live OpenRouter catalog **first**, then the curated list — and Redis `SMEMBERS` returned unordered results, so the chain hit 8 obscure tiny models (poolside/laguna-xs.2, nemotron-content-safety, kimi-k2.6, lfm-2.5-1.2b, …) and never reached llama-3.3-70b:free or deepseek-chat:free. Reversed: **static FREE_FALLBACKS first** (5 battle-tested models), then the sorted live catalog as additional coverage.
 - **🐛 Retry budget too small for the now-much-larger candidate pool.** Was `len(FREE_FALLBACKS) + 3 = 8`. Now `min(12, len(FREE_FALLBACKS) + scard(llm:free_catalog) + 3)` — covers a normal walk plus 3 real retries, capped at 12 so one bad call can't take forever.
@@ -18,10 +17,6 @@ Each entry is one deployed version. Most recent first.
   - **`EntityRef sentiment > 1` Pydantic validation crash**. Free model returned `sentiment=2`. Clamped at construction site: `max(-1.0, min(1.0, float(raw)))`. Also wrapped the EntityRef constructor in try/except so one bad entity doesn't tank the whole signal.
 - **📋 `/sysop/` "Copy all" button.** New action at the top of the page concatenates every visible finding's markdown into one clipboard block (separated by `---`), with a timestamp + count header. Paste-once-into-chat workflow for multi-finding briefs.
 
-=======
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/master
 ## 2.24.161 — 2026-06-07
 - **🛠 `structured()` hardened against 4 free-model failure modes** — the patches I shipped were incomplete. Caught: (a) `response.choices` returning `None` (SDK edge case → `TypeError: 'NoneType' object is not subscriptable`), (b) prose appended after JSON (`Note: The JSON is intentionally truncated for brevity`), (c) the existing tab-loop / max_tokens cutoff, AND (d) **valid JSON missing required keys** (graph_ingestion `KeyError: 'summary'` — model returned JSON but ignored the schema's required field).
 - **What's new**
@@ -30,11 +25,6 @@ Each entry is one deployed version. Most recent first.
   - **Required-key schema check**: reads `schema["required"]` and verifies every listed key is present in the parsed dict. Missing key = unusable response → walk to next model (same Redis-cooldown machinery as garbage output).
   - Single failure path through all four modes — no special cases, no duplicated logic.
 
-<<<<<<< HEAD
-=======
-=======
->>>>>>> origin/master
->>>>>>> origin/master
 ## 2.24.160 — 2026-06-07
 - **🐛 Fix `LLM structured response was not valid JSON (finish_reason=length, tail='\\t\\t\\t…')`.** Some free models on OpenRouter get into a degenerate state and emit hundreds of whitespace chars in a row until they hit `max_tokens`, producing JSON that never closes. Two-part fix:
   - New `_looks_like_loop_output()` detector: any single non-syntax character repeating 50+ times in a row is treated as loop garbage.
