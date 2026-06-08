@@ -81,7 +81,7 @@ async def record_published(proposal: Any) -> None:
     values = {
         "proposal_ulid": proposal.ulid,
         "triggering_event_ulid": getattr(proposal, "triggering_event_ulid", None),
-        "symbol": proposal.symbol,
+        "symbol": (proposal.symbol or "")[:32],
         "side": str(proposal.side),
         "conviction": float(proposal.conviction) if proposal.conviction is not None else None,
         "suggested_sl_pct": proposal.suggested_sl_pct,
