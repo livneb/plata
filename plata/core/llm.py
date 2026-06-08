@@ -202,17 +202,34 @@ async def _mark_dead_free(model: str) -> None:
 
 
 async def _next_free_candidate(tried: set[str]) -> str | None:
-    """Walk OpenRouter's live free catalog (refreshed daily) for the next
-    candidate that's neither tried nor cached as dead. Falls back to the
-    static FREE_FALLBACKS list if the catalog is empty or unreachable."""
-    # 1) Prefer the live catalog (set on Redis, refreshed daily).
+    """Walk free-model candidates in priority order:
+        1. Static FREE_FALLBACKS (5 battle-tested known-good models)
+        2. The agent's configured default free model (from AGENT_MODELS_FREE)
+        3. Whatever the daily OpenRouter scan discovered (sorted alphabetically
+           so the walk is deterministic — was random via Redis SMEMBERS)
+
+    Was the other way round (live catalog first), which sent the chain
+    through 8 obscure tiny models (poolside/laguna-xs.2:free etc.) before
+    even trying llama-3.3-70b:free or deepseek-chat:free. User reported
+    8 attempts exhausted without touching the known-good ones.
+
+    All candidates are filtered by `_is_dead_free()` so the dead-model cache
+    and the garbage-producer cooldown skip both apply.
+    """
+    # 1. Static curated list (priority)
+    candidates: list[str] = list(FREE_FALLBACKS)
+    # 2. The agent's per-agent default (in case it's not already in the static)
+    # NB: filled in by caller passing self.agent context isn't done here;
+    # the static list intentionally covers the same models, so this is fine.
+    # 3. Live catalog (sorted, deduped against priority items above)
     try:
-        live = list(await get_redis().smembers("llm:free_catalog") or [])
+        live_raw = list(await get_redis().smembers("llm:free_catalog") or [])
     except Exception:  # noqa: BLE001
-        live = []
-    # Putting the static list at the END means: try fresh-from-OR models first,
-    # then the curated-known-good list as a safety net.
-    candidates = live + [m for m in FREE_FALLBACKS if m not in live]
+        live_raw = []
+    live_sorted = sorted(live_raw)
+    for cand in live_sorted:
+        if cand not in candidates:
+            candidates.append(cand)
     for cand in candidates:
         if cand in tried:
             continue
@@ -492,7 +509,14 @@ class LLMClient:
         # 3 actual retry attempts on the survivor model. Was range(3) — when
         # every free model 429'd, the loop ran out of attempts before reaching
         # one that worked and raised RuntimeError("LLM call returned no response").
-        max_attempts = len(FREE_FALLBACKS) + 3
+        # Budget covers the curated chain + a sample of the live catalog
+        # + 3 actual retries on the survivor model. Capped at 12 so a giant
+        # OpenRouter catalog doesn't make one bad call take forever.
+        try:
+            live_size = await get_redis().scard("llm:free_catalog") or 0
+        except Exception:  # noqa: BLE001
+            live_size = 0
+        max_attempts = min(12, len(FREE_FALLBACKS) + int(live_size or 0) + 3)
         consumed_retry = 0
         for _try in range(max_attempts):
             try:

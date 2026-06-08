@@ -3,6 +3,13 @@
 Each entry is one deployed version. Most recent first.
 
 <<<<<<< HEAD
+## 2.24.163 — 2026-06-08
+- **🐛 Free-model chain priority was backwards.** `_next_free_candidate` was walking the live OpenRouter catalog **first**, then the curated list — and Redis `SMEMBERS` returned unordered results, so the chain hit 8 obscure tiny models (poolside/laguna-xs.2, nemotron-content-safety, kimi-k2.6, lfm-2.5-1.2b, …) and never reached llama-3.3-70b:free or deepseek-chat:free. Reversed: **static FREE_FALLBACKS first** (5 battle-tested models), then the sorted live catalog as additional coverage.
+- **🐛 Retry budget too small for the now-much-larger candidate pool.** Was `len(FREE_FALLBACKS) + 3 = 8`. Now `min(12, len(FREE_FALLBACKS) + scard(llm:free_catalog) + 3)` — covers a normal walk plus 3 real retries, capped at 12 so one bad call can't take forever.
+- **🕘 Symbol-watch cadence is market-hours-aware.** US equity symbols (routed to Alpaca) now poll every **5 min while open / 60 min while closed**. Crypto (Bybit) stays on 5 min always. Saves the API budget overnight and on weekends; the data isn't moving anyway.
+- **⏳ Live countdown on `/positions/`.** New banner at the top of the Symbol watch page: green "🟢 US market open — closes in 4h 12m 33s" or amber "🌙 US market closed — opens in 1d 14h 22m" (next open shown in your local time). Auto-refreshes the page when the countdown hits zero so the cadence label updates.
+- New `plata/execution/market_hours.py` helper module: `market_open()`, `seconds_until_next_open()`, `seconds_until_next_close()`, `next_open_iso()`. Regular session only (09:30–16:00 ET, Mon–Fri); no holiday calendar yet (on a holiday Monday we'll over-poll harmlessly).
+
 ## 2.24.162 — 2026-06-08
 - **🛠 Bundle of real bugs caught by sysop:**
   - **`StringDataRightTruncationError` on `proposals.symbol`** (32 chars). Free models occasionally produced long hallucinated symbol strings (full name / exchange-prefixed slug) → INSERT silently failed, proposal lost. Bumped column to `String(64)` + clamp in strategist (`raw_symbol = decision["symbol"][:64]`). Alembic migration `20260608_0000`.

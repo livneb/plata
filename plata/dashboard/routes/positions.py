@@ -83,9 +83,27 @@ async def index(request: Request):
     for sym, trades in by_symbol.items():
         cards.append(await _symbol_card(sym, trades, redis))
     cards.sort(key=lambda c: -abs(c["unrealized"]))
+    # Market-hours-aware cadence: 5 min when US equity market is open; 60 min
+    # when it's closed. Crypto symbols are 24/7 and stay on 5 min.
+    from plata.execution.market_hours import (
+        market_open, seconds_until_next_open, seconds_until_next_close,
+        next_open_iso,
+    )
+    is_open = market_open()
+    has_alpaca = any((c.get("venue") or "").lower() == "alpaca" for c in cards)
+    effective_cadence = 5 * 60 if is_open else (60 * 60 if has_alpaca else 5 * 60)
     return templates.TemplateResponse(
         request, "pages/positions_index.html",
-        {"active": "positions", "cards": cards, "cadence_sec": 5 * 60},
+        {
+            "active": "positions",
+            "cards": cards,
+            "cadence_sec": effective_cadence,
+            "market_open": is_open,
+            "has_alpaca": has_alpaca,
+            "seconds_until_open": seconds_until_next_open(),
+            "seconds_until_close": seconds_until_next_close(),
+            "next_open_iso": next_open_iso(),
+        },
     )
 
 
