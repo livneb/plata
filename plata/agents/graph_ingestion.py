@@ -8,7 +8,7 @@ from sqlalchemy import update
 
 from plata.agents.base import BaseAgent
 from plata.agents.scraper.sanitizer import wrap_untrusted
-from plata.core.bus import Streams, publish
+from plata.core.bus import Streams, get_redis, publish
 from plata.core.db import SignalArchive, session_scope
 from plata.core.embeddings import EmbeddingRateLimited, embed
 from plata.core.graph import ensure_indexes, upsert_edge, upsert_entity, upsert_event
@@ -111,18 +111,35 @@ class GraphIngestion(BaseAgent):
             metadata={"signal_ulid": signal.ulid},
         )
 
-        entity_refs = [
-            EntityRef(
-                type=EntityType(e["type"]),
-                id=e["id"],
-                name=e["name"],
-                sentiment=e["sentiment"],
-            )
-            for e in extracted.get("entities", [])
-        ]
+        entity_refs = []
+        for e in extracted.get("entities", []):
+            # Defensive coercion for free-model schema violations:
+            #   - sentiment out of [-1, 1] (we've seen 2)
+            #   - missing required fields → skip the entity, don't crash
+            try:
+                # Clamp sentiment to schema range
+                raw_sent = e.get("sentiment", 0.0)
+                try:
+                    sent = max(-1.0, min(1.0, float(raw_sent)))
+                except (TypeError, ValueError):
+                    sent = 0.0
+                entity_refs.append(EntityRef(
+                    type=EntityType(e["type"]),
+                    id=e["id"],
+                    name=e["name"],
+                    sentiment=sent,
+                ))
+            except (KeyError, ValueError) as exc:
+                self.log.debug("entity_ref_skip", error=str(exc)[:120], entity=e)
+                continue
 
         event_ulid = new_ulid()
-        summary = extracted["summary"]
+        summary = (extracted.get("summary") or "").strip()
+        if not summary:
+            # Empty summary → can't embed → can't proceed. Treat as a soft drop.
+            self.log.warning("empty_summary_drop", signal_ulid=signal.ulid)
+            await get_redis().hincrby(f"agent_stats:{self.name}", "dropped_empty_summary", 1)
+            return
         try:
             embedding = await embed(summary, input_type="document")
         except EmbeddingRateLimited as exc:

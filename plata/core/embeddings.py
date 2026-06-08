@@ -77,7 +77,14 @@ class EmbeddingRateLimited(Exception):
 
 
 async def embed(text: str, *, input_type: str = "document") -> list[float]:
-    """Return a 1024-d embedding for a single text. Cached by content hash."""
+    """Return a 1024-d embedding for a single text. Cached by content hash.
+
+    Empty/whitespace input is treated as a programming error — Voyage rejects
+    it with 'Input cannot contain empty strings' which crashed graph_ingestion.
+    Callers should guard against empty input; this raises a clear error.
+    """
+    if not text or not str(text).strip():
+        raise ValueError("embed() called with empty input — guard before calling")
     key = f"{input_type}:{_hash(text)}"
     cached = _cache.get(key)
     if cached is not None:
