@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.164 — 2026-06-08
+- **🐛 ROOT cause of "12 attempts on obscure models, never reached llama/deepseek".** Even though v2.24.163 put static FREE_FALLBACKS first in the priority order, the curated models were ALL in the `llm:dead_free_models` Redis set from earlier "no endpoints found" hits (which v2.24.158 wrongly classified as PERMANENT 24h-dead). The pre-call check and chain walk both skipped every curated model → chain only used obscure live-catalog ones (nvidia/liquid/google-gemma-4/kimi/...) → all 429'd.
+  - **Reclassification**: `"no endpoints found"` + `"404"` are now TRANSIENT (10-min cooldown). `"unavailable for free"` + `"response_format is not supported"` stay PERMANENT (24h). Provider load shouldn't blacklist a model for a day.
+  - **One-shot cleanup on dashboard startup**: clears `llm:dead_free_models` once after this deploy so the curated models get a fresh chance under the new classification.
+- **💲 Entry price field on `/trades/<ulid>`.** Was buried in the page heading (`NVDA LONG · 4.89 @ 204.37`) — easy to miss because the heading isn't formatted like a value. Now it has its own labelled card next to Notional / SL/TP / Current price.
+
 ## 2.24.163 — 2026-06-08
 - **🐛 Free-model chain priority was backwards.** `_next_free_candidate` was walking the live OpenRouter catalog **first**, then the curated list — and Redis `SMEMBERS` returned unordered results, so the chain hit 8 obscure tiny models (poolside/laguna-xs.2, nemotron-content-safety, kimi-k2.6, lfm-2.5-1.2b, …) and never reached llama-3.3-70b:free or deepseek-chat:free. Reversed: **static FREE_FALLBACKS first** (5 battle-tested models), then the sorted live catalog as additional coverage.
 - **🐛 Retry budget too small for the now-much-larger candidate pool.** Was `len(FREE_FALLBACKS) + 3 = 8`. Now `min(12, len(FREE_FALLBACKS) + scard(llm:free_catalog) + 3)` — covers a normal walk plus 3 real retries, capped at 12 so one bad call can't take forever.
