@@ -407,6 +407,14 @@ async def _lifespan(_app: FastAPI):
             _log.info("llm_dead_free_set_cleared_for_reclassification")
         except Exception:  # noqa: BLE001
             pass
+        # ONE-SHOT v2.24.168: the proposals:last_persist_error banner had a
+        # 7-day TTL. v2.24.167 dropped it to 30 min, but old entries linger.
+        # Wipe once on boot so the user sees the banner disappear immediately
+        # after the fix deploys.
+        try:
+            await _gr().delete("proposals:last_persist_error")
+        except Exception:  # noqa: BLE001
+            pass
         while True:
             try:
                 await refresh_free_catalog()

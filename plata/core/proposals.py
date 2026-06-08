@@ -48,7 +48,10 @@ async def _persist_failure_to_redis(error: str, context: dict) -> None:
             **{k: str(v)[:200] for k, v in context.items() if v is not None},
         }
         await redis.hset("proposals:last_persist_error", mapping=payload)
-        await redis.expire("proposals:last_persist_error", 7 * 24 * 60 * 60)
+        # Short TTL (30 min) so the banner self-clears if the agent recovers
+        # and inserts stop failing. Was 7 days — caused the "1h ago" banner
+        # to linger for a week after the underlying issue was already fixed.
+        await redis.expire("proposals:last_persist_error", 30 * 60)
         # Bump a counter so the banner can show "47 drops failed to persist".
         await redis.incr("proposals:persist_failures_total")
     except Exception:  # noqa: BLE001 — never break the caller
