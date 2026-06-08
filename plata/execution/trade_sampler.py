@@ -38,19 +38,34 @@ _log = get_logger("trade_sampler")
 
 MAX_SAMPLES_PER_TRADE = 720           # cap memory (e.g. 720×5s = 1h, 720×1min = 12h, etc.)
 PROPOSAL_CACHE_TTL_SEC = 600          # remember the longest-milestone lookup per trade
-SYMBOL_WATCH_CADENCE_SEC = 5 * 60     # refresh every open-position symbol every 5 min
+SYMBOL_WATCH_CADENCE_SEC = 5 * 60     # default open-market cadence
+SYMBOL_WATCH_CADENCE_CLOSED_SEC = 60 * 60  # 60 min when US market is closed
 _SYMBOL_WATCH_LAST: dict[str, float] = {}  # symbol → monotonic last-fetched ts
 
 
+def _cadence_for(symbol: str) -> int:
+    """Per-symbol cadence: crypto = 5 min always, US equities = 5 min when
+    open / 60 min when closed (weekend/after-hours)."""
+    from plata.execution.market_hours import market_open
+    from plata.execution.router import venue_for
+    try:
+        venue = venue_for(symbol)
+    except Exception:  # noqa: BLE001
+        venue = "bybit"
+    if venue == "alpaca" and not market_open():
+        return SYMBOL_WATCH_CADENCE_CLOSED_SEC
+    return SYMBOL_WATCH_CADENCE_SEC
+
+
 async def _refresh_symbol_watch(symbols: list[str], now: float) -> None:
-    """Per-symbol fixed-cadence watcher. One fetch per distinct open-position
-    symbol every SYMBOL_WATCH_CADENCE_SEC, independent of per-trade cadence.
-    Result stored in Redis hash `symbol:latest:<symbol>` for the UI."""
+    """Per-symbol cadence-aware watcher. One fetch per distinct open-position
+    symbol per cadence interval (5 min normally; 60 min for closed US
+    equities). Result stored in Redis hash `symbol:latest:<symbol>` for the UI."""
     redis = get_redis()
     from plata.execution.router import venue_for
     for sym in symbols:
         last = _SYMBOL_WATCH_LAST.get(sym, 0)
-        if now - last < SYMBOL_WATCH_CADENCE_SEC:
+        if now - last < _cadence_for(sym):
             continue
         try:
             price = await _latest_price(sym)

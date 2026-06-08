@@ -12,6 +12,50 @@
   <a href="/trades/?from=positions" class="text-xs text-blue-500 hover:underline">← positions list</a>
 </div>
 
+{% if has_alpaca %}
+<div id="market-status-banner"
+     class="mb-3 flex items-center gap-3 px-3 py-2 rounded border
+            {% if market_open %}border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300
+            {% else %}border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300{% endif %}">
+  {% if market_open %}
+  <span class="text-sm">🟢 US market open — Alpaca symbols polled every 5 min.</span>
+  <span class="text-xs ml-auto">Closes in <b id="market-countdown" data-seconds="{{ seconds_until_close }}">…</b></span>
+  {% else %}
+  <span class="text-sm">🌙 US market closed — Alpaca symbols polled every 60 min until open.</span>
+  <span class="text-xs ml-auto">Opens in <b id="market-countdown" data-seconds="{{ seconds_until_open }}">…</b>
+    <span class="text-[10px] text-gray-500 ml-1"><time data-utc="{{ next_open_iso }}">{{ next_open_iso }}</time></span>
+  </span>
+  {% endif %}
+</div>
+<script>
+  (function () {
+    const el = document.getElementById('market-countdown');
+    if (!el) return;
+    let secs = parseInt(el.getAttribute('data-seconds') || '0', 10);
+    function fmt(s) {
+      if (s <= 0) return 'now';
+      const d = Math.floor(s / 86400);
+      const h = Math.floor((s % 86400) / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      if (d > 0) return `${d}d ${h}h ${m}m`;
+      if (h > 0) return `${h}h ${m}m ${sec.toString().padStart(2,'0')}s`;
+      if (m > 0) return `${m}m ${sec.toString().padStart(2,'0')}s`;
+      return `${sec}s`;
+    }
+    el.textContent = fmt(secs);
+    setInterval(() => {
+      secs = Math.max(0, secs - 1);
+      el.textContent = fmt(secs);
+      if (secs === 0) {
+        // Force one reload so the banner flips state.
+        setTimeout(() => location.reload(), 1500);
+      }
+    }, 1000);
+  })();
+</script>
+{% endif %}
+
 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
   {% for c in cards %}
   <a href="/positions/{{ c.symbol }}?from=positions" class="block bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-blue-500 transition overflow-hidden">
