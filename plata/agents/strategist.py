@@ -243,9 +243,13 @@ class Strategist(BaseAgent):
             except Exception:  # noqa: BLE001
                 continue
 
+        # Clamp symbol to 64 chars defensively — free models occasionally
+        # produce hallucinated long strings that previously overflowed
+        # proposals.symbol(varchar 32) and silently lost the row.
+        raw_symbol = str(decision.get("symbol") or "").strip()[:64]
         proposal = TradeProposal(
             triggering_event_ulid=event.ulid,
-            symbol=decision["symbol"],
+            symbol=raw_symbol,
             side=Side(decision["side"]),
             conviction=float(decision["conviction"]),
             reasoning=decision["reasoning"],

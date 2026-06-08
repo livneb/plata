@@ -526,6 +526,11 @@ class LLMClient:
                     "unavailable for free" in low
                     or "no endpoints found" in low
                     or "404" in msg
+                    # "response_format is not supported by this model"
+                    # — model is permanently incapable of structured output,
+                    # don't keep trying it.
+                    or "response_format is not supported" in low
+                    or "response_format" in low and "not supported" in low
                 )
                 is_transient = is_free and (
                     "rate limit" in low or "429" in msg

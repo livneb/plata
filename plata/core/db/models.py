@@ -308,7 +308,10 @@ class Proposal(Base):
 
     proposal_ulid: Mapped[str] = mapped_column(String(26), primary_key=True)
     triggering_event_ulid: Mapped[str | None] = mapped_column(String(26), nullable=True, index=True)
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    # symbol bumped to 64 because free models occasionally hallucinate long
+    # symbol strings (e.g. include exchange prefix or full name). Inserts that
+    # overflowed silently dropped proposals. Clamp at the strategist too.
+    symbol: Mapped[str] = mapped_column(String(64), index=True)
     side: Mapped[str] = mapped_column(String(8))
     conviction: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
     suggested_sl_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 6), nullable=True)

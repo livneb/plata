@@ -2,8 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
+## 2.24.162 — 2026-06-08
+- **🛠 Bundle of real bugs caught by sysop:**
+  - **`StringDataRightTruncationError` on `proposals.symbol`** (32 chars). Free models occasionally produced long hallucinated symbol strings (full name / exchange-prefixed slug) → INSERT silently failed, proposal lost. Bumped column to `String(64)` + clamp in strategist (`raw_symbol = decision["symbol"][:64]`). Alembic migration `20260608_0000`.
+  - **`response_format is not supported by this model`** (400 from Venice provider on `mistralai/mistral-small-24b-instruct-2501:free` and similar). The model doesn't support OpenAI-style structured outputs at all — classified as PERMANENT failure now (caches as dead, walks chain). Same machinery as 404 / "unavailable for free".
+  - **`Voyage InvalidRequestError: Input cannot contain empty strings`**. graph_ingestion was calling `embed("")` when free model produced JSON with empty summary. Now: guard against empty/whitespace summaries before the call (skip with WARN + agent stat counter), and `embed()` raises a clear `ValueError` if a caller still forgets to guard.
+  - **`EntityRef sentiment > 1` Pydantic validation crash**. Free model returned `sentiment=2`. Clamped at construction site: `max(-1.0, min(1.0, float(raw)))`. Also wrapped the EntityRef constructor in try/except so one bad entity doesn't tank the whole signal.
+- **📋 `/sysop/` "Copy all" button.** New action at the top of the page concatenates every visible finding's markdown into one clipboard block (separated by `---`), with a timestamp + count header. Paste-once-into-chat workflow for multi-finding briefs.
+
 ## 2.24.161 — 2026-06-07
 - **🛠 `structured()` hardened against 4 free-model failure modes** — the patches I shipped were incomplete. Caught: (a) `response.choices` returning `None` (SDK edge case → `TypeError: 'NoneType' object is not subscriptable`), (b) prose appended after JSON (`Note: The JSON is intentionally truncated for brevity`), (c) the existing tab-loop / max_tokens cutoff, AND (d) **valid JSON missing required keys** (graph_ingestion `KeyError: 'summary'` — model returned JSON but ignored the schema's required field).
 - **What's new**
@@ -12,27 +18,17 @@ Each entry is one deployed version. Most recent first.
   - **Required-key schema check**: reads `schema["required"]` and verifies every listed key is present in the parsed dict. Missing key = unusable response → walk to next model (same Redis-cooldown machinery as garbage output).
   - Single failure path through all four modes — no special cases, no duplicated logic.
 
-=======
->>>>>>> origin/master
 ## 2.24.160 — 2026-06-07
 - **🐛 Fix `LLM structured response was not valid JSON (finish_reason=length, tail='\\t\\t\\t…')`.** Some free models on OpenRouter get into a degenerate state and emit hundreds of whitespace chars in a row until they hit `max_tokens`, producing JSON that never closes. Two-part fix:
   - New `_looks_like_loop_output()` detector: any single non-syntax character repeating 50+ times in a row is treated as loop garbage.
   - `structured()` now retries up to 5 times, each time on a different free model (the offending one gets cached as a `llm:garbage_producer:<slug>` Redis key with 10-min TTL so `_next_free_candidate()` skips it). 5 garbage outputs in a row from different models → clean error suggesting paid mode.
 - **🩺 `_is_dead_free()` extended** to also treat garbage-producer cooldowns as "dead for now" — same skip semantics across the chain walk and pre-call check.
 
-=======
-<<<<<<< HEAD
->>>>>>> origin/master
 ## 2.24.159 — 2026-06-07
 - **🌐 Daily refresh of OpenRouter's free-model catalog.** Static `FREE_FALLBACKS` was always going to go stale (mistral-small example). New `refresh_free_catalog()` hits `https://openrouter.ai/api/v1/models` once at boot then every 24h, filters to models where `pricing.prompt == 0 AND pricing.completion == 0 AND slug.endswith(":free")`, stores them in Redis `llm:free_catalog` (48h TTL). `_next_free_candidate()` prefers the live catalog over the static list. When OpenRouter adds a new free model, Plata picks it up the next day with zero code change.
 - **🛟 Auto-mode paid rescue.** When all free models are exhausted (rate-limited, retired, no endpoints) AND `llm_mode = auto`, the client falls back to the configured paid model for that call (the whole point of auto: "use free when possible, else paid"). Clears the sticky `llm_config:auto_active_free` pin so subsequent calls go straight to paid until free recovers. `free` mode still raises (user opted into free-only).
 - **🩺 New sysop detector `all_free_exhausted`** fires when `RuntimeError("All free models exhausted")` recurred in the last 30 min. Surfaces the current `llm_mode`, the dead-model cache, and the live catalog size, with `set_llm_mode_auto` as a one-click fix (in `AUTO_APPLY_SAFE`). User-friendly path out when the OpenRouter free pool is genuinely down.
 
-<<<<<<< HEAD
-=======
-=======
->>>>>>> origin/master
->>>>>>> origin/master
 ## 2.24.158 — 2026-06-07
 - **🛠 Redesign of the free-model fallback path** (instead of another incremental patch — your point landed). What was wrong:
   1. `mistralai/mistral-small-24b-instruct-2501:free` was retired by OpenRouter ("This model is unavailable for free"). Static `FREE_FALLBACKS` kept retrying it — 10+ errors/hour caught by sysop's `repeated_error` detector.

@@ -5,6 +5,11 @@
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold">🛠 Sysop findings</h1>
     <div class="flex items-center gap-2 text-xs">
+      {% if findings %}
+      <button id="copy-all-findings" type="button"
+              class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+              title="Copy every visible finding as one markdown block, ready to paste into chat for diagnosis.">📋 Copy all ({{ findings | length }})</button>
+      {% endif %}
       <a href="/sysop/?show=open" class="px-2 py-1 rounded {% if show == 'open' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">Open</a>
       <a href="/sysop/?show=history" class="px-2 py-1 rounded {% if show == 'history' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">History</a>
       <a href="/sysop/?show=all" class="px-2 py-1 rounded {% if show == 'all' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">All</a>
@@ -80,7 +85,7 @@
 </div>
 
 <script>
-  // Copy-for-chat handler
+  // Copy-for-chat handler (single finding)
   document.querySelectorAll('[data-copy-finding]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.getAttribute('data-copy-finding');
@@ -95,6 +100,33 @@
         plataToast('Copy failed: ' + e.message, 'error');
       }
     });
+  });
+
+  // Copy-all handler — concatenate every visible finding's clipboard payload
+  // separated by a horizontal rule so it pastes cleanly as a multi-finding
+  // brief into chat.
+  document.getElementById('copy-all-findings')?.addEventListener('click', async () => {
+    const tas = document.querySelectorAll('textarea[id^="clipboard-"]');
+    if (!tas.length) return;
+    const parts = [];
+    parts.push(`# Plata sysop · ${tas.length} open finding(s) · ${new Date().toISOString()}`);
+    parts.push("");
+    tas.forEach((ta, i) => {
+      parts.push(`---`);
+      parts.push("");
+      parts.push(ta.value);
+      parts.push("");
+    });
+    const blob = parts.join("\n");
+    const btn = document.getElementById('copy-all-findings');
+    try {
+      await navigator.clipboard.writeText(blob);
+      const prev = btn.innerHTML;
+      btn.innerHTML = `✓ Copied ${tas.length}`;
+      setTimeout(() => { btn.innerHTML = prev; }, 1800);
+    } catch (e) {
+      plataToast('Copy failed: ' + e.message, 'error');
+    }
   });
 
   // Approve & apply handler — POSTs to /sysop/<id>/apply, shows result
