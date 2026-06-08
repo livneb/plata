@@ -611,9 +611,14 @@ def _month_key() -> str:
 
 
 def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    # Free-tier calls are actually free. Don't synthesize a "conservative
+    # high estimate" against the daily budget — that's how `llm_mode=free`
+    # was hitting BudgetExceededError at $20/day despite zero real spend.
+    if _is_free_model(model):
+        return 0.0
     prices = MODEL_PRICES.get(model)
     if prices is None:
-        # Unknown model → conservative high estimate so it still counts
+        # Unknown PAID model → conservative high estimate so it still counts
         prompt_price, completion_price = 5.0, 15.0
     else:
         prompt_price, completion_price = prices

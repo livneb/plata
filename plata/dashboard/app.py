@@ -416,6 +416,20 @@ async def _lifespan(_app: FastAPI):
             await _gr().delete("proposals:last_persist_error")
         except Exception:  # noqa: BLE001
             pass
+        # ONE-SHOT v2.24.180: today's LLM cost counters got inflated by the
+        # phantom $5/$15-per-1M estimate on free-tier calls. The fix in
+        # _estimate_cost_usd zeros out future free spend, but the existing
+        # cost:daily:<today>* entries are still huge — they'd keep tripping
+        # BudgetExceededError until midnight. Wipe today's counters once on
+        # boot so the system is unstuck immediately.
+        try:
+            from datetime import date as _date
+            today_pat = f"cost:daily:{_date.today().isoformat()}*"
+            r_ = _gr()
+            async for k in r_.scan_iter(match=today_pat, count=200):
+                await r_.delete(k)
+        except Exception:  # noqa: BLE001
+            pass
         # ONE-SHOT v2.24.169: clear the 10-min garbage_producer cache + reset
         # the per-model throttle keys. After the chain stopped walking and
         # left every model in garbage cooldown simultaneously, the new
