@@ -144,7 +144,6 @@ class GraphIngestion(BaseAgent):
             embedding = await embed(summary, input_type="document")
         except EmbeddingRateLimited as exc:
             # Don't DLQ; classify as a warning, skip this signal until quota recovers.
-            from plata.core.bus import get_redis
             await get_redis().hincrby(f"agent_stats:{self.name}", "dropped_embed_rate_limit", 1)
             await self.error_reporter.capture(
                 agent=self.name, severity="WARN", error_type="EmbeddingRateLimited",

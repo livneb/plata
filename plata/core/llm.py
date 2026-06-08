@@ -308,35 +308,44 @@ async def _mark_dead_free(model: str) -> None:
 
 
 async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) -> str | None:
-    """Walk free-model candidates in priority order:
-        1. Static FREE_FALLBACKS (5 battle-tested known-good models)
-        2. The agent's configured default free model (from AGENT_MODELS_FREE)
-        3. Whatever the daily OpenRouter scan discovered (sorted alphabetically
-           so the walk is deterministic — was random via Redis SMEMBERS)
+    """Walk free-model candidates in this strict priority order:
+        Stage 1: FREE_FALLBACKS, filtered only by `tried` + PERMANENTLY_RETIRED +
+                 24h hard-dead cache. Soft (garbage) cache is IGNORED at this
+                 stage so we always prefer a known-good model over a random
+                 obscure live-catalog model — even if the known-good one was
+                 briefly rate-limited 5 min ago.
+        Stage 2: live catalog (alphabetical), full filter — only used if every
+                 curated model has been tried OR is hard-dead.
+        Stage 3: live catalog, relax_garbage — fallback when even live is fully
+                 filtered.
 
-    Was the other way round (live catalog first), which sent the chain
-    through 8 obscure tiny models (poolside/laguna-xs.2:free etc.) before
-    even trying llama-3.3-70b:free or deepseek-chat:free. User reported
-    8 attempts exhausted without touching the known-good ones.
-
-    All candidates are filtered by `_is_dead_free()` so the dead-model cache
-    and the garbage-producer cooldown skip both apply.
-
-    `relax_garbage=True` does a SECOND-PASS lookup that ignores the
-    10-min garbage-producer cooldown — used when the first pass exhausted
-    every candidate. Better to retry a recently-rate-limited model than
-    give up entirely.
+    Earlier shape walked Stage 1+2 together with full filter, which sent the
+    chain through 12 obscure live-catalog models (dolphin-mistral / nvidia-
+    nemotron / liquid-lfm-1.2b) before ever trying llama-3.3-70b — because
+    all 5 curated FREE_FALLBACKS were in the 10-min garbage cache from
+    earlier 429s.
     """
-    # 1. Static curated list (priority)
-    candidates: list[str] = list(FREE_FALLBACKS)
-    # 3. Live catalog (sorted, deduped against priority items above)
+    # Stage 1: curated FREE_FALLBACKS, hard-dead filter only.
+    for cand in FREE_FALLBACKS:
+        if cand in tried:
+            continue
+        if cand in PERMANENTLY_RETIRED_FREE:
+            continue
+        try:
+            if await get_redis().sismember("llm:dead_free_models", cand):
+                continue
+        except Exception:  # noqa: BLE001
+            pass
+        return cand
+    # Stage 2 + 3: live catalog
     try:
         live_raw = list(await get_redis().smembers("llm:free_catalog") or [])
     except Exception:  # noqa: BLE001
         live_raw = []
     live_sorted = sorted(live_raw)
+    candidates: list[str] = []
     for cand in live_sorted:
-        if cand not in candidates:
+        if cand not in FREE_FALLBACKS:
             candidates.append(cand)
     for cand in candidates:
         if cand in tried:
@@ -937,6 +946,16 @@ class LLMClient:
                 else f"json_error={parse_err.msg if parse_err else 'no_content'}"
             )
             last_error = (finish, f"{why} | tail={tail!r}")
+            # If the response hit max_tokens (finish_reason="length"), the
+            # model wasn't producing garbage — it just ran out of room. Bump
+            # max_tokens and retry with the SAME model before falling back.
+            if finish == "length" and max_tokens < 8192:
+                new_max = min(8192, max_tokens * 2)
+                _log.warning("llm_structured_truncated_bump_tokens",
+                              agent=self.agent, model=self.model,
+                              old_max=max_tokens, new_max=new_max)
+                max_tokens = new_max
+                continue
             if self.model not in tried_garbage:
                 try:
                     await get_redis().setex(
