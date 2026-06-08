@@ -474,9 +474,37 @@
           {% endif %}
         </div>
 
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+          <h3 class="font-semibold mb-2">Defaults</h3>
+          <p class="text-xs text-gray-500 mb-3">Global fallbacks. Per-agent overrides (below) always win.</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <label class="block">
+              <div class="text-[11px] uppercase text-gray-500 mb-1">Default paid model</div>
+              <select name="default_paid_model"
+                      class="w-full text-[12px] font-mono p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+                <option value="" {% if not default_paid_model %}selected{% endif %}>— per-agent paid default —</option>
+                {% for opt in model_catalog_paid %}
+                <option value="{{ opt }}" {% if default_paid_model == opt %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+              </select>
+              <div class="text-[11px] text-gray-500 mt-1">When mode is <b>paid</b> and an agent has no override, every agent uses this.</div>
+            </label>
+            <label class="block">
+              <div class="text-[11px] uppercase text-gray-500 mb-1">Default free provider</div>
+              <select name="default_free_provider"
+                      class="w-full text-[12px] font-mono p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+                <option value="both" {% if default_free_provider == 'both' %}selected{% endif %}>🔁 Both — interleaved chain (recommended)</option>
+                <option value="openrouter" {% if default_free_provider == 'openrouter' %}selected{% endif %}>🌐 OpenRouter only</option>
+                <option value="google_ai_studio" {% if default_free_provider == 'google_ai_studio' %}selected{% endif %}>🔵 Google AI Studio only</option>
+              </select>
+              <div class="text-[11px] text-gray-500 mt-1">With <b>Both</b>, the chain walks Google + OpenRouter; failures fall to the next. Pick a single provider to pin all free calls there.</div>
+            </label>
+          </div>
+        </div>
+
         <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 overflow-x-auto">
           <h3 class="font-semibold mb-2">Per-agent models</h3>
-          <p class="text-xs text-gray-500 mb-3">Leave "override" empty to use the default for the selected mode. Any OpenRouter model ID works; the dropdown shows curated suggestions.</p>
+          <p class="text-xs text-gray-500 mb-3">Leave override on <i>(default)</i> to use the global default for the selected mode. Pick a specific model to pin this agent.</p>
           <table class="w-full text-sm text-left">
             <thead class="text-[10px] uppercase text-gray-500">
               <tr>
@@ -493,18 +521,37 @@
                 <td class="px-2 py-2 text-[11px] font-mono text-gray-500">{{ m.paid or '—' }}</td>
                 <td class="px-2 py-2 text-[11px] font-mono text-emerald-500">{{ m.free or '—' }}</td>
                 <td class="px-2 py-2">
-                  <input list="model-catalog" name="override:{{ m.agent }}" value="{{ m.override }}"
-                         placeholder="(default)"
-                         class="w-72 text-[11px] font-mono p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+                  <select name="override:{{ m.agent }}"
+                          class="w-80 text-[11px] font-mono p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+                    <option value="" {% if not m.override %}selected{% endif %}>(default)</option>
+                    <optgroup label="💰 Paid (OpenRouter)">
+                      {% for opt in model_catalog_paid %}
+                      <option value="{{ opt }}" {% if m.override == opt %}selected{% endif %}>{{ opt }}</option>
+                      {% endfor %}
+                    </optgroup>
+                    <optgroup label="🆓 Free — OpenRouter">
+                      {% for opt in model_catalog_free %}
+                      <option value="{{ opt }}" {% if m.override == opt %}selected{% endif %}>{{ opt }}</option>
+                      {% endfor %}
+                    </optgroup>
+                    <optgroup label="🔵 Free — Google AI Studio">
+                      {% for opt in model_catalog_google_free %}
+                      <option value="{{ opt }}" {% if m.override == opt %}selected{% endif %}>{{ opt }}</option>
+                      {% endfor %}
+                    </optgroup>
+                    {# If the saved override is custom (not in any catalog), show it so we don't silently drop it on save. #}
+                    {% set _all = (model_catalog_paid + model_catalog_free + model_catalog_google_free) %}
+                    {% if m.override and m.override not in _all %}
+                    <optgroup label="✎ Custom (saved)">
+                      <option value="{{ m.override }}" selected>{{ m.override }}</option>
+                    </optgroup>
+                    {% endif %}
+                  </select>
                 </td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
-          <datalist id="model-catalog">
-            {% for opt in model_catalog_paid %}<option value="{{ opt }}">💰 paid</option>{% endfor %}
-            {% for opt in model_catalog_free %}<option value="{{ opt }}">🆓 free</option>{% endfor %}
-          </datalist>
         </div>
 
         <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">Save model config</button>

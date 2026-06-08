@@ -46,7 +46,7 @@ async def index(request: Request, tab: str = "controls"):
     # LLM model config — mode + per-agent overrides + suggestion catalog.
     from plata.core.llm import (
         AGENT_MODELS, AGENT_MODELS_FREE,
-        MODEL_CATALOG_FREE, MODEL_CATALOG_PAID,
+        MODEL_CATALOG_FREE, MODEL_CATALOG_PAID, MODEL_CATALOG_GOOGLE_FREE,
     )
     llm_cfg = await redis.hgetall("llm_config") or {}
     auto_active_free = await redis.get("llm_config:auto_active_free")
@@ -90,6 +90,9 @@ async def index(request: Request, tab: str = "controls"):
             "models_view": models_view,
             "model_catalog_paid": MODEL_CATALOG_PAID,
             "model_catalog_free": MODEL_CATALOG_FREE,
+            "model_catalog_google_free": MODEL_CATALOG_GOOGLE_FREE,
+            "default_paid_model": llm_cfg.get("default_paid_model", ""),
+            "default_free_provider": (llm_cfg.get("default_free_provider") or "both").lower(),
         },
     )
 
@@ -103,6 +106,16 @@ async def llm_save(request: Request):
     if mode not in ("paid", "auto", "free"):
         mode = "paid"
     await redis.hset("llm_config", "mode", mode)
+    # Global defaults — pick a single paid model + free-provider preference.
+    default_paid = (form.get("default_paid_model") or "").strip()
+    if default_paid:
+        await redis.hset("llm_config", "default_paid_model", default_paid)
+    else:
+        await redis.hdel("llm_config", "default_paid_model")
+    free_provider = (form.get("default_free_provider") or "both").lower().strip()
+    if free_provider not in ("openrouter", "google_ai_studio", "both"):
+        free_provider = "both"
+    await redis.hset("llm_config", "default_free_provider", free_provider)
     # Per-agent overrides — empty string means "clear override".
     from plata.core.llm import AGENT_MODELS, AGENT_MODELS_FREE
     for ag in sorted(set(AGENT_MODELS) | set(AGENT_MODELS_FREE)):

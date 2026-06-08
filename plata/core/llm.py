@@ -327,6 +327,28 @@ async def _mark_dead_free(model: str) -> None:
         pass
 
 
+async def _free_provider_preference() -> str:
+    """Read llm_config:default_free_provider — `openrouter` / `google_ai_studio`
+    / `both` (default). Used by the chain walk to filter candidates."""
+    try:
+        cfg = await get_redis().hgetall("llm_config") or {}
+        v = (cfg.get("default_free_provider") or "both").lower().strip()
+        if v in ("openrouter", "google_ai_studio", "both"):
+            return v
+    except Exception:  # noqa: BLE001
+        pass
+    return "both"
+
+
+def _matches_provider_preference(model: str, preference: str) -> bool:
+    """True if `model` is allowed under the current `default_free_provider`
+    setting. Both → everything; otherwise filter by prefix."""
+    if preference == "both":
+        return True
+    provider = _provider_for(model)
+    return provider == preference
+
+
 async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) -> str | None:
     """Walk free-model candidates in this strict priority order:
         Stage 1: FREE_FALLBACKS, filtered only by `tried` + PERMANENTLY_RETIRED +
@@ -345,11 +367,16 @@ async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) 
     all 5 curated FREE_FALLBACKS were in the 10-min garbage cache from
     earlier 429s.
     """
+    # Read provider preference once per walk. "both" = no filter; otherwise
+    # we skip candidates whose provider doesn't match.
+    preference = await _free_provider_preference()
     # Stage 1: curated FREE_FALLBACKS, hard-dead filter only.
     for cand in FREE_FALLBACKS:
         if cand in tried:
             continue
         if cand in PERMANENTLY_RETIRED_FREE:
+            continue
+        if not _matches_provider_preference(cand, preference):
             continue
         try:
             if await get_redis().sismember("llm:dead_free_models", cand):
@@ -372,6 +399,8 @@ async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) 
             continue
         if cand in PERMANENTLY_RETIRED_FREE:
             continue
+        if not _matches_provider_preference(cand, preference):
+            continue
         if relax_garbage:
             # Only filter by the 24h hard-dead cache, not the 10-min garbage.
             try:
@@ -393,6 +422,14 @@ MODEL_CATALOG_FREE: list[str] = [
     "deepseek/deepseek-chat:free",
     "qwen/qwen-2.5-72b-instruct:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
+]
+# Google AI Studio free pool — separate catalog because it uses a different
+# API endpoint and different rate-limit structure. UI groups it separately.
+MODEL_CATALOG_GOOGLE_FREE: list[str] = [
+    "google-ai-studio/gemini-2.5-flash",
+    "google-ai-studio/gemini-2.0-flash",
+    "google-ai-studio/gemini-2.5-flash-lite",
+    "google-ai-studio/gemini-2.5-pro",
 ]
 MODEL_CATALOG_PAID: list[str] = [
     "anthropic/claude-sonnet-4-6",
@@ -421,8 +458,22 @@ async def resolve_model(agent: str) -> tuple[str, str]:
     override = cfg.get(f"override:{agent}")
     if override:
         return override, mode
+    # Global default-paid override (set on /settings/?tab=models) wins over
+    # the per-agent paid default when in paid / auto-paid mode and the agent
+    # has no specific override.
+    default_paid = (cfg.get("default_paid_model") or "").strip()
+    free_pref = (cfg.get("default_free_provider") or "both").lower()
+    def _free_default_for_agent() -> str:
+        # If the operator pinned "google_ai_studio", reach for a Google model
+        # even when AGENT_MODELS_FREE has an OpenRouter default for the agent.
+        if free_pref == "google_ai_studio":
+            return "google-ai-studio/gemini-2.5-flash"
+        # AGENT_MODELS_FREE entries are OpenRouter models. Honor "openrouter".
+        # For "both", we still pick the per-agent OpenRouter default; the chain
+        # walk on failure will hop providers.
+        return AGENT_MODELS_FREE.get(agent, FREE_FALLBACKS[0])
     if mode == "free":
-        return AGENT_MODELS_FREE.get(agent, FREE_FALLBACKS[0]), mode
+        return _free_default_for_agent(), mode
     if mode == "auto":
         # If we recently hit 402, stay on free until the sticky pin expires.
         try:
@@ -430,8 +481,9 @@ async def resolve_model(agent: str) -> tuple[str, str]:
         except Exception:  # noqa: BLE001
             pinned = None
         if pinned:
-            return AGENT_MODELS_FREE.get(agent, FREE_FALLBACKS[0]), "auto-free"
-    return AGENT_MODELS.get(agent, "anthropic/claude-haiku-4-5"), mode
+            return _free_default_for_agent(), "auto-free"
+    paid = default_paid or AGENT_MODELS.get(agent, "anthropic/claude-haiku-4-5")
+    return paid, mode
 
 
 # Approximate prices (USD per 1M tokens) — updated by hand or via OpenRouter pricing API.
