@@ -641,7 +641,12 @@ class LLMClient:
             live_size = await get_redis().scard("llm:free_catalog") or 0
         except Exception:  # noqa: BLE001
             live_size = 0
-        max_attempts = min(12, len(FREE_FALLBACKS) + int(live_size or 0) + 3)
+        # Budget = curated FREE_FALLBACKS (~5) + up to 2 live-catalog
+        # bonus attempts + 3 retries on a survivor. Capped at 10. The
+        # earlier `+ live_size` shape burned the whole budget on
+        # obscure live-catalog models when curated were all in garbage
+        # cache, with zero successes.
+        max_attempts = min(10, len(FREE_FALLBACKS) + 2 + 3)
         consumed_retry = 0
         for _try in range(max_attempts):
             try:
@@ -811,6 +816,39 @@ class LLMClient:
                     except ValueError:
                         retry_after = 0.0
                 await asyncio.sleep(max(retry_after, 1 + consumed_retry * 2))
+        if response is None:
+            # Final paid-rescue: even if chain didn't formally "exhaust"
+            # (each attempt found SOME next_model in the live catalog), the
+            # 12-attempt budget burned out without a single success. In auto
+            # mode, fall to paid before raising — same logic as the
+            # mid-chain rescue branch above. Only do this once per call.
+            try:
+                cfg = await get_redis().hgetall("llm_config") or {}
+            except Exception:  # noqa: BLE001
+                cfg = {}
+            mode = (cfg.get("mode") or "paid").lower()
+            if mode == "auto" and not kwargs.get("_paid_rescue_tried"):
+                paid = AGENT_MODELS.get(self.agent, "anthropic/claude-haiku-4-5")
+                if paid:
+                    _log.warning("llm_budget_exhausted_paid_rescue",
+                                  agent=self.agent,
+                                  tried_free=list(kwargs.get("_tried_free") or []),
+                                  paid=paid)
+                    kwargs["model"] = paid
+                    kwargs["_paid_rescue_tried"] = True
+                    self.model = paid
+                    try:
+                        await get_redis().delete("llm_config:auto_active_free")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    try:
+                        response = await _attempt_once()
+                    except Exception as exc:  # noqa: BLE001
+                        raise RuntimeError(
+                            f"LLM call returned no response after {max_attempts} "
+                            f"free attempts AND paid rescue ({paid}) also failed: "
+                            f"{type(exc).__name__}: {str(exc)[:200]}"
+                        ) from exc
         if response is None:
             raise RuntimeError(
                 f"LLM call returned no response after {max_attempts} attempts "
