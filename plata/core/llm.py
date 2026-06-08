@@ -525,12 +525,37 @@ def _strip_provider_prefix(model: str) -> str:
 _OPENAI_CLIENT_CACHE: dict[tuple[str, str], AsyncOpenAI] = {}
 
 
-def _client_for(provider: str) -> AsyncOpenAI:
-    """Build (and cache) the AsyncOpenAI client for a given provider."""
+def _is_provider_configured(provider: str) -> bool:
+    """Cheap check: does the API key for `provider` exist (UI creds OR env)?
+    Used by the chain walk to skip candidates whose provider isn't set up,
+    so we don't burn an attempt on a guaranteed RuntimeError."""
+    settings = get_settings()
+    from plata.config import credentials as _creds
+    try:
+        v = _creds.get_sync(provider)
+    except Exception:  # noqa: BLE001
+        v = None
+    if v:
+        return True
+    if provider == "google_ai_studio":
+        return bool(settings.google_ai_studio_api_key)
+    if provider == "openrouter":
+        return bool(settings.openrouter_api_key)
+    return False
+
+
+async def _client_for(provider: str) -> AsyncOpenAI:
+    """Build (and cache) the AsyncOpenAI client for a given provider.
+
+    Async because UI-saved credentials live in Postgres — the in-process
+    sync cache is empty in fresh agent containers, so we must do a real DB
+    lookup the first time. credentials.get() handles its own caching with a
+    TTL, so subsequent calls are cheap.
+    """
     settings = get_settings()
     from plata.config import credentials as _creds
     if provider == "google_ai_studio":
-        api_key = _creds.get_sync("google_ai_studio") or (
+        api_key = await _creds.get("google_ai_studio") or (
             settings.google_ai_studio_api_key.get_secret_value()
             if settings.google_ai_studio_api_key else None
         )
@@ -538,7 +563,7 @@ def _client_for(provider: str) -> AsyncOpenAI:
         if not api_key:
             raise RuntimeError("GOOGLE_AI_STUDIO_API_KEY not configured")
     else:  # openrouter (default)
-        api_key = _creds.get_sync("openrouter") or (
+        api_key = await _creds.get("openrouter") or (
             settings.openrouter_api_key.get_secret_value()
             if settings.openrouter_api_key else None
         )
@@ -557,9 +582,18 @@ def _client_for(provider: str) -> AsyncOpenAI:
 
 
 def _client() -> AsyncOpenAI:
-    """Back-compat shim: default OpenRouter client. New code should use
-    `_client_for(_provider_for(model))` to pick the right one."""
-    return _client_for("openrouter")
+    """Back-compat sync shim — used only by legacy callers that build a
+    one-off client outside of LLMClient. Uses sync env/UI-cache lookup.
+    New async code should `await _client_for(provider)` instead."""
+    settings = get_settings()
+    from plata.config import credentials as _creds
+    api_key = _creds.get_sync("openrouter") or (
+        settings.openrouter_api_key.get_secret_value()
+        if settings.openrouter_api_key else None
+    )
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY not configured")
+    return AsyncOpenAI(api_key=api_key, base_url=settings.openrouter_base_url)
 
 
 _BEDROCK_INCOMPATIBLE_KEYS = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
@@ -676,7 +710,11 @@ class LLMClient:
         # per-call via resolve_model() so live config edits take effect.
         self._explicit_model = model
         self.model = model or AGENT_MODELS.get(agent, "anthropic/claude-haiku-4-5")
-        self._openai = _client()
+        # Don't build an AsyncOpenAI client here — _client_for() is awaited
+        # per attempt and picks the right provider for the current model.
+        # Eagerly building OpenRouter in __init__ failed when the only
+        # configured key was Google AI Studio (UI-saved, not in env).
+        self._openai = None
         self._langfuse = get_langfuse_client()
 
     async def _refresh_model(self) -> str:
@@ -749,7 +787,7 @@ class LLMClient:
             clean = {k: v for k, v in kwargs.items() if not k.startswith("_")}
             current_model = clean.get("model") or ""
             provider = _provider_for(current_model)
-            client = _client_for(provider) if provider != "openrouter" else self._openai
+            client = await _client_for(provider)
             if provider == "google_ai_studio":
                 clean["model"] = _strip_provider_prefix(current_model)
                 # Google AI Studio's OpenAI-compat endpoint doesn't accept
