@@ -415,6 +415,24 @@ async def _lifespan(_app: FastAPI):
             await _gr().delete("proposals:last_persist_error")
         except Exception:  # noqa: BLE001
             pass
+        # ONE-SHOT v2.24.169: clear the 10-min garbage_producer cache + reset
+        # the per-model throttle keys. After the chain stopped walking and
+        # left every model in garbage cooldown simultaneously, the new
+        # relax-garbage second pass + per-model throttle need a clean slate.
+        try:
+            r_ = _gr()
+            for key_pat in ("llm:garbage_producer:*", "llm:free_throttle:*"):
+                async for k in r_.scan_iter(match=key_pat, count=200):
+                    await r_.delete(k)
+        except Exception:  # noqa: BLE001
+            pass
+        # Seed the throttle interval default if not set yet.
+        try:
+            cfg = await _gr().hgetall("llm_config") or {}
+            if "free_throttle_sec" not in cfg:
+                await _gr().hset("llm_config", "free_throttle_sec", "6")
+        except Exception:  # noqa: BLE001
+            pass
         while True:
             try:
                 await refresh_free_catalog()

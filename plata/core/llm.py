@@ -265,6 +265,39 @@ async def _is_dead_free(model: str) -> bool:
     return False
 
 
+async def _throttle_free(model: str) -> None:
+    """OpenRouter's free tier throttles per-model. Hammering the same model
+    with rapid calls trips "no endpoints found" / 429s. Enforce a minimum
+    interval between calls to each free model — read from llm_config
+    (`free_throttle_sec`, default 6s → ~10 RPM per model).
+
+    Uses Redis SETNX-with-EX to coordinate across agent processes."""
+    if ":free" not in (model or ""):
+        return
+    try:
+        r = get_redis()
+        cfg = await r.hgetall("llm_config") or {}
+        try:
+            min_sec = float(cfg.get("free_throttle_sec") or 6)
+        except (TypeError, ValueError):
+            min_sec = 6.0
+        if min_sec <= 0:
+            return
+        # Spin until the lock is free. Each iteration: try to take a TTL lock;
+        # if taken (other call in flight) sleep and retry. Caps at ~30s total.
+        deadline = asyncio.get_event_loop().time() + 30
+        while asyncio.get_event_loop().time() < deadline:
+            ok = await r.set(
+                f"llm:free_throttle:{model}", "1",
+                ex=max(1, int(min_sec)), nx=True,
+            )
+            if ok:
+                return
+            await asyncio.sleep(min(1.0, min_sec / 3))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _mark_dead_free(model: str) -> None:
     try:
         r = get_redis()
@@ -274,7 +307,7 @@ async def _mark_dead_free(model: str) -> None:
         pass
 
 
-async def _next_free_candidate(tried: set[str]) -> str | None:
+async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) -> str | None:
     """Walk free-model candidates in priority order:
         1. Static FREE_FALLBACKS (5 battle-tested known-good models)
         2. The agent's configured default free model (from AGENT_MODELS_FREE)
@@ -288,12 +321,14 @@ async def _next_free_candidate(tried: set[str]) -> str | None:
 
     All candidates are filtered by `_is_dead_free()` so the dead-model cache
     and the garbage-producer cooldown skip both apply.
+
+    `relax_garbage=True` does a SECOND-PASS lookup that ignores the
+    10-min garbage-producer cooldown — used when the first pass exhausted
+    every candidate. Better to retry a recently-rate-limited model than
+    give up entirely.
     """
     # 1. Static curated list (priority)
     candidates: list[str] = list(FREE_FALLBACKS)
-    # 2. The agent's per-agent default (in case it's not already in the static)
-    # NB: filled in by caller passing self.agent context isn't done here;
-    # the static list intentionally covers the same models, so this is fine.
     # 3. Live catalog (sorted, deduped against priority items above)
     try:
         live_raw = list(await get_redis().smembers("llm:free_catalog") or [])
@@ -306,8 +341,18 @@ async def _next_free_candidate(tried: set[str]) -> str | None:
     for cand in candidates:
         if cand in tried:
             continue
-        if await _is_dead_free(cand):
+        if cand in PERMANENTLY_RETIRED_FREE:
             continue
+        if relax_garbage:
+            # Only filter by the 24h hard-dead cache, not the 10-min garbage.
+            try:
+                if await get_redis().sismember("llm:dead_free_models", cand):
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            if await _is_dead_free(cand):
+                continue
         return cand
     return None
 
@@ -591,6 +636,9 @@ class LLMClient:
         consumed_retry = 0
         for _try in range(max_attempts):
             try:
+                # Throttle per-model on free tier so we don't trip
+                # OpenRouter's per-model RPM cap. Paid models pass through.
+                await _throttle_free(kwargs.get("model") or "")
                 response = await _attempt_once()
                 break
             except Exception as exc:  # noqa: BLE001
@@ -645,6 +693,20 @@ class LLMClient:
                     tried = set(kwargs.setdefault("_tried_free", []))
                     tried.add(current_model)
                     next_model = await _next_free_candidate(tried)
+                    # Second pass: if first walk exhausted (every other free
+                    # model is in the 10-min garbage cooldown), retry one of
+                    # them anyway. Better to attempt a recently-rate-limited
+                    # model than raise "all exhausted" on a single-model
+                    # Tried list, which was happening repeatedly when
+                    # OpenRouter throttled the whole pool simultaneously.
+                    if not next_model:
+                        next_model = await _next_free_candidate(
+                            tried, relax_garbage=True
+                        )
+                        if next_model:
+                            _log.warning("llm_free_fallback_relaxed",
+                                         agent=self.agent,
+                                         to_model=next_model)
                     if next_model:
                         _log.warning("llm_free_fallback",
                                      from_model=current_model,
