@@ -36,6 +36,13 @@ class Streams:
     EXECUTED_TRADES = "executed_trades:stream"
     TRADE_CLOSURES = "trade_closures:stream"
     HEARTBEATS = "agent_heartbeats:stream"
+    # When the strategist drops a high-sentiment proposal due to weak/missing
+    # historical analogs, it pushes onto this stream. Historian consumes,
+    # researches similar past events via LLM, ingests them into the graph,
+    # then re-publishes the original event to ENRICHED_EVENTS with
+    # `_re_research_done=true` so the strategist re-evaluates with richer
+    # analogs. See plata/agents/historian.py::handle.
+    HISTORIAN_RESEARCH_REQUESTS = "historian_research_requests:stream"
 
     @staticmethod
     def dlq_for(stream: str) -> str:

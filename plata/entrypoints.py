@@ -152,6 +152,7 @@ async def _run_ingestion_hub() -> None:
 
 async def _run_intelligence_sandbox() -> None:
     from plata.agents.graph_ingestion import GraphIngestion
+    from plata.agents.historian import HistorianResearchAgent
     from plata.agents.position_monitor import PositionMonitor
     from plata.agents.reviewer import Reviewer
     from plata.agents.strategist import Strategist
@@ -163,6 +164,7 @@ async def _run_intelligence_sandbox() -> None:
             ("strategist", lambda: Strategist().run()),
             ("reviewer", lambda: Reviewer().run()),
             ("position_monitor", lambda: PositionMonitor().run()),
+            ("historian_research", lambda: HistorianResearchAgent().run()),
         ],
     )
 

@@ -11,6 +11,7 @@ from plata.core.llm import LLMClient
 from plata.core.schemas import (
     AnalogousEvent,
     EnrichedEvent,
+    HistorianResearchRequest,
     Milestone,
     Side,
     TradeProposal,
@@ -229,6 +230,36 @@ class Strategist(BaseAgent):
                     "llm_decision": decision,
                 },
             )
+            # If conditions warrant, fire a follow-up historian research
+            # request. Skip if this event is ITSELF a re-research replay —
+            # otherwise we'd loop. See plata/agents/historian.py.
+            if not getattr(event, "re_research_done", False):
+                try:
+                    from plata.agents.historian import _should_trigger_research
+                    top_sim = max((a.similarity for a in analogs), default=0.0)
+                    if await _should_trigger_research(
+                        sentiment_magnitude=event.sentiment_magnitude,
+                        top_analog_similarity=top_sim,
+                        category=str(event.category),
+                        drop_reason=decision.get("reasoning") or "",
+                    ):
+                        req = HistorianResearchRequest(
+                            triggering_event_ulid=event.ulid,
+                            summary=event.summary or "",
+                            category=event.category,
+                            sentiment_magnitude=event.sentiment_magnitude,
+                            drop_reason=(decision.get("reasoning") or "")[:500],
+                            top_analog_similarity=top_sim,
+                            lookback_years=int(
+                                (await redis.hget("risk_config",
+                                                   "research_lookback_years")) or 5
+                            ),
+                        )
+                        await publish(Streams.HISTORIAN_RESEARCH_REQUESTS, req)
+                        self.log.info("historian_research_requested",
+                                       event_ulid=event.ulid, top_sim=top_sim)
+                except Exception:  # noqa: BLE001
+                    pass
             return
 
         milestones: list[Milestone] = []

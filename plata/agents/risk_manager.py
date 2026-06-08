@@ -64,6 +64,15 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     # details" panel. Paper accounts default to $10k; bump to match your
     # live account if you wire one up.
     "account_baseline_equity_usd": "10000",
+    # Historian follow-up research — when a high-sentiment event is dropped
+    # because its top analog is weak / reasoning says "no precedent", the
+    # historian fires an LLM call to enumerate real similar past events,
+    # ingests them into the graph, and re-publishes the original event so
+    # the strategist re-evaluates with the richer analog pool.
+    "research_min_sentiment": "0.6",
+    "research_max_analog_score": "0.85",
+    "research_lookback_years": "5",
+    "research_max_per_day": "20",
 }
 
 

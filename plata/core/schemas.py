@@ -124,6 +124,11 @@ class EnrichedEvent(StreamMessage):
     entities: list[EntityRef] = Field(default_factory=list)
     # Filled by oracle backfill (mirrored from Postgres for hot-path use)
     price_impact: dict[str, dict[str, float]] | None = None
+    # Set when historian has just finished a follow-up research pass and
+    # re-published the event so the strategist can re-evaluate with fresh
+    # analogs. Lets the strategist skip the event-ulid dedup guard for
+    # this one specific replay. See Streams.HISTORIAN_RESEARCH_REQUESTS.
+    re_research_done: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +234,23 @@ class TradeClosure(StreamMessage):
 # ---------------------------------------------------------------------------
 # System / heartbeat
 # ---------------------------------------------------------------------------
+
+class HistorianResearchRequest(StreamMessage):
+    """Fired by the strategist when a high-sentiment event is dropped due to
+    weak/missing historical analogs. Historian picks it up, asks the LLM for
+    real similar past events, ingests them into the graph (so they're
+    embed-searchable), and re-publishes the original event with
+    `re_research_done=True` so the strategist gets a second pass with the
+    fresh analog pool."""
+
+    triggering_event_ulid: str
+    summary: str
+    category: EventCategory
+    sentiment_magnitude: float
+    drop_reason: str
+    top_analog_similarity: float = 0.0
+    lookback_years: int = 5
+
 
 class AgentHeartbeat(StreamMessage):
     agent: str

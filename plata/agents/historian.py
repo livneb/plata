@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime
 from typing import Any
 
@@ -240,6 +241,281 @@ async def seed(
         "failed_batches": failed,
     })
     _log.info("historian_seed_complete", total=written)
+
+
+# ---------------------------------------------------------------------------
+# Live consumer: HistorianResearchAgent
+#
+# Listens on Streams.HISTORIAN_RESEARCH_REQUESTS. Fired by the strategist
+# when a high-sentiment event is dropped due to weak/missing historical
+# analogs. The agent asks the LLM for ~6 real similar past events, ingests
+# each into the graph (so they become embed-searchable), and re-publishes
+# the original event back to ENRICHED_EVENTS with `re_research_done=True`
+# so the strategist re-evaluates with the now-richer analog pool.
+# ---------------------------------------------------------------------------
+
+RESEARCH_BATCH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["events"],
+    "properties": {
+        "events": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["date", "category", "narrative", "affected_assets"],
+                "properties": {
+                    "date": {"type": "string", "description": "YYYY-MM-DD"},
+                    "category": {"type": "string"},
+                    "affected_assets": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+                    "narrative": {"type": "string", "minLength": 40, "maxLength": 600},
+                    "observed_impact": {"type": "string", "maxLength": 300,
+                                          "description": "What happened to the named assets in the days/weeks after."},
+                },
+            },
+        },
+    },
+}
+
+RESEARCH_SYSTEM = """You are a financial historian.
+
+You will be given a recent event whose strategic implications are unclear because the
+similarity search produced no concrete historical analogs with observable price data.
+
+Your job: enumerate up to 8 REAL past events from the lookback window that are
+structurally similar to the current event, and describe each one's observable market
+impact. Be specific (real dates, named entities, accurate factual claims). Do not
+fabricate events. If you can't think of strong analogs, return fewer events rather
+than padding with weak ones.
+Output JSON only, matching the schema."""
+
+
+async def _should_trigger_research(
+    *, sentiment_magnitude: float, top_analog_similarity: float, category: str,
+    drop_reason: str | None,
+) -> bool:
+    """Conservative trigger: only fire on high-sentiment events whose top
+    analog is weak AND whose drop reasoning indicates lack of evidence.
+    All thresholds live in risk_config so they're tunable from /settings/."""
+    from plata.core.bus import get_redis
+    try:
+        cfg = await get_redis().hgetall("risk_config") or {}
+        min_sent = float(cfg.get("research_min_sentiment") or 0.6)
+        max_top = float(cfg.get("research_max_analog_score") or 0.85)
+    except Exception:  # noqa: BLE001
+        min_sent, max_top = 0.6, 0.85
+    if sentiment_magnitude < min_sent:
+        return False
+    if top_analog_similarity >= max_top:
+        # We already have a strong analog; deeper research unlikely to help.
+        return False
+    # Heuristic on the LLM's drop reasoning — it tends to say one of these
+    # when the issue is genuinely lack of evidence (rather than e.g.
+    # "low conviction because direction is ambiguous").
+    if not drop_reason:
+        return True  # missing reasoning → assume worth researching
+    low = drop_reason.lower()
+    return any(s in low for s in (
+        "no historical analog", "no analog", "insufficient evidence",
+        "no concrete", "lack of", "no clear precedent",
+        "no relevant historical", "no comparable",
+    ))
+
+
+async def _research_daily_count() -> int:
+    from datetime import date as _date
+    from plata.core.bus import get_redis
+    try:
+        v = await get_redis().get(f"historian:research:daily:{_date.today().isoformat()}")
+        return int(v or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+async def _research_daily_cap() -> int:
+    from plata.core.bus import get_redis
+    try:
+        cfg = await get_redis().hgetall("risk_config") or {}
+        return int(cfg.get("research_max_per_day") or 20)
+    except Exception:  # noqa: BLE001
+        return 20
+
+
+class HistorianResearchAgent:
+    """Consumer-style agent for follow-up research requests.
+
+    Not a `BaseAgent` subclass because that ties in to the workflow-Kanban
+    activity stream — this is a side-band researcher, not part of the main
+    proposal pipeline. Spawned from `entrypoints._run_intelligence_sandbox`.
+    """
+
+    name = "historian"
+    input_stream: str  # filled at runtime from Streams.HISTORIAN_RESEARCH_REQUESTS
+    group = "historian-research-grp"
+
+    def __init__(self) -> None:
+        from plata.core.bus import Streams
+        from plata.core.observability import get_logger as _gl
+        self.input_stream = Streams.HISTORIAN_RESEARCH_REQUESTS
+        self.log = _gl(self.name)
+        self._llm = LLMClient(self.name)
+
+    async def run(self) -> None:
+        from plata.core.bus import consume, ack, ensure_consumer_group
+        await ensure_indexes()
+        await ensure_consumer_group(self.input_stream, self.group)
+        consumer_name = f"{self.name}-{os.environ.get('HOSTNAME', 'local')}"
+        async for msg in consume(self.input_stream, self.group, consumer_name):
+            try:
+                await self.handle(msg.payload)
+            except Exception as exc:  # noqa: BLE001
+                self.log.exception("historian_research_failed", error=str(exc)[:200])
+                try:
+                    from plata.core.error_reporter import get_error_reporter
+                    await get_error_reporter().capture_exception(
+                        exc, agent=self.name, severity="ERROR",
+                        context={"redis_id": msg.redis_id, "phase": "research"},
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            finally:
+                await ack(self.input_stream, self.group, msg.redis_id)
+
+    async def handle(self, payload: dict[str, Any]) -> None:
+        from plata.core.bus import get_redis, publish, Streams
+        from plata.core.schemas import EnrichedEvent
+        redis = get_redis()
+        # Daily cap.
+        today_count = await _research_daily_count()
+        cap = await _research_daily_cap()
+        if today_count >= cap:
+            self.log.info("historian_research_skipped_daily_cap",
+                          count=today_count, cap=cap)
+            return
+        req_ulid = payload.get("triggering_event_ulid")
+        summary = payload.get("summary") or ""
+        category = payload.get("category") or "other"
+        lookback_years = int(payload.get("lookback_years") or 5)
+        if not req_ulid or not summary:
+            return
+        # Idempotency: don't research the same event twice within 7 days.
+        seen_key = f"historian:research:seen:{req_ulid}"
+        if await redis.exists(seen_key):
+            self.log.info("historian_research_already_done", ulid=req_ulid)
+            return
+        await redis.setex(seen_key, 7 * 24 * 3600, "1")
+        # Bump daily counter.
+        from datetime import date as _date
+        await redis.incr(f"historian:research:daily:{_date.today().isoformat()}")
+        await redis.expire(f"historian:research:daily:{_date.today().isoformat()}",
+                            48 * 3600)
+
+        prompt = (
+            f"CURRENT EVENT (no strong analogs found):\n"
+            f"category: {category}\n"
+            f"summary: {summary}\n\n"
+            f"LOOKBACK: last {lookback_years} years.\n\n"
+            f"Enumerate up to 8 real past events from this window that are structurally "
+            f"similar (same category / mechanism / asset class). For each, give the date, "
+            f"category, the directly affected tickers / instruments, a 1-3 sentence "
+            f"narrative, and what was observed in price action after."
+        )
+        try:
+            data = await self._llm.structured(
+                messages=[
+                    {"role": "system", "content": RESEARCH_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                schema=RESEARCH_BATCH_SCHEMA,
+                schema_name="historian_research_batch",
+                metadata={"triggering_event_ulid": req_ulid},
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log.warning("historian_research_llm_failed",
+                             ulid=req_ulid, error=str(exc)[:200])
+            return
+
+        new_events = data.get("events") or []
+        ingested = 0
+        for ev in new_events:
+            try:
+                ts = datetime.fromisoformat(ev["date"])
+            except Exception:
+                continue
+            event_ulid = new_ulid()
+            try:
+                embedding = await embed(ev["narrative"], input_type="document")
+            except Exception as exc:  # noqa: BLE001
+                self.log.warning("historian_research_embed_failed",
+                                 error=str(exc)[:160])
+                continue
+            entity_refs = [
+                EntityRef(type=EntityType.TICKER, id=str(a).upper(), name=str(a),
+                          sentiment=-0.2)
+                for a in (ev.get("affected_assets") or [])[:8]
+            ]
+            try:
+                await upsert_event(
+                    ulid=event_ulid,
+                    summary=ev["narrative"],
+                    embedding=embedding,
+                    source=SignalSource.HISTORIAN.value,
+                    category=ev.get("category", category),
+                    ts=ts,
+                    entity_refs=[r.model_dump() for r in entity_refs],
+                    extra={
+                        "research_for_ulid": req_ulid,
+                        "observed_impact": ev.get("observed_impact"),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.log.warning("historian_research_upsert_failed",
+                                 error=str(exc)[:160])
+                continue
+            # Best-effort price-impact backfill for the most-relevant symbol.
+            symbols = symbols_for_entities(entity_refs)
+            for sym in symbols[:2]:
+                try:
+                    metrics = await compute_and_store(
+                        event_ulid=event_ulid, symbol=sym, event_ts=ts
+                    )
+                    if metrics:
+                        await attach_price_impact(event_ulid, sym, metrics)
+                except Exception:  # noqa: BLE001
+                    pass
+            ingested += 1
+
+        self.log.info("historian_research_done",
+                      ulid=req_ulid, ingested=ingested, total=len(new_events))
+
+        # Re-publish the original event with re_research_done=True so the
+        # strategist re-evaluates with the now-richer analog pool. Pull the
+        # full original event from the graph so we don't lose fields.
+        try:
+            from plata.core.graph import get_event
+            doc = await get_event(req_ulid) or {}
+        except Exception:  # noqa: BLE001
+            doc = {}
+        try:
+            replay = EnrichedEvent(
+                source_signal_ulid=doc.get("source_signal_ulid") or req_ulid,
+                source=doc.get("source") or SignalSource.HISTORIAN.value,
+                summary=doc.get("summary") or summary,
+                category=doc.get("category") or category,
+                sentiment_magnitude=float(doc.get("sentiment_magnitude")
+                                           or payload.get("sentiment_magnitude") or 0.6),
+                entities=[],  # entities aren't required for re-eval
+                re_research_done=True,
+            )
+            await publish(Streams.ENRICHED_EVENTS, replay)
+            self.log.info("historian_research_re_published",
+                          original_ulid=req_ulid, new_ulid=replay.ulid)
+        except Exception as exc:  # noqa: BLE001
+            self.log.warning("historian_research_re_publish_failed",
+                             error=str(exc)[:200])
 
 
 if __name__ == "__main__":  # pragma: no cover
