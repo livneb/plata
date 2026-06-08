@@ -465,11 +465,14 @@
             </label>
           </div>
           {% if llm_auto_active_free %}
+          {# Use formaction/formmethod on the button — a nested <form> here
+             silently closes the outer form in every browser, dropping
+             default_free_provider / default_paid_model / per-agent
+             overrides from the submit. #}
           <div class="mt-3 p-2 rounded border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-xs">
             ⚠ Auto mode is currently <b>pinned to free</b> (OpenRouter returned an out-of-credits error within the last hour).
-            <form method="post" action="/settings/llm/clear_free_pin" class="inline">
-              <button type="submit" class="text-blue-500 hover:underline ml-2">Clear pin now</button>
-            </form>
+            <button type="submit" formaction="/settings/llm/clear_free_pin" formmethod="post"
+                    class="text-blue-500 hover:underline ml-2 bg-transparent border-0 p-0 cursor-pointer">Clear pin now</button>
           </div>
           {% endif %}
         </div>
