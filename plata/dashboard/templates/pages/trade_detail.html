@@ -35,13 +35,16 @@
       {# When open: show LIVE current price (replaces "Exit") and live notional (replaces "Notional at close") #}
       {% if not trade.closed_at and live.price %}
       <div><div class="text-[10px] uppercase text-gray-500" title="Live mark-to-market price from the symbol watch (5-min cadence).">Current price <span class="text-[9px] text-emerald-500 animate-pulse">●</span></div>
+        {# Color is PnL-aware: for SHORT, price-up is a loss, so flip the sign. #}
+        {% set side_sign = -1 if (trade.side and trade.side|string|lower == 'short') else 1 %}
+        {% set pnl_pct = (live.price_pct or 0) * side_sign %}
         <div class="font-mono font-semibold" id="current-price">{{ '%.4f' % live.price }}
-          <span class="ml-1 text-[10px] {% if live.price_pct > 0 %}text-green-500{% elif live.price_pct < 0 %}text-red-500{% else %}text-gray-400{% endif %}"
-                title="(current − entry) / entry × 100% — sign-agnostic price drift.">
+          <span class="ml-1 text-[10px] {% if pnl_pct > 0 %}text-green-500{% elif pnl_pct < 0 %}text-red-500{% else %}text-gray-400{% endif %}"
+                title="(current − entry) / entry × 100%, signed for trade direction. Long: price-up is green. Short: price-up is red (loss).">
             {% if live.price_pct > 0 %}+{% endif %}{{ '%.2f' % live.price_pct }}%
           </span>
         </div></div>
-      <div><div class="text-[10px] uppercase text-gray-500" title="Current value of the position = qty × current price (USD). Updates with each sampler tick.">Notional now</div>
+      <div><div class="text-[10px] uppercase text-gray-500" title="Current mark-to-market value of the position = qty × current price (USD). For a SHORT, an increase means it would cost more to buy back — a loss. Updates with each sampler tick.">Notional now</div>
         <div class="font-mono" id="notional-now">${{ '{:,.2f}'.format(live.notional_now) }}</div></div>
       {% else %}
       <div><div class="text-[10px] uppercase text-gray-500">Exit</div><div>{{ trade.exit_price or '—' }}</div></div>
