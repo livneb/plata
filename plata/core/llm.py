@@ -60,25 +60,35 @@ AGENT_MODELS_FREE: dict[str, str] = {
     "strategist":      "deepseek/deepseek-chat:free",
     "reviewer":        "deepseek/deepseek-chat:free",
     "historian":       "deepseek/deepseek-chat:free",
-    "risk_manager":    "google/gemini-2.0-flash-exp:free",
+    "risk_manager":    "qwen/qwen-2.5-72b-instruct:free",
     "scraper":         "qwen/qwen-2.5-72b-instruct:free",
-    "position_monitor":"google/gemini-2.0-flash-exp:free",
-    "translator":      "google/gemini-2.0-flash-exp:free",
+    "position_monitor":"qwen/qwen-2.5-72b-instruct:free",
+    "translator":      "qwen/qwen-2.5-72b-instruct:free",
 }
 
 # Fallback chain for any free model that's currently 404 / 429 / dead.
-# Kept short and battle-tested. mistral-small-24b-instruct-2501 used to be
-# here but OpenRouter retired its free variant — left out so we don't waste
-# attempts on it. Dynamically-discovered dead models are cached in Redis
+# Kept short and battle-tested. Retired-by-OpenRouter models stay out:
+#   - mistral-small-24b-instruct-2501:free (retired ~v2.24.140)
+#   - google/gemini-2.0-flash-exp:free (returns persistent "no endpoints
+#     found" — removed v2.24.167 after 31x reviewer/graph_ingestion errors)
+# Dynamically-discovered dead models are cached in Redis
 # (key `llm:dead_free_models`, set, 24h TTL) and pre-filtered before each
 # call, so this static list is the safety net, not the only mechanism.
 FREE_FALLBACKS: list[str] = [
     "deepseek/deepseek-chat:free",
     "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemini-2.0-flash-exp:free",
     "qwen/qwen-2.5-72b-instruct:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
+    "deepseek/deepseek-r1:free",
 ]
+
+# Permanently retired free models — always treated as dead regardless of
+# what Redis cache or OpenRouter catalog says. Belt-and-suspenders so we
+# never select these as the initial model either.
+PERMANENTLY_RETIRED_FREE: frozenset[str] = frozenset({
+    "google/gemini-2.0-flash-exp:free",
+    "mistralai/mistral-small-24b-instruct-2501:free",
+})
 
 
 async def refresh_free_catalog() -> int:
@@ -112,6 +122,8 @@ async def refresh_free_catalog() -> int:
         except (TypeError, ValueError):
             continue
         if prompt_p == 0 and comp_p == 0:
+            if slug in PERMANENTLY_RETIRED_FREE:
+                continue
             free.append(slug)
     if not free:
         _log.warning("free_catalog_refresh_empty", item_count=len(data.get("data") or []))
@@ -122,10 +134,37 @@ async def refresh_free_catalog() -> int:
         pipe.delete("llm:free_catalog")
         pipe.sadd("llm:free_catalog", *free)
         pipe.expire("llm:free_catalog", 48 * 3600)  # 2-day safety margin
+        # Mark every permanently-retired model as dead so the dead-cache stays
+        # authoritative for them too (24h TTL, refreshed on every scan).
+        if PERMANENTLY_RETIRED_FREE:
+            pipe.sadd("llm:dead_free_models", *PERMANENTLY_RETIRED_FREE)
+            pipe.expire("llm:dead_free_models", 24 * 3600)
         await pipe.execute()
     except Exception as exc:  # noqa: BLE001
         _log.warning("free_catalog_redis_write_failed", error=str(exc)[:160])
         return 0
+    # Reconcile per-agent defaults: if an agent's configured default isn't in
+    # the live catalog, repoint it at the first surviving FREE_FALLBACKS entry.
+    # Write to `llm_config` so resolve_model() picks it up automatically;
+    # don't mutate the in-process AGENT_MODELS_FREE dict (other workers see
+    # the Redis hash instantly, the dict only when they restart).
+    try:
+        live = set(free)
+        repointed: dict[str, str] = {}
+        for agent, default_model in AGENT_MODELS_FREE.items():
+            if default_model in live:
+                continue
+            replacement = next((m for m in FREE_FALLBACKS if m in live), None)
+            if not replacement:
+                replacement = next(iter(sorted(live)), None)
+            if replacement and replacement != default_model:
+                repointed[f"override:{agent}"] = replacement
+        if repointed:
+            await get_redis().hset("llm_config", mapping=repointed)
+            _log.info("free_catalog_repointed_agents", count=len(repointed),
+                      mapping=repointed)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("free_catalog_repoint_failed", error=str(exc)[:160])
     _log.info("free_catalog_refreshed", count=len(free))
     return len(free)
 
@@ -181,6 +220,8 @@ async def _is_dead_free(model: str) -> bool:
     Two TTLs: dead-cache is 24h, garbage-producer is 10 min."""
     if ":free" not in (model or ""):
         return False
+    if model in PERMANENTLY_RETIRED_FREE:
+        return True
     try:
         r = get_redis()
         if await r.sismember("llm:dead_free_models", model):
@@ -244,10 +285,8 @@ MODEL_CATALOG_FREE: list[str] = [
     "meta-llama/llama-3.3-70b-instruct:free",
     "deepseek/deepseek-r1:free",
     "deepseek/deepseek-chat:free",
-    "google/gemini-2.0-flash-exp:free",
     "qwen/qwen-2.5-72b-instruct:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
-    "mistralai/mistral-small-24b-instruct-2501:free",
 ]
 MODEL_CATALOG_PAID: list[str] = [
     "anthropic/claude-sonnet-4-6",
