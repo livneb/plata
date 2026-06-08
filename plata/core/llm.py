@@ -148,21 +148,53 @@ async def refresh_free_catalog() -> int:
     # Write to `llm_config` so resolve_model() picks it up automatically;
     # don't mutate the in-process AGENT_MODELS_FREE dict (other workers see
     # the Redis hash instantly, the dict only when they restart).
+    # Also: scrub any pre-existing override:<agent> that points to a
+    # retired model — otherwise old Redis state pins agents to a dead model
+    # forever even after a deploy that drops it from the defaults.
     try:
         live = set(free)
+        r_ = get_redis()
+        existing_cfg = await r_.hgetall("llm_config") or {}
         repointed: dict[str, str] = {}
+        to_delete: list[str] = []
+        agents_seen: set[str] = set()
+        # Existing overrides first
+        for k, v in existing_cfg.items():
+            if not k.startswith("override:"):
+                continue
+            agent = k.split(":", 1)[1]
+            agents_seen.add(agent)
+            if v in PERMANENTLY_RETIRED_FREE or (v.endswith(":free") and v not in live):
+                replacement = next((m for m in FREE_FALLBACKS if m in live), None) \
+                    or next(iter(sorted(live)), None)
+                if replacement and replacement != v:
+                    repointed[k] = replacement
+                else:
+                    to_delete.append(k)
+        # Then any AGENT_MODELS_FREE default that's stale and not yet overridden
         for agent, default_model in AGENT_MODELS_FREE.items():
+            if agent in agents_seen:
+                continue
             if default_model in live:
                 continue
-            replacement = next((m for m in FREE_FALLBACKS if m in live), None)
-            if not replacement:
-                replacement = next(iter(sorted(live)), None)
+            replacement = next((m for m in FREE_FALLBACKS if m in live), None) \
+                or next(iter(sorted(live)), None)
             if replacement and replacement != default_model:
                 repointed[f"override:{agent}"] = replacement
         if repointed:
-            await get_redis().hset("llm_config", mapping=repointed)
-            _log.info("free_catalog_repointed_agents", count=len(repointed),
-                      mapping=repointed)
+            await r_.hset("llm_config", mapping=repointed)
+        if to_delete:
+            await r_.hdel("llm_config", *to_delete)
+        # If the sticky auto-active pin points at a retired model, wipe it.
+        try:
+            pinned = await r_.get("llm_config:auto_active_free")
+            if pinned and pinned in PERMANENTLY_RETIRED_FREE:
+                await r_.delete("llm_config:auto_active_free")
+        except Exception:  # noqa: BLE001
+            pass
+        if repointed or to_delete:
+            _log.info("free_catalog_reconciled",
+                      repointed=len(repointed), deleted=len(to_delete))
     except Exception as exc:  # noqa: BLE001
         _log.warning("free_catalog_repoint_failed", error=str(exc)[:160])
     _log.info("free_catalog_refreshed", count=len(free))
@@ -316,7 +348,7 @@ async def resolve_model(agent: str) -> tuple[str, str]:
     if override:
         return override, mode
     if mode == "free":
-        return AGENT_MODELS_FREE.get(agent, "google/gemini-2.0-flash-exp:free"), mode
+        return AGENT_MODELS_FREE.get(agent, FREE_FALLBACKS[0]), mode
     if mode == "auto":
         # If we recently hit 402, stay on free until the sticky pin expires.
         try:
@@ -324,7 +356,7 @@ async def resolve_model(agent: str) -> tuple[str, str]:
         except Exception:  # noqa: BLE001
             pinned = None
         if pinned:
-            return AGENT_MODELS_FREE.get(agent, "google/gemini-2.0-flash-exp:free"), "auto-free"
+            return AGENT_MODELS_FREE.get(agent, FREE_FALLBACKS[0]), "auto-free"
     return AGENT_MODELS.get(agent, "anthropic/claude-haiku-4-5"), mode
 
 
@@ -673,7 +705,7 @@ class LLMClient:
                     if (cfg.get("mode") or "paid").lower() == "auto" \
                             and not kwargs.get("_already_fallback"):
                         free_model = AGENT_MODELS_FREE.get(
-                            self.agent, "google/gemini-2.0-flash-exp:free"
+                            self.agent, FREE_FALLBACKS[0]
                         )
                         _log.warning("llm_auto_fallback_to_free",
                                      agent=self.agent, from_model=self.model,
