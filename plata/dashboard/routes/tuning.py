@@ -28,10 +28,18 @@ async def index(request: Request):
                 .order_by(_desc(AuditLog.ts))
                 .limit(50)
             )).scalars().all()
+        seen: set[tuple] = set()
         for a in audits:
             p = a.payload or {}
             if (p.get("status") or "pending") != "pending":
                 continue
+            # Dedup: collapse repeat proposals with the same (key, old, new).
+            # Reviewer can fire the same suggestion every 25 closures; only
+            # show the newest. audits are already ordered by ts desc.
+            dedup_key = (p.get("key"), str(p.get("old")), str(p.get("new")))
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
             tuning_rows.append({
                 "id": a.id, "ts": a.ts, "key": p.get("key"),
                 "old": p.get("old"), "new": p.get("new"),
