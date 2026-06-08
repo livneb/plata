@@ -393,8 +393,20 @@ async def _lifespan(_app: FastAPI):
     # Keeps `llm:free_catalog` Redis set current so when OpenRouter retires
     # or adds free models, Plata picks the change up the next day.
     async def _free_catalog_refresher() -> None:
+        from plata.core.bus import get_redis as _gr
         from plata.core.llm import refresh_free_catalog
         await _asyncio.sleep(5)  # let the dashboard finish booting
+        # ONE-SHOT v2.24.164 cleanup: the v2.24.158 classification wrongly
+        # marked "no endpoints found" as PERMANENT 24h-dead. As a result
+        # the curated FREE_FALLBACKS (llama / deepseek / gemini / qwen /
+        # hermes) all ended up cached as dead, so chain walks always
+        # skipped them and used obscure live-catalog models that 429'd.
+        # Clear the set so the new (correct) classification can re-evaluate.
+        try:
+            await _gr().delete("llm:dead_free_models")
+            _log.info("llm_dead_free_set_cleared_for_reclassification")
+        except Exception:  # noqa: BLE001
+            pass
         while True:
             try:
                 await refresh_free_catalog()

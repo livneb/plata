@@ -536,31 +536,43 @@ class LLMClient:
                         kwargs["max_tokens"] = affordable
                         _log.warning("llm_max_tokens_shrunk", new_max=affordable)
                         continue
-                # Free-pool failure classification:
-                #   PERMANENT (model is dead for free tier; cache as dead 24h)
+                # Free-pool failure classification (re-derived in v2.24.164):
+                #   PERMANENT (mark dead 24h)
                 #     - "unavailable for free" (OpenRouter explicit retirement)
-                #     - "no endpoints found" (no providers active right now)
-                #     - "404"
-                #   TRANSIENT (model alive but capped; don't cache as dead)
+                #     - "response_format is not supported" (model can't do
+                #       structured output at all)
+                #   TRANSIENT (10-min garbage cooldown; model may come back)
+                #     - "no endpoints found" (provider pool is loaded RIGHT NOW)
+                #     - 404 (could be misconfig OR temporary)
                 #     - "rate limit" / "429"
                 # Both walk FREE_FALLBACKS to the next non-tried non-dead model.
                 current_model = kwargs.get("model") or ""
                 is_free = ":free" in current_model
                 is_perm_unavail = is_free and (
                     "unavailable for free" in low
-                    or "no endpoints found" in low
-                    or "404" in msg
-                    # "response_format is not supported by this model"
-                    # — model is permanently incapable of structured output,
-                    # don't keep trying it.
                     or "response_format is not supported" in low
-                    or "response_format" in low and "not supported" in low
+                    or ("response_format" in low and "not supported" in low)
+                )
+                is_transient = is_free and (
+                    "no endpoints found" in low
+                    or "404" in msg
+                    or "rate limit" in low
+                    or "429" in msg
                 )
                 is_transient = is_free and (
                     "rate limit" in low or "429" in msg
                 )
                 if is_perm_unavail:
                     await _mark_dead_free(current_model)
+                elif is_transient:
+                    # Short cooldown so we don't keep hitting the same
+                    # overloaded model within minutes. Re-tries after 10 min.
+                    try:
+                        await get_redis().setex(
+                            f"llm:garbage_producer:{current_model}", 600, "1"
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                 if is_perm_unavail or is_transient:
                     tried = set(kwargs.setdefault("_tried_free", []))
                     tried.add(current_model)
