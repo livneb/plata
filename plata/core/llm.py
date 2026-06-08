@@ -559,9 +559,6 @@ class LLMClient:
                     or "rate limit" in low
                     or "429" in msg
                 )
-                is_transient = is_free and (
-                    "rate limit" in low or "429" in msg
-                )
                 if is_perm_unavail:
                     await _mark_dead_free(current_model)
                 elif is_transient:
