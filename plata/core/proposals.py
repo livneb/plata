@@ -196,6 +196,14 @@ async def _record_drop_attempt(values: dict) -> Exception | None:
                 index_elements=["proposal_ulid"]
             )
             await session.execute(stmt)
+        # First successful write after a streak of failures should clear the
+        # sysop banner — otherwise the "1h ago" stale message lingers for
+        # 7 days. Cheap del; tolerate Redis errors silently.
+        try:
+            from plata.core.bus import get_redis
+            await get_redis().delete("proposals:last_persist_error")
+        except Exception:  # noqa: BLE001
+            pass
         return None
     except Exception as exc:  # noqa: BLE001
         return exc
