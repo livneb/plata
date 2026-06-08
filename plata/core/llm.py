@@ -378,6 +378,8 @@ async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) 
             continue
         if not _matches_provider_preference(cand, preference):
             continue
+        if _provider_for(cand) in _UNREACHABLE_PROVIDERS:
+            continue
         try:
             if await get_redis().sismember("llm:dead_free_models", cand):
                 continue
@@ -400,6 +402,8 @@ async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) 
         if cand in PERMANENTLY_RETIRED_FREE:
             continue
         if not _matches_provider_preference(cand, preference):
+            continue
+        if _provider_for(cand) in _UNREACHABLE_PROVIDERS:
             continue
         if relax_garbage:
             # Only filter by the 24h hard-dead cache, not the 10-min garbage.
@@ -523,6 +527,11 @@ def _strip_provider_prefix(model: str) -> str:
 # Cached AsyncOpenAI clients, keyed by `(provider, api_key)` so a credential
 # rotation invalidates only the rotated client, not all of them.
 _OPENAI_CLIENT_CACHE: dict[tuple[str, str], AsyncOpenAI] = {}
+
+# Providers we've already confirmed unconfigured in this process (no env var,
+# no UI cred, or decrypt failed). Skipped by the chain walk so we don't keep
+# walking to candidates that are guaranteed to RuntimeError.
+_UNREACHABLE_PROVIDERS: set[str] = set()
 
 
 def _is_provider_configured(provider: str) -> bool:
@@ -751,6 +760,16 @@ class LLMClient:
                           agent=self.agent,
                           from_model=self.model, to_model=next_model)
                 self.model = next_model
+        # Same idea for unreachable-provider models: if our starting model
+        # is e.g. google-ai-studio/... but we have no Google key wired into
+        # this process, swap to a reachable free candidate up front.
+        if _provider_for(self.model) in _UNREACHABLE_PROVIDERS:
+            next_model = await _next_free_candidate({self.model})
+            if next_model:
+                _log.info("llm_skip_unreachable_provider",
+                          agent=self.agent,
+                          from_model=self.model, to_model=next_model)
+                self.model = next_model
         trace = None
         if self._langfuse and hasattr(self._langfuse, "trace"):
             try:
@@ -787,7 +806,20 @@ class LLMClient:
             clean = {k: v for k, v in kwargs.items() if not k.startswith("_")}
             current_model = clean.get("model") or ""
             provider = _provider_for(current_model)
-            client = await _client_for(provider)
+            try:
+                client = await _client_for(provider)
+            except RuntimeError as exc:
+                # Provider not configured. Don't crash the agent — mark
+                # the provider as unreachable for the rest of this process
+                # and re-raise as a transient-looking error so the chain
+                # walks to the next candidate.
+                _UNREACHABLE_PROVIDERS.add(provider)
+                _log.warning("llm_provider_unconfigured_skip",
+                              provider=provider, model=current_model,
+                              error=str(exc)[:160])
+                raise RuntimeError(
+                    f"provider_unreachable: {provider} — {exc}"
+                ) from exc
             if provider == "google_ai_studio":
                 clean["model"] = _strip_provider_prefix(current_model)
                 # Google AI Studio's OpenAI-compat endpoint doesn't accept
@@ -857,6 +889,7 @@ class LLMClient:
                     or "404" in msg
                     or "rate limit" in low
                     or "429" in msg
+                    or "provider_unreachable" in msg
                 )
                 if is_perm_unavail:
                     await _mark_dead_free(current_model)
