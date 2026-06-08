@@ -163,48 +163,27 @@ async def refresh_free_catalog() -> int:
     except Exception as exc:  # noqa: BLE001
         _log.warning("free_catalog_redis_write_failed", error=str(exc)[:160])
         return 0
-    # Reconcile per-agent defaults: if an agent's configured default isn't in
-    # the live catalog, repoint it at the first surviving FREE_FALLBACKS entry.
-    # Write to `llm_config` so resolve_model() picks it up automatically;
-    # don't mutate the in-process AGENT_MODELS_FREE dict (other workers see
-    # the Redis hash instantly, the dict only when they restart).
-    # Also: scrub any pre-existing override:<agent> that points to a
-    # retired model — otherwise old Redis state pins agents to a dead model
-    # forever even after a deploy that drops it from the defaults.
+    # Limited reconciliation: ONLY scrub overrides that point at a
+    # permanently-retired model (where there's no possible recovery). Do
+    # NOT auto-write new overrides — the chain walk handles stale defaults
+    # at call time, and the operator's "(default)" / explicit choice in
+    # /settings/?tab=models is authoritative. Pre-v2.24.178 we used to
+    # repoint stale defaults via auto-written overrides, which fought the
+    # operator: clearing an override on the UI would silently reappear at
+    # the next catalog refresh.
     try:
-        live = set(free)
         r_ = get_redis()
         existing_cfg = await r_.hgetall("llm_config") or {}
-        repointed: dict[str, str] = {}
         to_delete: list[str] = []
-        agents_seen: set[str] = set()
-        # Existing overrides first
         for k, v in existing_cfg.items():
             if not k.startswith("override:"):
                 continue
-            agent = k.split(":", 1)[1]
-            agents_seen.add(agent)
-            if v in PERMANENTLY_RETIRED_FREE or (v.endswith(":free") and v not in live):
-                replacement = next((m for m in FREE_FALLBACKS if m in live), None) \
-                    or next(iter(sorted(live)), None)
-                if replacement and replacement != v:
-                    repointed[k] = replacement
-                else:
-                    to_delete.append(k)
-        # Then any AGENT_MODELS_FREE default that's stale and not yet overridden
-        for agent, default_model in AGENT_MODELS_FREE.items():
-            if agent in agents_seen:
-                continue
-            if default_model in live:
-                continue
-            replacement = next((m for m in FREE_FALLBACKS if m in live), None) \
-                or next(iter(sorted(live)), None)
-            if replacement and replacement != default_model:
-                repointed[f"override:{agent}"] = replacement
-        if repointed:
-            await r_.hset("llm_config", mapping=repointed)
+            if v in PERMANENTLY_RETIRED_FREE:
+                to_delete.append(k)
         if to_delete:
             await r_.hdel("llm_config", *to_delete)
+            _log.info("override_scrubbed_retired", count=len(to_delete),
+                      keys=to_delete)
         # If the sticky auto-active pin points at a retired model, wipe it.
         try:
             pinned = await r_.get("llm_config:auto_active_free")
