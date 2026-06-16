@@ -127,7 +127,21 @@
         <td class="px-3 py-2 text-right font-mono text-xs">{{ '%.4f' % (t.entry_price | float) if t.entry_price else '—' }}</td>
         <td class="px-3 py-2 text-right font-mono text-xs">
           {% if t.qty and t.entry_price %}
-            ${{ '{:,.2f}'.format((t.qty | float) * (t.entry_price | float)) }}
+            {% set entry_notional = (t.qty | float) * (t.entry_price | float) %}
+            ${{ '{:,.2f}'.format(entry_notional) }}
+            {# Current notional underneath — qty × current (open) or × exit (closed).
+               Color is PnL-aware: for short, a smaller "now" is good (green). #}
+            {% set now_price = (t.exit_price | float) if t.exit_price else (e.cur_price if e.cur_price is not none else None) %}
+            {% if now_price is not none %}
+              {% set now_notional = (t.qty | float) * (now_price | float) %}
+              {% set delta = now_notional - entry_notional %}
+              {% set side_sign = -1 if (t.side and t.side|string|lower == 'short') else 1 %}
+              {% set pnl_delta = delta * side_sign %}
+              <div class="text-[10px] {% if pnl_delta > 0 %}text-green-500{% elif pnl_delta < 0 %}text-red-500{% else %}text-gray-400{% endif %}"
+                   title="Position value now = qty × {{ 'exit' if t.exit_price else 'current' }} price. Long: up is good. Short: down is good.">
+                now ${{ '{:,.2f}'.format(now_notional) }}
+              </div>
+            {% endif %}
           {% else %}<span class="text-gray-300">—</span>{% endif %}
         </td>
         <td class="px-3 py-2 text-right font-mono text-xs">

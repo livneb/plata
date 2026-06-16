@@ -522,6 +522,93 @@ async def detail(request: Request, trade_ulid: str):
                     suggested_adjustment_ulid = row.proposal_ulid
         except Exception:  # noqa: BLE001
             pass
+    # Derived view-models for the "human" hero card at the top of the page.
+    # Most of trade_detail's grid is information-dense for debugging agents;
+    # the hero card is the one block the user actually reads.
+    horizon: dict = {"label": "—", "kind": "unknown",
+                      "chip_class": "bg-gray-200 text-gray-700"}
+    if proposal:
+        try:
+            milestones = proposal.get("milestones") or []
+            etas = [int(m.get("eta_minutes") or 0) for m in milestones]
+            max_eta = max(etas) if etas else 0
+            if max_eta == 0:
+                pass
+            elif max_eta < 24 * 60:
+                horizon = {
+                    "label": "Quick win",
+                    "kind": "quick",
+                    "tooltip": f"Expected to resolve within {max_eta // 60 or 1}h.",
+                    "chip_class": "bg-yellow-100 text-yellow-800",
+                    "icon": "⚡",
+                }
+            elif max_eta < 7 * 24 * 60:
+                horizon = {
+                    "label": "Swing",
+                    "kind": "swing",
+                    "tooltip": f"Expected to play out over {max_eta // 1440 or 1}d.",
+                    "chip_class": "bg-blue-100 text-blue-800",
+                    "icon": "🌊",
+                }
+            else:
+                horizon = {
+                    "label": "Long-term",
+                    "kind": "long_term",
+                    "tooltip": f"Expected to play out over {max_eta // 10080 or 1}w.",
+                    "chip_class": "bg-purple-100 text-purple-800",
+                    "icon": "🌱",
+                }
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Outcome summary for closed positions — what the human wants to see first.
+    outcome: dict = {}
+    if trade:
+        if trade.exit_price is not None and trade.closed_at:
+            net_pnl = float(trade.net_pnl) if trade.net_pnl is not None else 0.0
+            inv = (float(trade.qty or 0) * float(trade.entry_price or 0)) or 0
+            pct = (net_pnl / inv * 100.0) if inv > 0 else 0.0
+            if net_pnl > 0.005:
+                verdict = "win"
+                verdict_label = "Won"
+                verdict_class = "text-green-500"
+            elif net_pnl < -0.005:
+                verdict = "loss"
+                verdict_label = "Lost"
+                verdict_class = "text-red-500"
+            else:
+                verdict = "flat"
+                verdict_label = "Break-even"
+                verdict_class = "text-gray-400"
+            reason_raw = (trade.close_reason or "").lower()
+            reason_map = {
+                "sl": ("🛑 Stop-loss triggered",
+                       "Price hit the stop-loss level — automatic exit."),
+                "tp": ("🎯 Take-profit reached",
+                       "Price hit the take-profit level — automatic exit."),
+                "manual": ("✋ Closed manually",
+                            "Someone clicked Close at market on this trade."),
+                "kill_switch": ("🛑 Kill switch",
+                                 "System-wide halt triggered — every open position was force-closed."),
+                "timeout": ("⏰ Held too long",
+                             "Position monitor closed it because max-hold-minutes elapsed."),
+            }
+            reason_label, reason_tooltip = reason_map.get(
+                reason_raw, (f"Closed ({reason_raw})", "")
+            )
+            held_sec = int((trade.closed_at - trade.opened_at).total_seconds()) \
+                if trade.opened_at else 0
+            outcome = {
+                "verdict": verdict,
+                "verdict_label": verdict_label,
+                "verdict_class": verdict_class,
+                "net_pnl": net_pnl,
+                "pct": pct,
+                "reason_label": reason_label,
+                "reason_tooltip": reason_tooltip,
+                "held_sec": held_sec,
+            }
+
     return templates.TemplateResponse(
         request,
         "pages/trade_detail.html",
@@ -534,5 +621,7 @@ async def detail(request: Request, trade_ulid: str):
             "health": health,
             "suggested_adjustment_ulid": suggested_adjustment_ulid,
             "live": live,
+            "horizon": horizon,
+            "outcome": outcome,
         },
     )
