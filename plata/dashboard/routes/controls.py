@@ -141,7 +141,17 @@ async def reset_system(request: Request):
     except Exception as exc:  # noqa: BLE001
         _log.warning("reset_set_equity_failed", error=str(exc)[:160])
 
-    # 5. Audit + sysop notify.
+    # 5. Stamp a "session boundary" — the Money page treats this as a hard
+    #    minimum when aggregating closed trades, so the dashboard starts
+    #    from $0 after a reset. TradeLedger history is preserved for
+    #    /trades/ and the trade detail pages.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        await redis.set("system:reset_at", now_iso)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("reset_stamp_failed", error=str(exc)[:160])
+
+    # 6. Audit + sysop notify.
     try:
         await publish_channel(Channels.SYSTEM_RESET, {
             "closed_count": closed_count,

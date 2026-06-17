@@ -100,6 +100,50 @@ async def index(request: Request,
     range_from, range_to, preset = _resolve_range(range, from_param, to_param)
 
     redis = get_redis()
+    # The /controls/reset endpoint stamps system:reset_at when the operator
+    # clicks "Start from scratch". After that, /money/ treats it as a HARD
+    # FLOOR: closed-trade aggregates never include trades from before the
+    # reset, regardless of the selected window. This keeps the dashboard
+    # showing "current session" cleanly even when the operator picks "All
+    # time". History is still on /trades/ for forensics.
+    reset_at: datetime | None = None
+    try:
+        ra_raw = await redis.get("system:reset_at")
+        if ra_raw:
+            reset_at = datetime.fromisoformat(ra_raw)
+            if reset_at.tzinfo is None:
+                reset_at = reset_at.replace(tzinfo=timezone.utc)
+    except Exception:  # noqa: BLE001
+        reset_at = None
+    if reset_at is None:
+        # One-shot retro backfill: prior /controls/reset calls (before
+        # v2.24.190) didn't stamp the boundary. Look for the most recent
+        # CloseReason.RESET row; if present, treat its closed_at as the
+        # boundary so the operator's earlier reset takes effect after this
+        # deploy without needing to click again. Cache to Redis so we only
+        # run the query once per process boot.
+        try:
+            from sqlalchemy import func as _func
+            async with session_scope() as _session:
+                latest = (await _session.execute(
+                    select(_func.max(TradeLedger.closed_at))
+                    .where(TradeLedger.close_reason == "reset")
+                )).scalar_one_or_none()
+            if latest is not None:
+                if latest.tzinfo is None:
+                    latest = latest.replace(tzinfo=timezone.utc)
+                reset_at = latest
+                try:
+                    await redis.set("system:reset_at", latest.isoformat())
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+    if reset_at is not None:
+        # Tighten range_from up to reset_at when the chosen window opens
+        # earlier (or has no lower bound, e.g. "All time").
+        if range_from is None or range_from < reset_at:
+            range_from = reset_at
     async with session_scope() as session:
         rows = (await session.execute(
             select(TradeLedger).order_by(TradeLedger.opened_at.asc())
@@ -288,6 +332,18 @@ async def closures_since(since: str | None = None, limit: int = 25):
                 cutoff = cutoff.replace(tzinfo=timezone.utc)
         except ValueError:
             cutoff = None
+    # Floor at system:reset_at — closures from before the reset boundary
+    # are no longer "current session" and shouldn't surface on the banner.
+    try:
+        ra_raw = await get_redis().get("system:reset_at")
+        if ra_raw:
+            reset_at = datetime.fromisoformat(ra_raw)
+            if reset_at.tzinfo is None:
+                reset_at = reset_at.replace(tzinfo=timezone.utc)
+            if cutoff is None or cutoff < reset_at:
+                cutoff = reset_at
+    except Exception:  # noqa: BLE001
+        pass
     async with session_scope() as session:
         q = select(TradeLedger).where(TradeLedger.exit_price.isnot(None))
         if cutoff:
