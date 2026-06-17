@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Lessons · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <div>
+      <h1 class="text-2xl font-semibold">📚 Lessons library</h1>
+      <p class="text-xs text-gray-500 mt-1">
+        What the Postmortem agent has learned from past proposals — executed and dropped alike. The strategist pulls the top 3 most-similar lessons on every new event.
+      </p>
+    </div>
+    <div class="text-[10px] text-gray-500">{{ total }} lesson(s) shown</div>
+  </div>
+
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <form method="get" class="flex items-center gap-2 flex-wrap text-sm">
+      <label>
+        <span class="text-[10px] uppercase text-gray-500">Severity</span>
+        <select name="severity"
+                class="ml-1 text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+          <option value="" {% if not severity_filter %}selected{% endif %}>All</option>
+          <option value="glaring"       {% if severity_filter == 'glaring' %}selected{% endif %}>🚨 Glaring</option>
+          <option value="concerning"    {% if severity_filter == 'concerning' %}selected{% endif %}>⚠ Concerning</option>
+          <option value="informational" {% if severity_filter == 'informational' %}selected{% endif %}>💡 Informational</option>
+        </select>
+      </label>
+      <label>
+        <span class="text-[10px] uppercase text-gray-500">Symbol</span>
+        <input name="symbol" value="{{ symbol_filter }}" placeholder="(any)"
+               class="ml-1 text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 font-mono w-32">
+      </label>
+      <button type="submit"
+              class="text-xs px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+        Filter
+      </button>
+      {% if severity_filter or symbol_filter %}
+      <a href="/lessons/" class="text-xs text-blue-500 hover:underline">Clear</a>
+      {% endif %}
+    </form>
+  </section>
+
+  {% if not lessons %}
+  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 text-center text-gray-500 text-sm">
+    No lessons yet — the Postmortem agent writes them at scheduled checkpoints (1d/1w/1mo+ from each proposal).
+  </div>
+  {% else %}
+  <section class="space-y-2">
+    {% for L in lessons %}
+    {% set meta = severity_meta.get(L.severity, {"icon": "·", "chip": "bg-gray-200 text-gray-700"}) %}
+    <article class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div class="flex items-center gap-2 mb-1 flex-wrap">
+        <span class="text-[11px] px-2 py-0.5 rounded {{ meta.chip }}">{{ meta.icon }} {{ L.severity or '—' }}</span>
+        <span class="font-mono text-sm font-semibold">{{ L.symbol or '?' }}</span>
+        {% if L.category %}<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">{{ L.category }}</span>{% endif %}
+        {% if L.horizon_bucket %}<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">{{ L.horizon_bucket }}</span>{% endif %}
+        <span class="text-[10px] text-gray-500">decision was <span class="font-mono">{{ L.decision_at_time or '?' }}</span></span>
+        {% if L.predicted_pct is not none and L.actual_pct is not none %}
+        <span class="text-[10px] text-gray-500 ml-auto">
+          predicted <span class="font-mono">{{ '%.2f' % ((L.predicted_pct|float) * 100) }}%</span> ·
+          actual <span class="font-mono {% if (L.actual_pct|float) > 0 %}text-green-500{% elif (L.actual_pct|float) < 0 %}text-red-500{% endif %}">{{ '%.2f' % ((L.actual_pct|float) * 100) }}%</span>
+        </span>
+        {% endif %}
+      </div>
+      <p class="text-sm text-gray-800 dark:text-gray-200">{{ L.lesson }}</p>
+      {% if L.signal_to_watch %}
+      <p class="text-xs text-gray-600 dark:text-gray-300 mt-1 italic">
+        📡 signal to watch: {{ L.signal_to_watch }}
+      </p>
+      {% endif %}
+      <div class="text-[10px] text-gray-400 mt-1">{{ L.ts }}</div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

@@ -272,6 +272,35 @@ class Strategist(BaseAgent):
                 f"  price_impact={json.dumps(price_impact or {})}"
             )
 
+        # Pull the top 3 most-similar lessons the postmortem agent has
+        # written. Empty when the library hasn't been populated yet; gets
+        # progressively more useful as the system learns from its mistakes.
+        lessons_block = ""
+        try:
+            from plata.core.graph import vector_search_lessons
+            lessons = await vector_search_lessons(
+                embedding, k=3, category=str(event.category) or None,
+            )
+            if lessons:
+                lines = []
+                for L in lessons:
+                    sev = (L.get("severity") or "informational").upper()
+                    lines.append(
+                        f"- [{sev}] ({L.get('symbol')}/{L.get('category')}, "
+                        f"decision={L.get('decision_at_time')}) "
+                        f"{L.get('lesson')}"
+                    )
+                    sig = L.get("signal_to_watch")
+                    if sig:
+                        lines.append(f"    signal: {sig}")
+                lessons_block = (
+                    "\n\nLESSONS FROM SIMILAR PAST EVENTS (the postmortem "
+                    "agent reviewed how earlier decisions played out):\n"
+                    + "\n".join(lines)
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
         user_msg = (
             f"CURRENT EVENT:\n"
             f"summary: {event.summary}\n"
@@ -279,6 +308,7 @@ class Strategist(BaseAgent):
             f"sentiment_magnitude: {event.sentiment_magnitude}\n"
             f"entities: {[e.model_dump() for e in event.entities]}\n\n"
             f"HISTORICAL ANALOGS:\n" + "\n".join(analog_blocks)
+            + lessons_block
         )
 
         decision = await self._llm.structured(

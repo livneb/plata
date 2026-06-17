@@ -98,6 +98,19 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     # high-conviction proposal.
     "council_enabled": "true",
     "council_min_conviction": "0.65",
+    # ===== Postmortem agent =====
+    # Periodic hindsight loop: for every proposal (executed AND dropped),
+    # at scheduled checkpoints, compares predicted vs actual move and
+    # writes a lesson into the searchable library. Strategist KNN-retrieves
+    # top-3 most-similar lessons when deciding on a new event.
+    # Schedules are comma-separated minute offsets from proposal time.
+    "postmortem_enabled": "true",
+    "postmortem_interval_min": "60",
+    "postmortem_max_per_cycle": "20",
+    "postmortem_schedule_few_hours": "1440,10080,43200",     # 1d, 1w, 1mo
+    "postmortem_schedule_few_days":  "4320,20160,43200",     # 3d, 2w, 1mo
+    "postmortem_schedule_few_weeks": "20160,86400",          # 2w, 2mo
+    "postmortem_schedule_long_term": "43200,129600",         # 1mo, 3mo
     # ===== Horizon buckets =====
     # Total daily $ to deploy across all four buckets. Set to 0 to disable
     # bucket sizing entirely (risk_per_trade_pct used instead).

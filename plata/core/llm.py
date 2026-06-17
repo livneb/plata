@@ -46,6 +46,7 @@ AGENT_MODELS: dict[str, str] = {
     "translator": "openai/gpt-4o-mini",
     "researcher": "anthropic/claude-sonnet-4-6",   # quality matters for the brain
     "council": "anthropic/claude-sonnet-4-6",      # deliberation aggregator
+    "postmortem": "anthropic/claude-haiku-4-5",    # short lesson notes — Haiku is enough
 }
 
 # Agents whose system prompts should be prepended with the current
@@ -55,6 +56,7 @@ AGENT_MODELS: dict[str, str] = {
 # news, not making trades.
 BRIEFING_AWARE_AGENTS: frozenset[str] = frozenset({
     "strategist", "position_monitor", "reviewer", "council", "historian",
+    "postmortem",
 })
 
 # Per-agent FREE OpenRouter models (the ":free" suffix triggers the free tier).
