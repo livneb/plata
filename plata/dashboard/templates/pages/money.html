@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Money · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Money</h1>
+    <span class="text-[10px] text-gray-500">All-time, every venue. Updated on page load.</span>
+  </div>
+
+  {# ===== Top KPIs ===== #}
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <div class="text-[10px] uppercase text-gray-500" title="Sum of qty × current market price across every position that has not yet closed.">Open right now</div>
+      <div class="text-2xl font-mono font-bold mt-1">${{ '{:,.2f}'.format(open_notional) }}</div>
+      <div class="text-[11px] text-gray-500 mt-1">{{ open_count }} position{{ '' if open_count == 1 else 's' }}
+        {% if open_unrealized %}
+          · <span class="{% if open_unrealized > 0 %}text-green-500{% else %}text-red-500{% endif %}">
+            {% if open_unrealized > 0 %}+{% endif %}${{ '{:,.2f}'.format(open_unrealized) }} unrealized
+          </span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <div class="text-[10px] uppercase text-gray-500" title="Sum of net PnL across every closed winning trade.">Earned (all-time)</div>
+      <div class="text-2xl font-mono font-bold text-green-500 mt-1">+${{ '{:,.2f}'.format(total_earned) }}</div>
+      <div class="text-[11px] text-gray-500 mt-1">{{ win_count }} winning trade{{ '' if win_count == 1 else 's' }}</div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <div class="text-[10px] uppercase text-gray-500" title="Sum of net PnL across every closed losing trade. Sign shown as-is (negative).">Lost (all-time)</div>
+      <div class="text-2xl font-mono font-bold text-red-500 mt-1">{% if total_lost == 0 %}$0.00{% else %}-${{ '{:,.2f}'.format(-total_lost) }}{% endif %}</div>
+      <div class="text-[11px] text-gray-500 mt-1">{{ loss_count }} losing trade{{ '' if loss_count == 1 else 's' }}</div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <div class="text-[10px] uppercase text-gray-500" title="Earned − |Lost|. The actual realized profit/loss across all closed positions.">Net realized</div>
+      <div class="text-2xl font-mono font-bold mt-1 {% if net_realized > 0 %}text-green-500{% elif net_realized < 0 %}text-red-500{% else %}text-gray-400{% endif %}">
+        {% if net_realized > 0 %}+{% elif net_realized < 0 %}-{% endif %}${{ '{:,.2f}'.format(net_realized|abs) }}
+      </div>
+      <div class="text-[11px] text-gray-500 mt-1">{{ closed_count }} closed · {{ '%.1f' % win_rate }}% win-rate</div>
+    </div>
+  </section>
+
+  {# ===== Charts ===== #}
+  <section class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 lg:col-span-2">
+      <h2 class="text-sm font-semibold mb-1">Cumulative net P&L</h2>
+      <p class="text-[11px] text-gray-500 mb-2">Realized P&L summed in trade-close order. Points are individual closed trades; the line is the running total.</p>
+      <div id="cum-pnl-chart" style="height: 260px;"></div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <h2 class="text-sm font-semibold mb-1">Open notional by class</h2>
+      <p class="text-[11px] text-gray-500 mb-2">What's tied up where right now.</p>
+      <div id="open-mix-chart" style="height: 260px;"></div>
+    </div>
+  </section>
+
+  {# ===== Class breakdown table + bar ===== #}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="text-sm font-semibold mb-1">Earned vs lost by asset class</h2>
+    <p class="text-[11px] text-gray-500 mb-3">Stocks vs crypto vs currencies — does one class carry the book?</p>
+    <div id="class-bars-chart" style="height: 300px;"></div>
+    <div class="overflow-x-auto mt-4">
+      <table class="w-full text-sm">
+        <thead class="text-[10px] uppercase text-gray-500">
+          <tr>
+            <th class="px-2 py-1 text-left">Class</th>
+            <th class="px-2 py-1 text-right">Open notional</th>
+            <th class="px-2 py-1 text-right">Earned</th>
+            <th class="px-2 py-1 text-right">Lost</th>
+            <th class="px-2 py-1 text-right">Net realized</th>
+            <th class="px-2 py-1 text-right">Wins / losses</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in classes_view %}
+          <tr class="border-t border-gray-100 dark:border-gray-700">
+            <td class="px-2 py-1.5">
+              <span style="color:{{ c.color }}">{{ c.icon }}</span>
+              <span class="ml-1">{{ c.label }}</span>
+              {% if c.open_count %}<span class="text-[10px] text-gray-500 ml-1">({{ c.open_count }} open)</span>{% endif %}
+            </td>
+            <td class="px-2 py-1.5 text-right font-mono">${{ '{:,.2f}'.format(c.open_notional) }}</td>
+            <td class="px-2 py-1.5 text-right font-mono text-green-500">{% if c.earned %}+${{ '{:,.2f}'.format(c.earned) }}{% else %}—{% endif %}</td>
+            <td class="px-2 py-1.5 text-right font-mono text-red-500">{% if c.lost %}-${{ '{:,.2f}'.format(-c.lost) }}{% else %}—{% endif %}</td>
+            <td class="px-2 py-1.5 text-right font-mono {% if c.net_realized > 0 %}text-green-500{% elif c.net_realized < 0 %}text-red-500{% else %}text-gray-400{% endif %}">
+              {% if c.net_realized > 0 %}+{% elif c.net_realized < 0 %}-{% endif %}${{ '{:,.2f}'.format(c.net_realized|abs) }}
+            </td>
+            <td class="px-2 py-1.5 text-right text-xs">{{ c.wins }} / {{ c.losses }}</td>
+          </tr>
+          {% endfor %}
+          {% if not classes_view %}
+          <tr><td colspan="6" class="px-2 py-4 text-center text-gray-400">No closed trades yet.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+  // Theme-aware tick color (ApexCharts dark-mode handling is rudimentary).
+  const _darkMode = document.documentElement.classList.contains('dark');
+  const _tickColor = _darkMode ? '#9ca3af' : '#6b7280';
+
+  // ===== Cumulative net PnL line =====
+  const cumData = {{ cumulative | tojson }};
+  if (cumData.length) {
+    new ApexCharts(document.getElementById('cum-pnl-chart'), {
+      chart: { type: 'area', height: 260, toolbar: { show: false }, animations: { enabled: false } },
+      series: [{ name: 'Net P&L (USD)', data: cumData.map(p => ({ x: new Date(p.ts).getTime(), y: p.cum })) }],
+      stroke: { curve: 'straight', width: 2 },
+      colors: ['#3b82f6'],
+      fill: {
+        type: 'gradient',
+        gradient: { shadeIntensity: 0.6, opacityFrom: 0.3, opacityTo: 0.05, stops: [0, 90] },
+      },
+      xaxis: { type: 'datetime', labels: { style: { colors: _tickColor } } },
+      yaxis: { labels: { formatter: v => '$' + v.toFixed(2), style: { colors: _tickColor } } },
+      tooltip: {
+        x: { format: 'yyyy-MM-dd HH:mm' },
+        y: { formatter: v => '$' + v.toFixed(2) },
+      },
+      grid: { borderColor: _darkMode ? '#374151' : '#e5e7eb' },
+      annotations: { yaxis: [{ y: 0, borderColor: '#94a3b8', strokeDashArray: 4 }] },
+    }).render();
+  } else {
+    document.getElementById('cum-pnl-chart').innerHTML = '<div class="text-center text-gray-400 text-sm py-12">No closed trades yet.</div>';
+  }
+
+  // ===== Open notional donut =====
+  const openMix = {{ classes_view | tojson }}.filter(c => c.open_notional > 0);
+  if (openMix.length) {
+    new ApexCharts(document.getElementById('open-mix-chart'), {
+      chart: { type: 'donut', height: 260, animations: { enabled: false } },
+      series: openMix.map(c => Math.round(c.open_notional * 100) / 100),
+      labels: openMix.map(c => c.label),
+      colors: openMix.map(c => c.color),
+      legend: { position: 'bottom', labels: { colors: _tickColor } },
+      dataLabels: { formatter: (v, opts) => '$' + opts.w.config.series[opts.seriesIndex].toFixed(0) },
+      tooltip: { y: { formatter: v => '$' + v.toFixed(2) } },
+      plotOptions: { pie: { donut: { size: '55%' } } },
+    }).render();
+  } else {
+    document.getElementById('open-mix-chart').innerHTML = '<div class="text-center text-gray-400 text-sm py-12">No open positions.</div>';
+  }
+
+  // ===== Earned vs lost bar =====
+  const cv = {{ classes_view | tojson }};
+  if (cv.length) {
+    new ApexCharts(document.getElementById('class-bars-chart'), {
+      chart: { type: 'bar', height: 300, stacked: false, toolbar: { show: false }, animations: { enabled: false } },
+      series: [
+        { name: 'Earned', data: cv.map(c => Math.round(c.earned * 100) / 100), color: '#10b981' },
+        { name: 'Lost',   data: cv.map(c => Math.round(c.lost   * 100) / 100), color: '#ef4444' },
+      ],
+      xaxis: { categories: cv.map(c => c.label), labels: { style: { colors: _tickColor } } },
+      yaxis: { labels: { formatter: v => '$' + v.toFixed(0), style: { colors: _tickColor } } },
+      tooltip: { y: { formatter: v => '$' + v.toFixed(2) } },
+      plotOptions: { bar: { columnWidth: '45%', borderRadius: 3 } },
+      dataLabels: { enabled: false },
+      grid: { borderColor: _darkMode ? '#374151' : '#e5e7eb' },
+      legend: { labels: { colors: _tickColor } },
+    }).render();
+  } else {
+    document.getElementById('class-bars-chart').innerHTML = '<div class="text-center text-gray-400 text-sm py-12">No closed trades yet.</div>';
+  }
+</script>
+{% endblock %}
