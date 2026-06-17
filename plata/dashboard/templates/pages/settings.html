@@ -91,8 +91,112 @@
             Switch via Risk Config tab: <span class="font-mono">paper_trading_mode</span>.
           </p>
         </div>
+
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-amber-200 dark:border-amber-700 p-4 md:col-span-2">
+          <h2 class="font-semibold mb-2">🔄 Start from scratch</h2>
+          <p class="text-sm mb-3">
+            Force-close every open position at its last sampled price, wipe daily counters, and start a fresh session with a new starting equity. <b>Trade history and the knowledge graph are preserved</b> — only open positions and per-day quotas are cleared.
+          </p>
+          <button id="reset-open-btn" type="button"
+                  class="text-white bg-amber-600 hover:bg-amber-700 focus:ring-4 focus:ring-amber-300 font-medium rounded-lg text-sm px-4 py-2">
+            Reset open positions…
+          </button>
+          <p class="text-xs text-gray-500 mt-2">
+            Use when: switching strategies, testing a fresh budget, or the book has drifted in a way the agents can't recover.
+          </p>
+        </div>
       </div>
     </div>
+
+    <!-- Reset confirmation modal -->
+    <div id="reset-modal"
+         class="hidden fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4"
+         role="dialog" aria-modal="true">
+      <div class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-5 space-y-3 shadow-xl">
+        <h3 class="text-lg font-semibold">🔄 Start from scratch</h3>
+        <p class="text-sm text-gray-700 dark:text-gray-300">
+          This will <b>book-close every open position</b> at its last mark and reset your starting equity. Trade history and the knowledge graph stay intact.
+        </p>
+        <label class="block text-sm">
+          <span class="text-xs uppercase text-gray-500">Starting equity (USD)</span>
+          <input id="reset-equity-input" type="number" min="100" step="100" value="10000"
+                 class="mt-1 w-full p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 font-mono">
+        </label>
+        <label class="block text-sm">
+          <span class="text-xs uppercase text-gray-500">Type <span class="font-mono font-bold">RESET</span> to confirm</span>
+          <input id="reset-confirm-input" type="text" placeholder="RESET"
+                 autocomplete="off"
+                 class="mt-1 w-full p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 font-mono">
+        </label>
+        <div id="reset-error" class="hidden text-xs text-red-500"></div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button id="reset-cancel-btn" type="button"
+                  class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+            Cancel
+          </button>
+          <button id="reset-confirm-btn" type="button"
+                  class="px-3 py-1.5 text-sm rounded text-white bg-amber-600 hover:bg-amber-700"
+                  disabled>
+            Reset now
+          </button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        const openBtn = document.getElementById('reset-open-btn');
+        const modal = document.getElementById('reset-modal');
+        const cancelBtn = document.getElementById('reset-cancel-btn');
+        const confirmBtn = document.getElementById('reset-confirm-btn');
+        const equityInput = document.getElementById('reset-equity-input');
+        const confirmInput = document.getElementById('reset-confirm-input');
+        const errorEl = document.getElementById('reset-error');
+        if (!openBtn || !modal) return;
+        function open() {
+          confirmInput.value = '';
+          confirmBtn.disabled = true;
+          errorEl.classList.add('hidden');
+          modal.classList.remove('hidden');
+          confirmInput.focus();
+        }
+        function close() { modal.classList.add('hidden'); }
+        openBtn.addEventListener('click', open);
+        cancelBtn.addEventListener('click', close);
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) close();
+        });
+        confirmInput.addEventListener('input', () => {
+          confirmBtn.disabled = (confirmInput.value.trim() !== 'RESET');
+        });
+        confirmBtn.addEventListener('click', async () => {
+          confirmBtn.disabled = true;
+          errorEl.classList.add('hidden');
+          const fd = new FormData();
+          fd.append('confirm', confirmInput.value.trim());
+          fd.append('new_equity_usd', equityInput.value || '10000');
+          try {
+            const r = await fetch('/controls/reset', { method: 'POST', body: fd });
+            const j = await r.json();
+            if (!r.ok || !j.ok) {
+              errorEl.textContent = j.detail || j.error || 'Reset failed.';
+              errorEl.classList.remove('hidden');
+              confirmBtn.disabled = false;
+              return;
+            }
+            // Success: close modal, show a friendly toast and reload.
+            close();
+            if (window.plataToast) {
+              window.plataToast(`Reset complete: closed ${j.closed_count} position(s). Starting equity now $${j.new_equity_usd}.`, 'ok');
+            }
+            setTimeout(() => window.location.reload(), 800);
+          } catch (e) {
+            errorEl.textContent = 'Network error — please retry.';
+            errorEl.classList.remove('hidden');
+            confirmBtn.disabled = false;
+          }
+        });
+      })();
+    </script>
 
     <!-- ===== Risk Config ===== -->
     <div class="hidden p-3" id="tab-risk" role="tabpanel" aria-labelledby="risk-tab">

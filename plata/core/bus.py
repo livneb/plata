@@ -52,6 +52,10 @@ class Streams:
 class Channels:
     SYSTEM_HALT = "system:halt"
     SYSTEM_RESUME = "system:resume"
+    # Fired by the dashboard /controls/reset endpoint after a "start from
+    # scratch" wipe. Sysop subscribes for audit; UI can refresh to show
+    # the empty positions list immediately.
+    SYSTEM_RESET = "system:reset"
     CONFIG_UPDATED = "config_updated"
 
     @staticmethod

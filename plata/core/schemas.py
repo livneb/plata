@@ -71,6 +71,7 @@ class CloseReason(StrEnum):
     MANUAL = "manual"
     KILL_SWITCH = "kill_switch"
     TIMEOUT = "timeout"
+    RESET = "reset"   # operator clicked "Start from scratch" — paper book-close
 
 
 # ---------------------------------------------------------------------------
