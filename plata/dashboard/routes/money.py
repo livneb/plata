@@ -15,12 +15,13 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 
 from plata.core.bus import get_redis
-from plata.core.db import TradeLedger, session_scope
+from plata.core.db import Proposal, TradeLedger, session_scope
 from plata.dashboard import templates
+from plata.dashboard.routes._close_reason import label_for
 
 router = APIRouter(prefix="/money", tags=["money"])
 
@@ -267,3 +268,72 @@ async def index(request: Request,
             "as_of": datetime.now(timezone.utc).isoformat(),
         },
     )
+
+
+@router.get("/closures")
+async def closures_since(since: str | None = None, limit: int = 25):
+    """Closures whose `closed_at > since` (ISO-8601). Drives the page-load
+    banner that surfaces what closed while the user was away. LEFT JOINs
+    the Proposal row so LLM-driven closes (position monitor) can surface
+    their reasoning.
+
+    `since` is optional — when missing, returns the most recent `limit`
+    closures so the banner has something to show on first load.
+    """
+    cutoff: datetime | None = None
+    if since:
+        try:
+            cutoff = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            if cutoff.tzinfo is None:
+                cutoff = cutoff.replace(tzinfo=timezone.utc)
+        except ValueError:
+            cutoff = None
+    async with session_scope() as session:
+        q = select(TradeLedger).where(TradeLedger.exit_price.isnot(None))
+        if cutoff:
+            q = q.where(TradeLedger.closed_at > cutoff)
+        q = q.order_by(TradeLedger.closed_at.desc()).limit(max(1, min(100, limit)))
+        rows = (await session.execute(q)).scalars().all()
+        # Pull matching Proposal rows in one shot so we can read LLM
+        # reasoning from extras.adjustment_executed_reasoning (set by the
+        # position monitor when its LLM verdict closed the trade).
+        proposal_map: dict[str, Proposal] = {}
+        if rows:
+            trade_ulids = [r.trade_ulid for r in rows]
+            proposals = (await session.execute(
+                select(Proposal).where(Proposal.trade_ulid.in_(trade_ulids))
+            )).scalars().all()
+            proposal_map = {p.trade_ulid: p for p in proposals if p.trade_ulid}
+
+    out = []
+    for r in rows:
+        label, tooltip = label_for(r.close_reason)
+        pnl = float(r.net_pnl or 0)
+        inv = (float(r.qty or 0) * float(r.entry_price or 0)) or 0
+        pct = (pnl / inv * 100.0) if inv > 0 else 0.0
+        # LLM reasoning, if any — position monitor stores it on the proposal.
+        llm_reasoning = None
+        p = proposal_map.get(r.trade_ulid)
+        if p and p.extras:
+            llm_reasoning = (p.extras or {}).get("adjustment_executed_reasoning")
+        held_sec = int((r.closed_at - r.opened_at).total_seconds()) \
+            if (r.closed_at and r.opened_at) else 0
+        out.append({
+            "trade_ulid": r.trade_ulid,
+            "symbol": r.symbol,
+            "side": r.side,
+            "qty": float(r.qty or 0),
+            "entry_price": float(r.entry_price or 0),
+            "exit_price": float(r.exit_price or 0) if r.exit_price else None,
+            "net_pnl": round(pnl, 4),
+            "pct": round(pct, 3),
+            "close_reason": (r.close_reason or "").lower(),
+            "close_label": label,
+            "close_tooltip": tooltip,
+            "opened_at": r.opened_at.isoformat() if r.opened_at else None,
+            "closed_at": r.closed_at.isoformat() if r.closed_at else None,
+            "held_sec": held_sec,
+            "llm_reasoning": llm_reasoning,
+        })
+    return JSONResponse({"closures": out,
+                          "as_of": datetime.now(timezone.utc).isoformat()})

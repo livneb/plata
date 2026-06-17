@@ -598,22 +598,8 @@ async def detail(request: Request, trade_ulid: str):
                 verdict = "flat"
                 verdict_label = "Break-even"
                 verdict_class = "text-gray-400"
-            reason_raw = (trade.close_reason or "").lower()
-            reason_map = {
-                "sl": ("🛑 Stop-loss triggered",
-                       "Price hit the stop-loss level — automatic exit."),
-                "tp": ("🎯 Take-profit reached",
-                       "Price hit the take-profit level — automatic exit."),
-                "manual": ("✋ Closed manually",
-                            "Someone clicked Close at market on this trade."),
-                "kill_switch": ("🛑 Kill switch",
-                                 "System-wide halt triggered — every open position was force-closed."),
-                "timeout": ("⏰ Held too long",
-                             "Position monitor closed it because max-hold-minutes elapsed."),
-            }
-            reason_label, reason_tooltip = reason_map.get(
-                reason_raw, (f"Closed ({reason_raw})", "")
-            )
+            from plata.dashboard.routes._close_reason import label_for
+            reason_label, reason_tooltip = label_for(trade.close_reason)
             held_sec = int((trade.closed_at - trade.opened_at).total_seconds()) \
                 if trade.opened_at else 0
             outcome = {

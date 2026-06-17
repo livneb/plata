@@ -21,7 +21,7 @@ from plata.hitl.approval_store import create_pending
 DEFAULT_RISK_CONFIG: dict[str, Any] = {
     "paper_trading_mode": "true",
     "risk_per_trade_pct": "1.0",
-    "max_open_positions": "3",
+    "max_open_positions": "75",
     "max_gross_exposure_pct": "30.0",
     "max_net_exposure_pct": "20.0",
     "max_correlated_positions": "2",

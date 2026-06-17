@@ -56,6 +56,20 @@
     body.banner-visible > aside { top: 36px; }
     body.banner-visible > aside { height: calc(100vh - 36px); }
     body.banner-visible #main-content { padding-top: calc(5rem + 36px); }
+    /* Closures banner: variable height (1–10 closure rows + scroll).
+       --closures-banner-h is set by JS to the measured height; CSS falls
+       back to 80px if JS hasn't measured yet. Stacks BELOW the halted
+       banner when both are visible. */
+    :root { --closures-banner-h: 80px; }
+    body.closures-visible > nav,
+    body.closures-visible > aside { top: var(--closures-banner-h); }
+    body.closures-visible > aside { height: calc(100vh - var(--closures-banner-h)); }
+    body.closures-visible #main-content { padding-top: calc(5rem + var(--closures-banner-h)); }
+    body.banner-visible.closures-visible > nav,
+    body.banner-visible.closures-visible > aside { top: calc(36px + var(--closures-banner-h)); }
+    body.banner-visible.closures-visible > aside { height: calc(100vh - 36px - var(--closures-banner-h)); }
+    body.banner-visible.closures-visible #main-content { padding-top: calc(5rem + 36px + var(--closures-banner-h)); }
+    body.banner-visible #closures-banner { top: 36px; }
   </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -66,6 +80,10 @@
     <span>⚠ <span id="halted-banner-text">Agents are halted</span> — click to manage.</span>
     <span class="text-[11px] opacity-80">/agents/ →</span>
   </a>
+  {# Closures banner — what closed since you last looked at the app.
+     Lives below the topbar (offset above the main content). The JS at the
+     bottom of this file fetches /money/closures and populates it. #}
+  {% include "partials/closures_banner.html" %}
 
   <!-- Version banner (pushes layout down when shown) -->
   <div id="version-banner" tabindex="-1"
@@ -685,6 +703,130 @@
       poll(); setInterval(poll, 10000);
       // Also react to SSE system-state events for immediate feedback.
       document.addEventListener('plata:system_state', poll);
+    })();
+
+    // ---------- Closures banner ----------
+    // "What closed while I was away" — the single most important thing the
+    // user wants to see on page load. Pulls /money/closures?since=<last-seen>
+    // and renders one row per closed position with the dollar move, plain-
+    // English reason, and (for LLM-driven closes) the LLM's reasoning.
+    (function () {
+      const banner = document.getElementById('closures-banner');
+      const listEl = document.getElementById('closures-list');
+      const countEl = document.getElementById('closures-count');
+      const dismissBtn = document.getElementById('closures-dismiss-all');
+      if (!banner || !listEl || !countEl || !dismissBtn) return;
+      const LS_KEY = 'plataLastClosureSeen';
+      const DISMISS_KEY = 'plataClosureDismissed';
+      function dismissedSet() {
+        try { return new Set(JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]')); }
+        catch { return new Set(); }
+      }
+      function rememberDismissed(ulids) {
+        const s = dismissedSet();
+        ulids.forEach(u => s.add(u));
+        // Keep the set small — cap at 200.
+        const arr = Array.from(s).slice(-200);
+        try { localStorage.setItem(DISMISS_KEY, JSON.stringify(arr)); } catch {}
+      }
+      function fmtUsd(n) {
+        const sign = n > 0 ? '+' : (n < 0 ? '-' : '');
+        return sign + '$' + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+      }
+      function fmtHeld(sec) {
+        if (sec < 3600) return Math.round(sec / 60) + ' min';
+        if (sec < 86400) return (sec / 3600).toFixed(1) + ' h';
+        return (sec / 86400).toFixed(1) + ' d';
+      }
+      function render(closures) {
+        const dismissed = dismissedSet();
+        const fresh = closures.filter(c => !dismissed.has(c.trade_ulid));
+        if (!fresh.length) {
+          banner.classList.add('hidden');
+          document.body.classList.remove('closures-visible');
+          return;
+        }
+        countEl.textContent = fresh.length;
+        listEl.innerHTML = '';
+        fresh.slice(0, 10).forEach(c => {
+          const row = document.createElement('div');
+          row.className = 'flex items-start justify-between gap-2 p-2 rounded bg-white dark:bg-gray-800 border border-blue-100 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer';
+          row.title = c.close_tooltip || '';
+          row.addEventListener('click', (e) => {
+            if (e.target.closest('.row-dismiss')) return;
+            window.location.href = '/trades/' + c.trade_ulid;
+          });
+          const pnlClass = c.net_pnl > 0 ? 'text-green-600 dark:text-green-400'
+                          : c.net_pnl < 0 ? 'text-red-600 dark:text-red-400'
+                          : 'text-gray-500';
+          const sideArrow = (c.side || '').toLowerCase() === 'long' ? '↑' : '↓';
+          const llm = c.llm_reasoning
+            ? `<div class="text-[11px] text-gray-600 dark:text-gray-300 italic mt-0.5">"${c.llm_reasoning.replace(/"/g, '&quot;').slice(0, 220)}${c.llm_reasoning.length > 220 ? '…' : ''}"</div>`
+            : '';
+          row.innerHTML = `
+            <div class="flex-1 min-w-0">
+              <div class="text-sm">
+                <span class="font-mono font-semibold">${c.symbol}</span>
+                <span class="text-xs text-gray-500">${sideArrow} ${c.side}</span>
+                <span class="font-mono font-bold ml-2 ${pnlClass}">${fmtUsd(c.net_pnl)}</span>
+                <span class="text-xs ${pnlClass} ml-1">(${c.pct > 0 ? '+' : ''}${c.pct.toFixed(2)}%)</span>
+                <span class="text-xs text-gray-500 ml-2">· ${c.close_label}</span>
+                <span class="text-xs text-gray-400 ml-2">· held ${fmtHeld(c.held_sec)}</span>
+              </div>
+              ${llm}
+            </div>
+            <button type="button" class="row-dismiss text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-0.5"
+                    title="Dismiss this one">✕</button>
+          `;
+          row.querySelector('.row-dismiss').addEventListener('click', (e) => {
+            e.stopPropagation();
+            rememberDismissed([c.trade_ulid]);
+            refresh();
+          });
+          listEl.appendChild(row);
+        });
+        if (fresh.length > 10) {
+          const more = document.createElement('div');
+          more.className = 'text-[11px] text-gray-500 px-2 pt-1';
+          more.textContent = `+ ${fresh.length - 10} more on /money/`;
+          listEl.appendChild(more);
+        }
+        banner.classList.remove('hidden');
+        document.body.classList.add('closures-visible');
+        // Measure rendered height and publish so CSS shifts the rest of
+        // the page by the exact amount — banner height varies with row count.
+        requestAnimationFrame(() => {
+          const h = Math.min(banner.offsetHeight, Math.round(window.innerHeight * 0.35));
+          document.documentElement.style.setProperty('--closures-banner-h', h + 'px');
+        });
+      }
+      let lastSeenISO = (() => {
+        try { return localStorage.getItem(LS_KEY); } catch { return null; }
+      })();
+      if (!lastSeenISO) {
+        // First visit: show closures from the last 24h.
+        lastSeenISO = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      }
+      async function refresh() {
+        try {
+          const r = await fetch('/money/closures?since=' + encodeURIComponent(lastSeenISO),
+                                { cache: 'no-store' });
+          if (!r.ok) return;
+          const j = await r.json();
+          render(j.closures || []);
+        } catch {}
+      }
+      dismissBtn.addEventListener('click', () => {
+        const now = new Date().toISOString();
+        try { localStorage.setItem(LS_KEY, now); } catch {}
+        lastSeenISO = now;
+        banner.classList.add('hidden');
+        document.body.classList.remove('closures-visible');
+      });
+      refresh();
+      setInterval(refresh, 30000);
+      // SSE: when a trade closes, refresh immediately so we don't wait 30s.
+      document.addEventListener('plata:trade_closed', refresh);
     })();
 
     // ---------- Server-Sent Events (live updates from agents) ----------

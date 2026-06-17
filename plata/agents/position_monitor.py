@@ -386,7 +386,8 @@ class PositionMonitor(BaseAgent):
                                   cur_price, actual_pct, expected_pct, deviation_pct)
 
     async def _publish_closure(self, trade: TradeLedger, price: float,
-                                reason: CloseReason) -> None:
+                                reason: CloseReason,
+                                llm_reasoning: str | None = None) -> None:
         sign = Decimal("1") if (trade.side or "").lower() == "long" else Decimal("-1")
         qty = Decimal(str(trade.qty or 0))
         entry = Decimal(str(trade.entry_price or 0))
@@ -407,6 +408,26 @@ class PositionMonitor(BaseAgent):
             closed_at=datetime.now(timezone.utc),
         )
         await publish(Streams.TRADE_CLOSURES, closure)
+        # Persist the LLM's reasoning (when present — only for the LLM-
+        # driven off-track / event-driven paths) on the opening proposal's
+        # extras so the closures banner can surface it: "our analyst
+        # closed it because trump tweeted X". Cheap merge via update_state.
+        if llm_reasoning and trade.proposal_id:
+            try:
+                from plata.core.db import Proposal as _P, session_scope as _ss
+                from sqlalchemy import select as _select
+                async with _ss() as _session:
+                    _row = (await _session.execute(
+                        _select(_P).where(_P.proposal_ulid == trade.proposal_id)
+                    )).scalar_one_or_none()
+                    if _row is not None:
+                        _merged = dict(_row.extras or {})
+                        _merged["adjustment_executed_reasoning"] = llm_reasoning[:1200]
+                        _merged["adjustment_executed_at"] = datetime.now(timezone.utc).isoformat()
+                        _row.extras = _merged
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("position_monitor_reasoning_persist_failed",
+                              trade=trade.trade_ulid, error=str(exc)[:160])
         _log.info("position_monitor_closed",
                    trade=trade.trade_ulid, reason=str(reason), price=price)
 
@@ -674,16 +695,22 @@ class PositionMonitor(BaseAgent):
         # Auto-execute now if the toggle is on.
         if auto_execute:
             try:
-                await self._apply_adjustment(trade, action, scale_pct or 1.0)
+                await self._apply_adjustment(
+                    trade, action, scale_pct or 1.0,
+                    llm_reasoning=(decision or {}).get("reasoning"),
+                )
             except Exception as exc:  # noqa: BLE001
                 _log.warning("auto_apply_adjustment_failed",
                               trade=trade.trade_ulid, error=str(exc)[:160])
 
     async def _apply_adjustment(self, trade: TradeLedger,
-                                  action: str, scale_pct: float) -> None:
+                                  action: str, scale_pct: float,
+                                  *, llm_reasoning: str | None = None) -> None:
         """Execute a monitor-suggested adjustment. Called either from
         auto-execute path or from the /proposals/<ulid>/decide approval
-        flow."""
+        flow. `llm_reasoning` is the LLM verdict text — when present, it's
+        persisted onto the opening proposal's extras so the closures banner
+        can surface "our analyst closed it because <reason>"."""
         # CLOSE → publish TradeClosure at current price.
         if action == "close":
             redis = get_redis()
@@ -693,7 +720,10 @@ class PositionMonitor(BaseAgent):
             except (TypeError, ValueError):
                 price = 0.0
             if price > 0:
-                await self._publish_closure(trade, price, CloseReason.MANUAL)
+                await self._publish_closure(
+                    trade, price, CloseReason.MANUAL,
+                    llm_reasoning=llm_reasoning,
+                )
             return
         # SCALE_UP → emit a new TradeProposal so the regular pipeline opens
         # an additional trade on the same symbol/side. Bypass risk only at

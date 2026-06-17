@@ -61,8 +61,8 @@ FIELDS: dict[str, dict] = {
         "label": "Max simultaneous positions",
         "group": "portfolio",
         "type": "int",
-        "min": 1, "max": 20, "step": 1,
-        "help": "Hard ceiling on open trades — applies across all venues. Reject incoming proposals once full.",
+        "min": 1, "max": 200, "step": 1,
+        "help": "Hard ceiling on open trades across all venues. Default 75 = headroom for horizon buckets (35+15+10+5). Reject incoming proposals once full.",
     },
     "max_correlated_positions": {
         "label": "Max correlated positions",
