@@ -2,10 +2,44 @@
 {% block title %}Money · Plata{% endblock %}
 {% block content %}
 <div class="space-y-4">
-  <div class="flex items-center justify-between">
+  <div class="flex items-center justify-between flex-wrap gap-2">
     <h1 class="text-2xl font-semibold">Money</h1>
-    <span class="text-[10px] text-gray-500">All-time, every venue. Updated on page load.</span>
+    <span class="text-[10px] text-gray-500">Every venue. Closed-trade aggregates use the selected window.</span>
   </div>
+
+  {# ===== Date range picker ===== #}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      {% set _presets = [('4h', 'Last 4h'), ('24h', 'Last 24h'),
+                          ('7d', 'Last 7 days'), ('30d', 'Last 30 days'),
+                          ('all', 'All time')] %}
+      {% for key, label in _presets %}
+      <a href="?range={{ key }}"
+         class="text-xs px-3 py-1.5 rounded border
+            {% if range_preset == key %}bg-blue-600 text-white border-blue-600
+            {% else %}border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
+        {{ label }}
+      </a>
+      {% endfor %}
+      <form method="get" class="flex items-center gap-1 ml-2" action="">
+        <input type="date" name="from" value="{{ range_from[:10] if range_from else '' }}"
+               class="text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+        <span class="text-xs text-gray-500">→</span>
+        <input type="date" name="to" value="{{ range_to[:10] if range_to else '' }}"
+               class="text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">
+        <button type="submit"
+                class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">
+          Custom
+        </button>
+      </form>
+      {% if range_preset == 'custom' %}
+        <span class="text-[10px] text-gray-500 ml-2">Custom: {{ range_from[:10] }} → {{ range_to[:10] or 'now' }}</span>
+      {% endif %}
+    </div>
+    <p class="text-[10px] text-gray-500 mt-2">
+      KPIs and per-day bars use the selected window. <b>Open right now</b> always shows current positions regardless of the window.
+    </p>
+  </section>
 
   {# ===== Top KPIs ===== #}
   <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -54,6 +88,18 @@
       <p class="text-[11px] text-gray-500 mb-2">What's tied up where right now.</p>
       <div id="open-mix-chart" style="height: 260px;"></div>
     </div>
+  </section>
+
+  {# ===== Per-day earned vs lost ===== #}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+    <h2 class="text-sm font-semibold mb-1">Earned vs lost per period</h2>
+    <p class="text-[11px] text-gray-500 mb-2">
+      Auto-grouped by the window:
+      <span class="font-mono">4h → 15-min buckets</span> ·
+      <span class="font-mono">24h → hourly</span> ·
+      <span class="font-mono">7d / 30d / all → daily</span>.
+    </p>
+    <div id="daily-bars-chart" style="height: 300px;"></div>
   </section>
 
   {# ===== Class breakdown table + bar ===== #}
@@ -105,19 +151,24 @@
   const _tickColor = _darkMode ? '#9ca3af' : '#6b7280';
 
   // ===== Cumulative net PnL line =====
+  // dataLabels are explicitly OFF — earlier version printed every running
+  // total on the chart which made it unreadable. Trajectory is what matters;
+  // hover for exact values.
   const cumData = {{ cumulative | tojson }};
   if (cumData.length) {
     new ApexCharts(document.getElementById('cum-pnl-chart'), {
       chart: { type: 'area', height: 260, toolbar: { show: false }, animations: { enabled: false } },
       series: [{ name: 'Net P&L (USD)', data: cumData.map(p => ({ x: new Date(p.ts).getTime(), y: p.cum })) }],
-      stroke: { curve: 'straight', width: 2 },
+      stroke: { curve: 'smooth', width: 2.5 },
       colors: ['#3b82f6'],
+      dataLabels: { enabled: false },
+      markers: { size: 0, hover: { size: 4 } },
       fill: {
         type: 'gradient',
         gradient: { shadeIntensity: 0.6, opacityFrom: 0.3, opacityTo: 0.05, stops: [0, 90] },
       },
       xaxis: { type: 'datetime', labels: { style: { colors: _tickColor } } },
-      yaxis: { labels: { formatter: v => '$' + v.toFixed(2), style: { colors: _tickColor } } },
+      yaxis: { labels: { formatter: v => '$' + v.toFixed(0), style: { colors: _tickColor } } },
       tooltip: {
         x: { format: 'yyyy-MM-dd HH:mm' },
         y: { formatter: v => '$' + v.toFixed(2) },
@@ -126,7 +177,40 @@
       annotations: { yaxis: [{ y: 0, borderColor: '#94a3b8', strokeDashArray: 4 }] },
     }).render();
   } else {
-    document.getElementById('cum-pnl-chart').innerHTML = '<div class="text-center text-gray-400 text-sm py-12">No closed trades yet.</div>';
+    document.getElementById('cum-pnl-chart').innerHTML = '<div class="text-center text-gray-400 text-sm py-12">No closed trades in this window.</div>';
+  }
+
+  // ===== Per-period earned vs lost bars =====
+  const daily = {{ daily_series | tojson }};
+  if (daily.length) {
+    new ApexCharts(document.getElementById('daily-bars-chart'), {
+      chart: { type: 'bar', height: 300, stacked: false, toolbar: { show: false }, animations: { enabled: false } },
+      series: [
+        { name: 'Earned', data: daily.map(d => Math.round(d.earned * 100) / 100), color: '#10b981' },
+        { name: 'Lost',   data: daily.map(d => Math.round(d.lost   * 100) / 100), color: '#ef4444' },
+      ],
+      xaxis: { categories: daily.map(d => d.label), labels: { style: { colors: _tickColor }, rotate: -45, rotateAlways: daily.length > 12 } },
+      yaxis: { labels: { formatter: v => '$' + v.toFixed(0), style: { colors: _tickColor } } },
+      tooltip: {
+        y: { formatter: v => '$' + v.toFixed(2) },
+        custom: ({ seriesIndex, dataPointIndex, w }) => {
+          const d = daily[dataPointIndex];
+          const earned = d.earned, lost = d.lost, net = earned + lost;
+          return `<div class="p-2 text-xs">
+            <div class="font-mono font-semibold mb-1">${d.label}</div>
+            <div>Earned: <b style="color:#10b981">+$${earned.toFixed(2)}</b> (${d.wins} wins)</div>
+            <div>Lost: <b style="color:#ef4444">$${lost.toFixed(2)}</b> (${d.losses} losses)</div>
+            <div>Net: <b style="color:${net>=0?'#10b981':'#ef4444'}">${net>=0?'+':''}$${net.toFixed(2)}</b></div>
+          </div>`;
+        },
+      },
+      plotOptions: { bar: { columnWidth: '60%', borderRadius: 2 } },
+      dataLabels: { enabled: false },
+      grid: { borderColor: _darkMode ? '#374151' : '#e5e7eb' },
+      legend: { labels: { colors: _tickColor } },
+    }).render();
+  } else {
+    document.getElementById('daily-bars-chart').innerHTML = '<div class="text-center text-gray-400 text-sm py-12">No closed trades in this window.</div>';
   }
 
   // ===== Open notional donut =====

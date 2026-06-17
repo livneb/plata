@@ -12,7 +12,7 @@ is obvious without reading numbers.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -59,8 +59,45 @@ def _classify(symbol: str, venue: str) -> str:
     return "other"
 
 
+RANGE_PRESETS = {
+    "4h":  timedelta(hours=4),
+    "24h": timedelta(hours=24),
+    "7d":  timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
+def _resolve_range(preset: str, from_s: str | None, to_s: str | None
+                    ) -> tuple[datetime | None, datetime | None, str]:
+    """Return (range_from, range_to, normalized preset key). `None` means
+    open-ended. Custom takes precedence over preset when from/to are present."""
+    now = datetime.now(timezone.utc)
+    if from_s or to_s:
+        try:
+            rf = datetime.fromisoformat(from_s).replace(tzinfo=timezone.utc) \
+                if from_s else None
+            rt = datetime.fromisoformat(to_s).replace(tzinfo=timezone.utc) \
+                if to_s else None
+            return rf, rt, "custom"
+        except ValueError:
+            pass
+    if preset in RANGE_PRESETS:
+        return now - RANGE_PRESETS[preset], None, preset
+    return None, None, "all"
+
+
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def index(request: Request,
+                range: str = "30d",
+                from_: str | None = None,
+                to: str | None = None):
+    # FastAPI doesn't let us bind `from` as a kwarg directly (reserved word);
+    # accept via query_params for the custom range fallback.
+    qp = request.query_params
+    from_param = qp.get("from") or from_
+    to_param = qp.get("to") or to
+    range_from, range_to, preset = _resolve_range(range, from_param, to_param)
+
     redis = get_redis()
     async with session_scope() as session:
         rows = (await session.execute(
@@ -79,6 +116,19 @@ async def index(request: Request):
     })
     cumulative: list[dict] = []
     cum_net = 0.0
+    # Daily aggregates inside the range — for the per-day earned/lost bars.
+    by_day: dict[str, dict[str, float]] = defaultdict(lambda: {
+        "earned": 0.0, "lost": 0.0, "wins": 0, "losses": 0,
+    })
+
+    def _in_range(ts):
+        if ts is None:
+            return False
+        if range_from and ts < range_from:
+            return False
+        if range_to and ts > range_to:
+            return False
+        return True
 
     for r in rows:
         cls = _classify(r.symbol, r.venue)
@@ -102,6 +152,12 @@ async def index(request: Request):
                 open_unrealized += un
                 bucket["open_unrealized"] += un
         else:
+            close_ts = r.closed_at or r.opened_at
+            # Range filter: only count closed trades whose close_ts is in range.
+            # Cumulative series spans ALL closed trades when range is "all",
+            # otherwise it's restricted to the range so the line is readable.
+            if not _in_range(close_ts):
+                continue
             pnl = float(r.net_pnl or 0)
             if pnl > 0:
                 total_earned += pnl
@@ -114,12 +170,31 @@ async def index(request: Request):
             # Cumulative net-PnL series — point per closed trade.
             cum_net += pnl
             cumulative.append({
-                "ts": (r.closed_at or r.opened_at).isoformat(),
+                "ts": close_ts.isoformat(),
                 "cum": round(cum_net, 4),
                 "pnl": round(pnl, 4),
                 "symbol": r.symbol,
                 "cls": cls,
             })
+            # Per-day earned/lost — granularity depends on range size:
+            #   <= 4h  -> bucket by 15-minute, label HH:MM
+            #   <= 24h -> bucket by hour, label HH:00
+            #   else   -> bucket by day, label YYYY-MM-DD
+            span_hours = ((range_to or datetime.now(timezone.utc))
+                           - range_from).total_seconds() / 3600 if range_from else 99999
+            if span_hours <= 4:
+                key = close_ts.strftime("%Y-%m-%d %H:") + f"{(close_ts.minute // 15) * 15:02d}"
+            elif span_hours <= 24:
+                key = close_ts.strftime("%Y-%m-%d %H:00")
+            else:
+                key = close_ts.strftime("%Y-%m-%d")
+            day = by_day[key]
+            if pnl > 0:
+                day["earned"] += pnl
+                day["wins"] += 1
+            elif pnl < 0:
+                day["lost"] += pnl
+                day["losses"] += 1
 
     net_realized = total_earned + total_lost   # total_lost is negative
     win_count = sum(b["wins"] for b in by_class.values())
@@ -140,6 +215,18 @@ async def index(request: Request):
             "net_realized": round(b["earned"] + b["lost"], 4),
         })
 
+    # Daily/hourly series for the bar chart, sorted by key.
+    daily_series = []
+    for key in sorted(by_day.keys()):
+        d = by_day[key]
+        daily_series.append({
+            "label": key,
+            "earned": round(d["earned"], 4),
+            "lost": round(d["lost"], 4),
+            "wins": d["wins"],
+            "losses": d["losses"],
+        })
+
     return templates.TemplateResponse(
         request,
         "pages/money.html",
@@ -157,6 +244,10 @@ async def index(request: Request):
             "win_rate": round(win_rate, 1),
             "classes_view": classes_view,
             "cumulative": cumulative,
+            "daily_series": daily_series,
+            "range_preset": preset,
+            "range_from": range_from.isoformat() if range_from else "",
+            "range_to": range_to.isoformat() if range_to else "",
             "as_of": datetime.now(timezone.utc).isoformat(),
         },
     )
