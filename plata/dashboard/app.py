@@ -668,26 +668,33 @@ def create_app() -> FastAPI:
 
         Stale agents (heartbeat older than 2 min) are excluded — they're dead
         processes, not halted, and the banner is for actionable halts only.
+
+        Fail-soft: any Redis timeout/error returns an empty payload so the
+        banner-poll loop on every page doesn't 500 the user. The next poll
+        (10s later) retries — transient railway redis latency self-resolves.
         """
         from datetime import datetime as _dt, timezone as _tz
         from plata.core.bus import get_redis
         redis = get_redis()
         halted: list[str] = []
         now_utc = _dt.now(_tz.utc)
-        async for k in redis.scan_iter(match="agent_status:*", count=100):
-            data = await redis.hgetall(k)
-            if (data.get("halted") or "").lower() != "true":
-                continue
-            # Exclude stale processes — they're dead, not pausable.
-            hb = data.get("last_heartbeat")
-            if hb:
-                try:
-                    if (now_utc - _dt.fromisoformat(hb)).total_seconds() > 120:
-                        continue
-                except Exception:  # noqa: BLE001
+        try:
+            async for k in redis.scan_iter(match="agent_status:*", count=100):
+                data = await redis.hgetall(k)
+                if (data.get("halted") or "").lower() != "true":
                     continue
-            halted.append(k.split(":")[-1])
-        system_state = await redis.get("system:state") or "RUNNING"
+                hb = data.get("last_heartbeat")
+                if hb:
+                    try:
+                        if (now_utc - _dt.fromisoformat(hb)).total_seconds() > 120:
+                            continue
+                    except Exception:  # noqa: BLE001
+                        continue
+                halted.append(k.split(":")[-1])
+            system_state = await redis.get("system:state") or "RUNNING"
+        except Exception:  # noqa: BLE001 — transient Redis latency, etc.
+            return {"count": 0, "names": [], "system_state": "UNKNOWN",
+                    "stale": True}
         return {"count": len(halted), "names": sorted(halted), "system_state": system_state}
 
     @app.get("/api/header_stats")

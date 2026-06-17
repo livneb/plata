@@ -64,6 +64,22 @@ async def ensure_indexes() -> None:
     await _ensure_lesson_index(redis)
 
 
+async def _create_index_idempotent(redis, name, schema, definition) -> None:
+    """create_index that survives the race window between info() and
+    create_index() — when two agents boot simultaneously, both see info()
+    fail, both try to create, the second one used to crash with "Index
+    already exists" and trip the supervisor crashloop. Swallow that.
+    """
+    try:
+        await redis.ft(name).create_index(schema, definition=definition)
+        _log.info("created_index", name=name)
+    except Exception as exc:  # noqa: BLE001
+        if "already exists" in str(exc).lower():
+            _log.debug("index_already_exists_race", name=name)
+            return
+        raise
+
+
 async def _ensure_lesson_index(redis) -> None:
     try:
         await redis.ft(LESSON_INDEX).info()
@@ -85,8 +101,7 @@ async def _ensure_lesson_index(redis) -> None:
         ),
     )
     definition = IndexDefinition(prefix=["lesson:"], index_type=IndexType.JSON)
-    await redis.ft(LESSON_INDEX).create_index(schema, definition=definition)
-    _log.info("created_index", name=LESSON_INDEX)
+    await _create_index_idempotent(redis, LESSON_INDEX, schema, definition)
 
 
 async def _ensure_entity_index(redis) -> None:
@@ -107,8 +122,7 @@ async def _ensure_entity_index(redis) -> None:
         ),
     )
     definition = IndexDefinition(prefix=["entity:"], index_type=IndexType.JSON)
-    await redis.ft(ENTITY_INDEX).create_index(schema, definition=definition)
-    _log.info("created_index", name=ENTITY_INDEX)
+    await _create_index_idempotent(redis, ENTITY_INDEX, schema, definition)
 
 
 async def _ensure_event_index(redis) -> None:
@@ -130,8 +144,7 @@ async def _ensure_event_index(redis) -> None:
         ),
     )
     definition = IndexDefinition(prefix=["event:"], index_type=IndexType.JSON)
-    await redis.ft(EVENT_INDEX).create_index(schema, definition=definition)
-    _log.info("created_index", name=EVENT_INDEX)
+    await _create_index_idempotent(redis, EVENT_INDEX, schema, definition)
 
 
 # ---------------------------------------------------------------------------
