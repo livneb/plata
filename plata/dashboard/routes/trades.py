@@ -547,6 +547,7 @@ async def detail(request: Request, trade_ulid: str):
         # but if the operator retunes horizon thresholds we want what the
         # bucket actually was at decision time.
         bucket = None
+        council_block = None
         try:
             from plata.core.db import Proposal as _P
             async with session_scope() as session:
@@ -555,8 +556,10 @@ async def detail(request: Request, trade_ulid: str):
                 )).scalar_one_or_none()
                 if pr and pr.extras:
                     bucket = (pr.extras or {}).get("horizon_bucket")
+                    council_block = (pr.extras or {}).get("council")
         except Exception:  # noqa: BLE001
             bucket = None
+            council_block = None
         if not bucket:
             # Fallback: re-derive from milestones with the same thresholds
             # used by the strategist (default values; not Redis-current).
@@ -627,5 +630,6 @@ async def detail(request: Request, trade_ulid: str):
             "live": live,
             "horizon": horizon,
             "outcome": outcome,
+            "council": council_block,
         },
     )

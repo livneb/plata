@@ -369,6 +369,55 @@ class Strategist(BaseAgent):
                                  "dropped_low_conviction", 1)
             return
 
+        # Council deliberation — only for high-conviction trades. The
+        # threshold is operator-tunable (council_min_conviction). The
+        # council's role-LLMs (risk/reviewer/historian/position_monitor)
+        # each contribute a POV; an aggregator returns conviction_delta +
+        # blockers. Total wall budget 15s; on any failure original
+        # conviction stands.
+        council_extras: dict | None = None
+        try:
+            council_enabled = (await redis.hget(
+                "risk_config", "council_enabled")) or "true"
+            council_threshold = float((await redis.hget(
+                "risk_config", "council_min_conviction")) or 0.65)
+        except Exception:  # noqa: BLE001
+            council_enabled, council_threshold = "true", 0.65
+        if (council_enabled.lower() in ("true", "1", "yes")
+                and conv >= council_threshold):
+            try:
+                from plata.agents.council import deliberate
+                verdict = await deliberate(
+                    decision=decision,
+                    event_summary=event.summary,
+                    analogs=analogs,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.log.warning("council_call_failed",
+                                  event_ulid=event.ulid, error=str(exc)[:200])
+                verdict = None
+            if verdict:
+                blockers = verdict.get("blockers") or []
+                if blockers:
+                    self.log.info("proposal_dropped_council_blocked",
+                                   event_ulid=event.ulid, blockers=blockers)
+                    await redis.hincrby(f"agent_stats:{self.name}",
+                                         "dropped_council_blocked", 1)
+                    return
+                # Apply the conviction delta and stash the council notes
+                # so the trade detail page can render them.
+                delta = float(verdict.get("conviction_delta") or 0.0)
+                conv = max(0.0, min(1.0, conv + delta))
+                decision["conviction"] = conv
+                council_extras = {
+                    "conviction_delta": delta,
+                    "council_notes": verdict.get("council_notes"),
+                    "povs": verdict.get("povs"),
+                }
+                self.log.info("council_applied",
+                               event_ulid=event.ulid,
+                               conviction_delta=delta, new_conviction=conv)
+
         # Horizon classification — based on the LARGEST milestone eta_minutes
         # the LLM gave. Drives sizing (per-bucket $ budget) and quotas
         # (max-N-per-day so we don't flood any one horizon).
@@ -432,12 +481,15 @@ class Strategist(BaseAgent):
         # Persist to Postgres so the proposals page can show the full lifecycle.
         try:
             from plata.core.proposals import record_published
-            await record_published(proposal, extras={
+            published_extras = {
                 "horizon_bucket": bucket,
                 "horizon_max_eta_min": int(max_eta),
                 "horizon_per_position_usd": float(per_position_usd),
                 "horizon_today_count_after": int(new_count),
-            })
+            }
+            if council_extras is not None:
+                published_extras["council"] = council_extras
+            await record_published(proposal, extras=published_extras)
         except Exception:  # noqa: BLE001
             pass
         self.log.info("proposal_published",

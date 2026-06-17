@@ -90,6 +90,14 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     # Disable by setting researcher_enabled=false — saves ~$1/day Sonnet.
     "researcher_enabled": "true",
     "researcher_interval_min": "30",
+    # ===== Council deliberation =====
+    # When a proposal's strategist-conviction is >= council_min_conviction,
+    # four POV LLM calls (risk_manager/reviewer/historian/position_monitor)
+    # critique it and an aggregator returns conviction_delta + blockers.
+    # Disable by setting council_enabled=false — saves ~5 LLM calls per
+    # high-conviction proposal.
+    "council_enabled": "true",
+    "council_min_conviction": "0.65",
     # ===== Horizon buckets =====
     # Total daily $ to deploy across all four buckets. Set to 0 to disable
     # bucket sizing entirely (risk_per_trade_pct used instead).
