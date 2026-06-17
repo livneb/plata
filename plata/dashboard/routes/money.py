@@ -114,8 +114,7 @@ async def index(request: Request,
         "earned": 0.0, "lost": 0.0,
         "wins": 0, "losses": 0, "open_count": 0,
     })
-    cumulative: list[dict] = []
-    cum_net = 0.0
+    cumulative: list[dict] = []  # filled after we sort closed trades by close_ts
     # Daily aggregates inside the range — for the per-day earned/lost bars.
     by_day: dict[str, dict[str, float]] = defaultdict(lambda: {
         "earned": 0.0, "lost": 0.0, "wins": 0, "losses": 0,
@@ -130,6 +129,11 @@ async def index(request: Request,
             return False
         return True
 
+    # First pass: collect closed-in-range trades into a list so we can sort by
+    # close_ts before building the cumulative series. The original loop built
+    # cumulative in opened_at order but charted by close_ts, which caused the
+    # backwards-traveling zigzag the user saw on the chart.
+    closed_in_range: list[dict] = []
     for r in rows:
         cls = _classify(r.symbol, r.venue)
         bucket = by_class[cls]
@@ -154,8 +158,6 @@ async def index(request: Request,
         else:
             close_ts = r.closed_at or r.opened_at
             # Range filter: only count closed trades whose close_ts is in range.
-            # Cumulative series spans ALL closed trades when range is "all",
-            # otherwise it's restricted to the range so the line is readable.
             if not _in_range(close_ts):
                 continue
             pnl = float(r.net_pnl or 0)
@@ -167,12 +169,9 @@ async def index(request: Request,
                 total_lost += pnl
                 bucket["lost"] += pnl
                 bucket["losses"] += 1
-            # Cumulative net-PnL series — point per closed trade.
-            cum_net += pnl
-            cumulative.append({
-                "ts": close_ts.isoformat(),
-                "cum": round(cum_net, 4),
-                "pnl": round(pnl, 4),
+            closed_in_range.append({
+                "close_ts": close_ts,
+                "pnl": pnl,
                 "symbol": r.symbol,
                 "cls": cls,
             })
@@ -213,6 +212,23 @@ async def index(request: Request,
             **{k: round(v, 4) for k, v in b.items() if isinstance(v, float)},
             "wins": b["wins"], "losses": b["losses"], "open_count": b["open_count"],
             "net_realized": round(b["earned"] + b["lost"], 4),
+        })
+
+    # Cumulative net-PnL series: sort closed trades by close timestamp, then
+    # accumulate. Sorted order is what makes the line read left-to-right
+    # monotonically in time — without it, an earlier-opened trade that closed
+    # later would be added to cum_net AFTER a later-opened trade that closed
+    # earlier, dragging the line backwards on the chart.
+    closed_in_range.sort(key=lambda c: c["close_ts"])
+    cum_net = 0.0
+    for c in closed_in_range:
+        cum_net += c["pnl"]
+        cumulative.append({
+            "ts": c["close_ts"].isoformat(),
+            "cum": round(cum_net, 4),
+            "pnl": round(c["pnl"], 4),
+            "symbol": c["symbol"],
+            "cls": c["cls"],
         })
 
     # Daily/hourly series for the bar chart, sorted by key.
