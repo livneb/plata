@@ -44,7 +44,18 @@ AGENT_MODELS: dict[str, str] = {
     "scraper": "anthropic/claude-haiku-4-5",
     "position_monitor": "anthropic/claude-haiku-4-5",
     "translator": "openai/gpt-4o-mini",
+    "researcher": "anthropic/claude-sonnet-4-6",   # quality matters for the brain
+    "council": "anthropic/claude-sonnet-4-6",      # deliberation aggregator
 }
+
+# Agents whose system prompts should be prepended with the current
+# knowledge_briefing (written by the researcher agent every ~30 min).
+# Decision-makers benefit from market context; ingestion-side agents
+# (graph_ingestion, scraper, translator) don't — they're classifying
+# news, not making trades.
+BRIEFING_AWARE_AGENTS: frozenset[str] = frozenset({
+    "strategist", "position_monitor", "reviewer", "council", "historian",
+})
 
 # Per-agent FREE OpenRouter models (the ":free" suffix triggers the free tier).
 # Tradeoffs per agent:
@@ -326,6 +337,31 @@ def _matches_provider_preference(model: str, preference: str) -> bool:
         return True
     provider = _provider_for(model)
     return provider == preference
+
+
+async def _load_briefing_block() -> str | None:
+    """Load the researcher's current market briefing and render it as a
+    compact <system_context>...</system_context> block. Returns None if no
+    briefing exists yet (researcher hasn't run, or just booted)."""
+    try:
+        r = get_redis()
+        h = await r.hgetall("knowledge_briefing:current")
+        if not h:
+            return None
+        body = h.get("body")
+        if not body:
+            return None
+        # Bound the size so we don't burn tokens on huge briefings.
+        body_short = body if len(body) <= 3000 else body[:3000] + "...(truncated)"
+        ts = h.get("ts", "")
+        return (
+            "<system_context source=\"researcher\" updated=\"" + ts + "\">\n"
+            "Current market briefing — use as context for every decision below.\n"
+            "" + body_short + "\n"
+            "</system_context>"
+        )
+    except Exception:  # noqa: BLE001
+        return None
 
 
 async def _next_free_candidate(tried: set[str], *, relax_garbage: bool = False) -> str | None:
@@ -733,6 +769,19 @@ class LLMClient:
         """Run a chat completion. Records cost and enforces budget caps."""
         # Pick up live config changes (mode / per-agent override).
         await self._refresh_model()
+        # Prepend the current market briefing for decision-making agents
+        # so every trade-related LLM call reflects the researcher's latest
+        # synthesis (regime + narratives + sector outlook). Cheap — reads
+        # one Redis hash. Skips silently if no briefing exists yet.
+        if self.agent in BRIEFING_AWARE_AGENTS:
+            briefing_block = await _load_briefing_block()
+            if briefing_block:
+                # Prepend (don't replace) — caller's system prompt still wins
+                # for agent-specific instructions; briefing is context.
+                messages = [
+                    {"role": "system", "content": briefing_block},
+                    *messages,
+                ]
         # If the selected model is a `:free` one that we've previously
         # marked as permanently dead, walk to a healthy candidate up
         # front instead of consuming an attempt only to retry. Avoids

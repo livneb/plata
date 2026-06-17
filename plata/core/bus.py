@@ -56,6 +56,9 @@ class Channels:
     # scratch" wipe. Sysop subscribes for audit; UI can refresh to show
     # the empty positions list immediately.
     SYSTEM_RESET = "system:reset"
+    # Fired by the researcher agent after each briefing cycle. Decision
+    # agents can warm their local copy, or just lazy-load on next LLM call.
+    KNOWLEDGE_UPDATED = "knowledge_updated"
     CONFIG_UPDATED = "config_updated"
 
     @staticmethod

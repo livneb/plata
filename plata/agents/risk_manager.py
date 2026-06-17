@@ -83,6 +83,13 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     # tight; raise to 5 if suggestions are noisy.
     "tuning_every_n_closures": "10",
     "tuning_min_bucket_trades": "3",
+    # ===== Researcher agent (the "brain") =====
+    # Synthesizes a market briefing every researcher_interval_min minutes
+    # from the latest enriched events. Briefing is prepended to every
+    # decision-making LLM call (strategist, position_monitor, reviewer).
+    # Disable by setting researcher_enabled=false — saves ~$1/day Sonnet.
+    "researcher_enabled": "true",
+    "researcher_interval_min": "30",
     # ===== Horizon buckets =====
     # Total daily $ to deploy across all four buckets. Set to 0 to disable
     # bucket sizing entirely (risk_per_trade_pct used instead).
