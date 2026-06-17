@@ -88,6 +88,84 @@ SENTIMENT_TRIGGER_THRESHOLD = 0.5
 ANALOG_K = 8
 
 
+# Horizon buckets — each new proposal is classified by the LARGEST
+# milestone eta_minutes the LLM produces. The user-facing intent is:
+#   few_hours  - intraday momentum, many positions, small $ each
+#   few_days   - swing trades, fewer positions, more $ each
+#   few_weeks  - longer thesis, ~weekly close, more $
+#   long_term  - multi-month / structural, fewest positions, biggest $
+# Thresholds are in minutes and configurable via risk_config keys
+# horizon_few_hours_max_min / horizon_few_days_max_min / horizon_few_weeks_max_min.
+# Per-bucket daily quotas and budget shares also live in risk_config —
+# see DEFAULT_RISK_CONFIG in plata/agents/risk_manager.py.
+HORIZON_BUCKETS = ("few_hours", "few_days", "few_weeks", "long_term")
+
+
+async def _classify_horizon(max_eta_minutes: int) -> str:
+    """Map the trade's longest expected-impact milestone to one of the four
+    horizon buckets. Thresholds are read live from risk_config so the
+    operator can re-tune without code changes."""
+    try:
+        from plata.core.bus import get_redis
+        cfg = await get_redis().hgetall("risk_config") or {}
+        h_hours = int(cfg.get("horizon_few_hours_max_min") or 1440)     # 24h
+        h_days = int(cfg.get("horizon_few_days_max_min") or 10080)      # 7d
+        h_weeks = int(cfg.get("horizon_few_weeks_max_min") or 43200)    # 30d
+    except Exception:  # noqa: BLE001
+        h_hours, h_days, h_weeks = 1440, 10080, 43200
+    if max_eta_minutes <= 0:
+        return "few_days"   # safest default when LLM didn't give milestones
+    if max_eta_minutes <= h_hours:
+        return "few_hours"
+    if max_eta_minutes <= h_days:
+        return "few_days"
+    if max_eta_minutes <= h_weeks:
+        return "few_weeks"
+    return "long_term"
+
+
+async def _bucket_quota(bucket: str) -> tuple[int, int]:
+    """Return (max_per_day, today_count) for `bucket`. The strategist
+    drops new proposals once today_count reaches max_per_day so we don't
+    flood one horizon at the cost of the others."""
+    from datetime import date as _date
+    from plata.core.bus import get_redis
+    try:
+        r = get_redis()
+        cfg = await r.hgetall("risk_config") or {}
+        DEFAULT_COUNTS = {"few_hours": 35, "few_days": 15, "few_weeks": 10, "long_term": 5}
+        max_per_day = int(cfg.get(f"horizon_{bucket}_daily_count")
+                          or DEFAULT_COUNTS.get(bucket, 10))
+        today_key = f"horizon:count:{_date.today().isoformat()}:{bucket}"
+        cur = int(await r.get(today_key) or 0)
+        return max_per_day, cur
+    except Exception:  # noqa: BLE001
+        return 999, 0
+
+
+async def _bucket_per_position_usd(bucket: str) -> float:
+    """The dollar size each new position in `bucket` should be opened at,
+    derived from the operator's total daily budget × bucket pct / target count.
+    Returns 0 to mean "fall back to risk_per_trade_pct sizing"."""
+    from plata.core.bus import get_redis
+    try:
+        r = get_redis()
+        cfg = await r.hgetall("risk_config") or {}
+        total = float(cfg.get("horizon_total_daily_budget_usd") or 0)
+        if total <= 0:
+            return 0.0
+        DEFAULT_PCTS = {"few_hours": 10.0, "few_days": 25.0,
+                          "few_weeks": 30.0, "long_term": 35.0}
+        DEFAULT_COUNTS = {"few_hours": 35, "few_days": 15, "few_weeks": 10, "long_term": 5}
+        pct = float(cfg.get(f"horizon_{bucket}_budget_pct")
+                     or DEFAULT_PCTS.get(bucket, 25.0))
+        count = max(1, int(cfg.get(f"horizon_{bucket}_daily_count")
+                            or DEFAULT_COUNTS.get(bucket, 10)))
+        return round(total * pct / 100.0 / count, 2)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 async def _current_thresholds() -> tuple[float, int]:
     """Read the live values from the same risk_config hash that drives all
     other tunables. Falls back to module defaults if missing."""
@@ -274,10 +352,47 @@ class Strategist(BaseAgent):
             except Exception:  # noqa: BLE001
                 continue
 
+        # Min-conviction filter — operator-tunable. Below this, the proposal
+        # is dropped without persistence so we don't pile up no-op rows in
+        # the proposals table. Default 0.3.
+        conv = float(decision.get("conviction") or 0)
+        try:
+            min_conv = float((await redis.hget(
+                "risk_config", "min_conviction_to_publish")) or 0.3)
+        except Exception:  # noqa: BLE001
+            min_conv = 0.3
+        if conv < min_conv:
+            self.log.info("proposal_dropped_low_conviction",
+                           event_ulid=event.ulid, conviction=conv,
+                           threshold=min_conv)
+            await redis.hincrby(f"agent_stats:{self.name}",
+                                 "dropped_low_conviction", 1)
+            return
+
+        # Horizon classification — based on the LARGEST milestone eta_minutes
+        # the LLM gave. Drives sizing (per-bucket $ budget) and quotas
+        # (max-N-per-day so we don't flood any one horizon).
+        max_eta = max((m.eta_minutes for m in milestones), default=0)
+        bucket = await _classify_horizon(max_eta)
+        max_per_day, today_count = await _bucket_quota(bucket)
+        if today_count >= max_per_day:
+            self.log.info("proposal_dropped_horizon_quota_reached",
+                           event_ulid=event.ulid, bucket=bucket,
+                           today_count=today_count, max_per_day=max_per_day)
+            await redis.hincrby(f"agent_stats:{self.name}",
+                                 f"dropped_quota_{bucket}", 1)
+            return
+        per_position_usd = await _bucket_per_position_usd(bucket)
+
         # Clamp symbol to 64 chars defensively — free models occasionally
         # produce hallucinated long strings that previously overflowed
         # proposals.symbol(varchar 32) and silently lost the row.
         raw_symbol = str(decision.get("symbol") or "").strip()[:64]
+        # If the operator has set a non-zero total daily budget, use the
+        # per-bucket $-per-position derived above; otherwise leave None so
+        # the risk_manager falls back to risk_per_trade_pct sizing.
+        from decimal import Decimal as _Dec
+        sized_usd = _Dec(str(per_position_usd)) if per_position_usd > 0 else None
         proposal = TradeProposal(
             triggering_event_ulid=event.ulid,
             symbol=raw_symbol,
@@ -288,7 +403,17 @@ class Strategist(BaseAgent):
             milestones=milestones,
             suggested_sl_pct=decision.get("suggested_sl_pct"),
             suggested_tp_pct=decision.get("suggested_tp_pct"),
+            suggested_notional_usd=sized_usd,
         )
+        # Bump today's bucket counter so subsequent proposals see the
+        # updated quota. 36h TTL gives a safety margin past midnight UTC.
+        try:
+            from datetime import date as _date
+            today_key = f"horizon:count:{_date.today().isoformat()}:{bucket}"
+            new_count = await redis.incr(today_key)
+            await redis.expire(today_key, 36 * 3600)
+        except Exception:  # noqa: BLE001
+            new_count = today_count + 1
         # Record per-proposal LLM cost snapshot for the trade-detail page.
         try:
             from datetime import date
@@ -307,8 +432,15 @@ class Strategist(BaseAgent):
         # Persist to Postgres so the proposals page can show the full lifecycle.
         try:
             from plata.core.proposals import record_published
-            await record_published(proposal)
+            await record_published(proposal, extras={
+                "horizon_bucket": bucket,
+                "horizon_max_eta_min": int(max_eta),
+                "horizon_per_position_usd": float(per_position_usd),
+                "horizon_today_count_after": int(new_count),
+            })
         except Exception:  # noqa: BLE001
             pass
-        self.log.info("proposal_published", symbol=proposal.symbol, side=proposal.side,
-                       milestones=len(milestones))
+        self.log.info("proposal_published",
+                       symbol=proposal.symbol, side=proposal.side,
+                       milestones=len(milestones), bucket=bucket,
+                       sized_usd=float(per_position_usd))

@@ -525,41 +525,59 @@ async def detail(request: Request, trade_ulid: str):
     # Derived view-models for the "human" hero card at the top of the page.
     # Most of trade_detail's grid is information-dense for debugging agents;
     # the hero card is the one block the user actually reads.
+    HORIZON_META = {
+        "few_hours": {"label": "Few hours",  "icon": "⚡",
+                       "chip_class": "bg-yellow-100 text-yellow-800",
+                       "tooltip": "Intraday momentum — expected to close within hours."},
+        "few_days":  {"label": "Few days",   "icon": "🌊",
+                       "chip_class": "bg-blue-100 text-blue-800",
+                       "tooltip": "Swing trade — expected to play out over days."},
+        "few_weeks": {"label": "Few weeks",  "icon": "🌒",
+                       "chip_class": "bg-cyan-100 text-cyan-800",
+                       "tooltip": "Longer thesis — expected to play out over weeks."},
+        "long_term": {"label": "Long-term",  "icon": "🌱",
+                       "chip_class": "bg-purple-100 text-purple-800",
+                       "tooltip": "Structural / multi-month thesis."},
+    }
     horizon: dict = {"label": "—", "kind": "unknown",
                       "chip_class": "bg-gray-200 text-gray-700"}
     if proposal:
+        # Prefer the strategist-stored bucket (in Proposal.extras) over the
+        # client-side milestone re-derivation — they agree by construction,
+        # but if the operator retunes horizon thresholds we want what the
+        # bucket actually was at decision time.
+        bucket = None
         try:
-            milestones = proposal.get("milestones") or []
-            etas = [int(m.get("eta_minutes") or 0) for m in milestones]
-            max_eta = max(etas) if etas else 0
-            if max_eta == 0:
-                pass
-            elif max_eta < 24 * 60:
-                horizon = {
-                    "label": "Quick win",
-                    "kind": "quick",
-                    "tooltip": f"Expected to resolve within {max_eta // 60 or 1}h.",
-                    "chip_class": "bg-yellow-100 text-yellow-800",
-                    "icon": "⚡",
-                }
-            elif max_eta < 7 * 24 * 60:
-                horizon = {
-                    "label": "Swing",
-                    "kind": "swing",
-                    "tooltip": f"Expected to play out over {max_eta // 1440 or 1}d.",
-                    "chip_class": "bg-blue-100 text-blue-800",
-                    "icon": "🌊",
-                }
-            else:
-                horizon = {
-                    "label": "Long-term",
-                    "kind": "long_term",
-                    "tooltip": f"Expected to play out over {max_eta // 10080 or 1}w.",
-                    "chip_class": "bg-purple-100 text-purple-800",
-                    "icon": "🌱",
-                }
+            from plata.core.db import Proposal as _P
+            async with session_scope() as session:
+                pr = (await session.execute(
+                    select(_P).where(_P.proposal_ulid == trade.proposal_id)
+                )).scalar_one_or_none()
+                if pr and pr.extras:
+                    bucket = (pr.extras or {}).get("horizon_bucket")
         except Exception:  # noqa: BLE001
-            pass
+            bucket = None
+        if not bucket:
+            # Fallback: re-derive from milestones with the same thresholds
+            # used by the strategist (default values; not Redis-current).
+            try:
+                etas = [int(m.get("eta_minutes") or 0)
+                          for m in (proposal.get("milestones") or [])]
+                max_eta = max(etas) if etas else 0
+                if max_eta <= 0:
+                    bucket = None
+                elif max_eta <= 1440:
+                    bucket = "few_hours"
+                elif max_eta <= 10080:
+                    bucket = "few_days"
+                elif max_eta <= 43200:
+                    bucket = "few_weeks"
+                else:
+                    bucket = "long_term"
+            except Exception:  # noqa: BLE001
+                bucket = None
+        if bucket and bucket in HORIZON_META:
+            horizon = {"kind": bucket, **HORIZON_META[bucket]}
 
     # Outcome summary for closed positions — what the human wants to see first.
     outcome: dict = {}

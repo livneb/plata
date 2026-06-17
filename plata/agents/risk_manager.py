@@ -73,6 +73,40 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     "research_max_analog_score": "0.85",
     "research_lookback_years": "5",
     "research_max_per_day": "20",
+    # Minimum strategist conviction required to publish a proposal at all.
+    # Below this, the proposal is dropped silently (no Postgres row, no
+    # downstream pipeline cost). Default 0.3 = "no idea" gets thrown away.
+    "min_conviction_to_publish": "0.3",
+    # How often the Reviewer fires an LLM-driven tuning suggestion.
+    # Default 10 = several per day at typical closure volume. Min trades
+    # per (symbol, conviction-bucket) before a bucket is eligible — 3 is
+    # tight; raise to 5 if suggestions are noisy.
+    "tuning_every_n_closures": "10",
+    "tuning_min_bucket_trades": "3",
+    # ===== Horizon buckets =====
+    # Total daily $ to deploy across all four buckets. Set to 0 to disable
+    # bucket sizing entirely (risk_per_trade_pct used instead).
+    "horizon_total_daily_budget_usd": "0",
+    # Threshold (max milestone eta_minutes) for each bucket — anything
+    # below the few_hours line is "few hours"; anything above few_weeks is
+    # "long term". Tune to match the strategist's milestone resolution.
+    "horizon_few_hours_max_min":  "1440",    # 24h
+    "horizon_few_days_max_min":   "10080",   # 7d
+    "horizon_few_weeks_max_min":  "43200",   # 30d
+    # Max NEW positions per day per bucket. New proposals beyond the limit
+    # are dropped (visible as agent_stats.dropped_quota_<bucket>).
+    "horizon_few_hours_daily_count":  "35",
+    "horizon_few_days_daily_count":   "15",
+    "horizon_few_weeks_daily_count":  "10",
+    "horizon_long_term_daily_count":  "5",
+    # Share of horizon_total_daily_budget_usd allocated to each bucket
+    # (percent). Should sum to 100; if it doesn't the buckets simply get
+    # their pct of the total regardless. Per-position $ =
+    # (total × pct / 100) / daily_count.
+    "horizon_few_hours_budget_pct":  "10.0",
+    "horizon_few_days_budget_pct":   "25.0",
+    "horizon_few_weeks_budget_pct":  "30.0",
+    "horizon_long_term_budget_pct":  "35.0",
 }
 
 
@@ -237,10 +271,17 @@ class RiskManager(BaseAgent):
             await self._reject(proposal, "sector_cap")
             return
 
-        # Approximate notional sizing: 1% of equity per trade (fallback if venue unset)
-        equity = await self._fetch_equity(venue)
-        risk_pct = Decimal(self._config.get("risk_per_trade_pct", "1.0")) / Decimal("100")
-        notional_usd = (Decimal(str(equity)) * risk_pct) if equity else Decimal("100")
+        # Sizing precedence:
+        #   1. proposal.suggested_notional_usd (set by strategist's horizon-
+        #      bucket budget split when the operator has configured
+        #      horizon_total_daily_budget_usd > 0).
+        #   2. equity × risk_per_trade_pct (fallback).
+        if proposal.suggested_notional_usd and Decimal(str(proposal.suggested_notional_usd)) > 0:
+            notional_usd = Decimal(str(proposal.suggested_notional_usd))
+        else:
+            equity = await self._fetch_equity(venue)
+            risk_pct = Decimal(self._config.get("risk_per_trade_pct", "1.0")) / Decimal("100")
+            notional_usd = (Decimal(str(equity)) * risk_pct) if equity else Decimal("100")
 
         ticker = await self._fetch_price(proposal.symbol)
         if ticker is None:

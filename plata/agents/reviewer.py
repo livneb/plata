@@ -159,13 +159,22 @@ class Reviewer(BaseAgent):
             await pipe.execute()
 
         total_closures = int(await redis.incr("reviewer:closures_since_tune") or 0)
-        if total_closures < 25:
+        # Threshold is operator-tunable. Default lowered to 10 (was 25) so
+        # tuning suggestions appear several times a day at typical closure
+        # rates. Min-trades-per-bucket also configurable.
+        try:
+            cfg = await redis.hgetall("risk_config") or {}
+            tune_every = int(cfg.get("tuning_every_n_closures") or 10)
+            min_bucket_trades = int(cfg.get("tuning_min_bucket_trades") or 3)
+        except Exception:  # noqa: BLE001
+            tune_every, min_bucket_trades = 10, 3
+        if total_closures < tune_every:
             return
         # Reset counter and propose a tweak.
         await redis.set("reviewer:closures_since_tune", 0)
 
         worst = await self._find_worst_bucket()
-        if not worst or worst["trades"] < 5:
+        if not worst or worst["trades"] < min_bucket_trades:
             return
 
         tweak = await self._propose_tweak(worst)

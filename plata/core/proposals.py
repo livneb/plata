@@ -78,9 +78,10 @@ async def _maybe_self_heal_tables(exc: Exception) -> bool:
         return False
 
 
-async def record_published(proposal: Any) -> None:
+async def record_published(proposal: Any, *, extras: dict | None = None) -> None:
     """Called by the strategist immediately after publishing to Redis.
-    Self-heals the table on the first failure."""
+    Self-heals the table on the first failure. `extras` (jsonb) carries
+    free-form metadata — horizon bucket, sizing reason, etc."""
     values = {
         "proposal_ulid": proposal.ulid,
         "triggering_event_ulid": getattr(proposal, "triggering_event_ulid", None),
@@ -94,6 +95,7 @@ async def record_published(proposal: Any) -> None:
         "analogs": [a.model_dump(mode="json") for a in (proposal.similar_events or [])],
         "state": "published",
         "last_actor": "strategist",
+        "extras": extras or {},
     }
     err = await _record_drop_attempt(values)
     if err is None:
