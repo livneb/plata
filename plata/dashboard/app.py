@@ -715,7 +715,11 @@ def create_app() -> FastAPI:
         except Exception:  # noqa: BLE001
             pass
         try:
-            today_utc = datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc)
+            # Floor at the later of midnight-UTC and the operator's last
+            # "Start from scratch" reset, so REALIZED TODAY resets after
+            # /controls/reset even though the calendar day hasn't rolled over.
+            from plata.dashboard._today_floor import today_floor
+            today_utc = await today_floor(redis)
             async with session_scope() as session:
                 stats["daily_pnl"] = float((await session.execute(
                     select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))
@@ -793,6 +797,12 @@ def create_app() -> FastAPI:
             v = await redis.get(today_key)
             if v:
                 stats["llm_spend_today"] = float(v)
+            # Subtract the snapshot taken at reset (if any) so post-reset
+            # display starts from $0 — same pattern as the / index card.
+            snap = await redis.get(f"llm:spend_at_reset:{date.today().isoformat()}")
+            if snap:
+                stats["llm_spend_today"] = max(0.0,
+                    stats.get("llm_spend_today", 0.0) - float(snap))
             budget = await redis.get("llm:daily_budget_usd")
             if budget:
                 stats["llm_budget"] = float(budget)
@@ -868,6 +878,12 @@ def create_app() -> FastAPI:
             ctx["system_state"] = await redis.get("system:state") or "UNKNOWN"
             today_key = f"cost:daily:{date.today().isoformat()}"
             ctx["llm_spend_today"] = float(await redis.get(today_key) or 0)
+            # If reset_at is today, subtract the snapshot taken at reset
+            # time so this counter shows "since reset" rather than "since
+            # midnight" — matches the other today-scoped KPIs.
+            snap = await redis.get(f"cost:daily_at_reset:{date.today().isoformat()}")
+            if snap:
+                ctx["llm_spend_today"] = max(0.0, ctx["llm_spend_today"] - float(snap))
         except Exception:
             ctx["system_state"] = "UNKNOWN"
             ctx["llm_spend_today"] = 0.0
@@ -885,7 +901,11 @@ def create_app() -> FastAPI:
                     ctx["open_ulid"] = (await session.execute(
                         select(TradeLedger.trade_ulid).where(TradeLedger.exit_price.is_(None)).limit(1)
                     )).scalar_one_or_none()
-                today_utc = datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc)
+                # Floor at the later of midnight-UTC and the operator's last
+                # reset, so PNL TODAY + SIGNALS TODAY genuinely show "since
+                # the reset" rather than "since midnight" after /controls/reset.
+                from plata.dashboard._today_floor import today_floor
+                today_utc = await today_floor(redis)
                 ctx["daily_pnl"] = float((await session.execute(
                     select(func.coalesce(func.sum(TradeLedger.net_pnl), 0))
                     .where(TradeLedger.exit_price.is_not(None))
@@ -893,7 +913,7 @@ def create_app() -> FastAPI:
                 )).scalar() or 0)
                 ctx["signals_24h"] = (await session.execute(
                     select(func.count()).select_from(SignalArchive)
-                    .where(SignalArchive.fetched_at >= datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0))
+                    .where(SignalArchive.fetched_at >= today_utc)
                 )).scalar() or 0
                 recent_errors = (await session.execute(
                     select(ErrorLog).order_by(ErrorLog.ts.desc()).limit(8)

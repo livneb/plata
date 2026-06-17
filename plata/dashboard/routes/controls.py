@@ -132,6 +132,30 @@ async def reset_system(request: Request):
         await redis.delete("reviewer:closures_since_tune")
     except Exception:  # noqa: BLE001
         pass
+    # Snapshot today's LLM spend so the topbar/Overview "today" cards
+    # display "since reset" rather than "since midnight". We can't wipe
+    # the underlying counters (the daily budget cap reads them) so we
+    # store the current value and the readers subtract it.
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    try:
+        for src_key, snap_key in (
+            (f"llm:spend:{today_iso}",   f"llm:spend_at_reset:{today_iso}"),
+            (f"cost:daily:{today_iso}",  f"cost:daily_at_reset:{today_iso}"),
+        ):
+            v = await redis.get(src_key)
+            if v:
+                # TTL one day so stale snapshots don't accumulate.
+                await redis.set(snap_key, v, ex=86400)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("reset_llm_snapshot_failed", error=str(exc)[:160])
+    # Clear any stale HITL proposals from before the reset so PENDING HITL
+    # drops to 0 and we don't act on pre-reset queued approvals.
+    hitl_wiped = 0
+    try:
+        async for k in redis.scan_iter(match="proposal:pending:*", count=200):
+            await redis.delete(k); hitl_wiped += 1
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("reset_hitl_wipe_failed", error=str(exc)[:160])
 
     # 4. Update baseline equity in risk_config — the Money page + agents
     #    will pick this up on their next config reload.
@@ -157,16 +181,19 @@ async def reset_system(request: Request):
             "closed_count": closed_count,
             "new_equity_usd": new_equity,
             "counter_keys_wiped": counter_keys_wiped,
+            "hitl_wiped": hitl_wiped,
             "ts": datetime.now(timezone.utc).isoformat(),
         })
     except Exception:  # noqa: BLE001
         pass
 
     _log.warning("system_reset_complete", closed=closed_count,
-                  new_equity=new_equity, counters_wiped=counter_keys_wiped)
+                  new_equity=new_equity, counters_wiped=counter_keys_wiped,
+                  hitl_wiped=hitl_wiped)
     return JSONResponse({
         "ok": True,
         "closed_count": closed_count,
         "new_equity_usd": new_equity,
+        "hitl_wiped": hitl_wiped,
         "counter_keys_wiped": counter_keys_wiped,
     })
