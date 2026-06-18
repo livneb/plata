@@ -22,6 +22,14 @@ DEFAULTS: dict[str, Any] = {
     "cryptopanic_enabled": False,
     "rss_enabled": True,
     "telegram_channels_enabled": False,
+    # Added v2.24.198 — no-auth, high-signal feeds. Enabled by default;
+    # operator toggles on /news/.
+    "sec_edgar_enabled": True,
+    "hackernews_enabled": True,
+    "stocktwits_enabled": True,
+    "polymarket_enabled": True,
+    "fear_greed_enabled": True,
+    "defillama_enabled": True,
     # Market-ticker source: poll live prices for top crypto + stocks; emit a
     # PRICE_ACTION signal when a tracked symbol moves > threshold % in window.
     # Gives the strategist momentum/breakout signals independent of news.
@@ -46,21 +54,61 @@ DEFAULTS: dict[str, Any] = {
         'inflation OR crypto OR bitcoin OR ethereum OR regulation OR '
         '"interest rate" OR fed OR ecb OR earnings OR tariff)'
     ),
-    "reddit_subreddits": ["CryptoCurrency", "wallstreetbets", "Bitcoin", "ethfinance"],
+    "reddit_subreddits": ["CryptoCurrency", "wallstreetbets", "Bitcoin",
+                            "ethfinance", "stocks", "investing", "options",
+                            "StockMarket", "SecurityAnalysis"],
+    # SEC EDGAR form filters. 8-K = material event (most stock-moving),
+    # 13D = 5%+ activist stake, 4 = insider trades, 10-Q/10-K = earnings.
+    "sec_edgar_forms": ["8-K", "13D", "13G", "4", "10-Q", "10-K"],
+    # HN: pull top N stories, only emit those with >= min_score.
+    "hackernews_top_n": 30,
+    "hackernews_min_score": 100,
+    # Polymarket swing threshold (%) — emit when YES probability moves > X%.
+    "polymarket_swing_threshold_pct": 8.0,
+    # DeFiLlama: emit when a top-50 protocol's 24h TVL change exceeds X%.
+    "defillama_change_threshold_pct": 8.0,
+    "defillama_top_n": 50,
     # Default RSS feeds — public, no-auth, generally reliable. Users can edit
     # this list on /news/. Picked for: high volume of finance/macro headlines,
     # don't 401 / require partner agreements, return well-formed RSS.
     "rss_feeds": [
+        # Tier 1: Crypto news
         {"name": "CoinDesk",          "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",   "enabled": True},
         {"name": "Cointelegraph",     "url": "https://cointelegraph.com/rss",                      "enabled": True},
         {"name": "Decrypt",           "url": "https://decrypt.co/feed",                            "enabled": True},
         {"name": "The Block",         "url": "https://www.theblock.co/rss.xml",                    "enabled": True},
+        {"name": "Bitcoin Magazine",  "url": "https://bitcoinmagazine.com/feed",                   "enabled": True},
+        # Tier 1: Mainstream financial press
         {"name": "Yahoo Finance",     "url": "https://finance.yahoo.com/news/rssindex",            "enabled": True},
         {"name": "CNBC Top News",     "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "enabled": True},
         {"name": "MarketWatch Top",   "url": "https://feeds.marketwatch.com/marketwatch/topstories/", "enabled": True},
         {"name": "Reuters Business",  "url": "https://www.reuters.com/business/rss",               "enabled": True},
         {"name": "Bloomberg Markets", "url": "https://feeds.bloomberg.com/markets/news.rss",       "enabled": True},
         {"name": "Investing.com",     "url": "https://www.investing.com/rss/news.rss",             "enabled": True},
+        {"name": "Financial Times",   "url": "https://www.ft.com/rss/home",                        "enabled": True},
+        {"name": "FT Markets",        "url": "https://www.ft.com/markets?format=rss",              "enabled": True},
+        # Tier 1: Macro / central banks
+        {"name": "Fed Press Releases","url": "https://www.federalreserve.gov/feeds/press_all.xml", "enabled": True},
+        {"name": "ECB Press",         "url": "https://www.ecb.europa.eu/rss/press.html",           "enabled": True},
+        {"name": "BoE News",          "url": "https://www.bankofengland.co.uk/rss/news",           "enabled": True},
+        {"name": "BLS Releases",      "url": "https://www.bls.gov/feed/news_release.rss",          "enabled": True},
+        # Tier 2: Independent analysis
+        {"name": "Doomberg",          "url": "https://newsletter.doomberg.com/feed",               "enabled": True},
+        {"name": "Bits about Money",  "url": "https://www.bitsaboutmoney.com/archive/rss/",        "enabled": True},
+        {"name": "ZeroHedge",         "url": "https://feeds.feedburner.com/zerohedge/feed",        "enabled": True},
+        # Tier 2: Crypto-focused Substack/blogs
+        {"name": "Bankless",          "url": "https://newsletter.banklesshq.com/feed",             "enabled": True},
+        {"name": "Messari Research",  "url": "https://messari.io/rss",                             "enabled": True},
+        # Tier 2: Tech / earnings catalysts
+        {"name": "TechCrunch",        "url": "https://techcrunch.com/feed/",                       "enabled": True},
+        {"name": "The Verge",         "url": "https://www.theverge.com/rss/index.xml",             "enabled": True},
+        # Tier 2: HN front-page mirror (separate from the JSON source —
+        # this gives you the Show HN / Ask HN long-tail too)
+        {"name": "Hacker News Front", "url": "https://hnrss.org/frontpage?points=200",             "enabled": True},
+        # Reddit RSS — backup to the JSON source, also lets you watch
+        # subs not in the JSON config without restart.
+        {"name": "r/CryptoCurrency RSS","url": "https://www.reddit.com/r/CryptoCurrency/hot/.rss", "enabled": False},
+        {"name": "r/wallstreetbets RSS","url": "https://www.reddit.com/r/wallstreetbets/hot/.rss", "enabled": False},
     ],
     # --- Content filter (applied to every signal before publish) ---
     # Drop if title length < this (junk one-word headlines). Was 20 which

@@ -11,8 +11,13 @@ from plata.agents.scraper.sanitizer import detect_likely_injection, sanitize
 from plata.agents.scraper.sources.base_source import BaseSource
 from plata.agents.scraper.sources.cryptopanic import CryptoPanicSource
 from plata.agents.scraper.sources.gdelt import GdeltSource
+from plata.agents.scraper.sources.hackernews import HackerNewsSource
+from plata.agents.scraper.sources.markets_misc import (
+    DefiLlamaSource, FearGreedSource, PolymarketSource, StockTwitsSource,
+)
 from plata.agents.scraper.sources.reddit import RedditSource
 from plata.agents.scraper.sources.rss import RssSource
+from plata.agents.scraper.sources.sec_edgar import SecEdgarSource
 from plata.agents.scraper.sources.market_ticker import MarketTickerSource
 from plata.core.bus import Streams, publish
 from plata.core.db import SignalArchive, session_scope
@@ -20,8 +25,13 @@ from plata.core.schemas import RawSignal
 
 
 def all_sources() -> list[BaseSource]:
-    return [RedditSource(), CryptoPanicSource(), GdeltSource(), RssSource(),
-            MarketTickerSource()]
+    return [
+        RedditSource(), CryptoPanicSource(), GdeltSource(), RssSource(),
+        MarketTickerSource(),
+        # v2.24.198 — no-auth, high-signal feeds.
+        SecEdgarSource(), HackerNewsSource(), StockTwitsSource(),
+        PolymarketSource(), FearGreedSource(), DefiLlamaSource(),
+    ]
 
 
 class Scraper(BaseAgent):

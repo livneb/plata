@@ -33,6 +33,13 @@ class SignalSource(StrEnum):
     TELEGRAM = "telegram"
     MARKET_TICKER = "market_ticker"
     MANUAL = "manual"
+    # Added in v2.24.198: no-auth, high-signal feeds.
+    SEC_EDGAR = "sec_edgar"            # 8-K / 10-Q / 10-K filings firehose
+    HACKERNEWS = "hackernews"          # HN front page
+    STOCKTWITS = "stocktwits"          # trending tickers + sentiment
+    POLYMARKET = "polymarket"          # prediction-market odds
+    FEAR_GREED = "fear_greed"          # crypto fear-and-greed regime tag
+    DEFILLAMA = "defillama"            # TVL flow changes
 
 
 class EntityType(StrEnum):
