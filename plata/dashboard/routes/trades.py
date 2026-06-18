@@ -16,6 +16,24 @@ from plata.dashboard import templates
 router = APIRouter(prefix="/trades", tags=["trades"])
 
 
+# Reused by trades-list rows. trade_detail.py has its own copy with richer
+# tooltip copy; the list just needs the chip class + label.
+LIST_HORIZON_META: dict[str, dict] = {
+    "few_hours": {"label": "Few hours",  "icon": "⚡",
+                   "chip_class": "bg-yellow-100 text-yellow-800",
+                   "tooltip": "Intraday momentum — expected to close within hours."},
+    "few_days":  {"label": "Few days",   "icon": "🌊",
+                   "chip_class": "bg-blue-100 text-blue-800",
+                   "tooltip": "Swing trade — expected to play out over days."},
+    "few_weeks": {"label": "Few weeks",  "icon": "🌒",
+                   "chip_class": "bg-cyan-100 text-cyan-800",
+                   "tooltip": "Longer thesis — expected to play out over weeks."},
+    "long_term": {"label": "Long-term",  "icon": "🌱",
+                   "chip_class": "bg-purple-100 text-purple-800",
+                   "tooltip": "Long-term position — months."},
+}
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     from plata.core.db import Proposal
@@ -114,6 +132,15 @@ async def index(request: Request):
                 health = await redis.hgetall(f"position:health:{r.trade_ulid}") or {}
         except Exception:  # noqa: BLE001
             pass
+        # Horizon bucket — recorded by the strategist on Proposal.extras.
+        # Falls back to "—" when the proposal pre-dates horizon classification.
+        bucket = ((prop.extras or {}).get("horizon_bucket")
+                  if (prop and prop.extras) else None)
+        horizon = LIST_HORIZON_META.get(bucket or "", {
+            "label": "—", "icon": "·",
+            "chip_class": "bg-gray-100 text-gray-500",
+            "tooltip": "Horizon bucket not recorded for this proposal.",
+        })
         enriched.append({
             "row": r, "venue": venue,
             "cur_price": cur_price, "cur_ts": cur_ts,
@@ -121,6 +148,8 @@ async def index(request: Request):
             "realized_pct": realized_pct,
             "held_sec": held_sec,
             "status": status,
+            "horizon": horizon,
+            "horizon_key": bucket or "",
             "conviction": float(prop.conviction) if (prop and prop.conviction is not None) else None,
             "reasoning_preview": (prop.reasoning[:280] if (prop and prop.reasoning) else None),
             "event_ulid": (prop.triggering_event_ulid if prop else None),

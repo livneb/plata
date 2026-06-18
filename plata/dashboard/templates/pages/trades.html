@@ -65,6 +65,7 @@
       <tr>
         <th class="px-3 py-2">Symbol</th>
         <th class="px-3 py-2">Status</th>
+        <th class="px-3 py-2" title="Strategist's horizon bucket for the proposal: few hours / few days / few weeks / long-term. Drives sizing + per-day quotas.">Horizon</th>
         <th class="px-3 py-2" title="Position monitor verdict: ✅ on track / ⚠ drifting / 🛑 off-track / — untracked. Hover the cell for details.">Health</th>
         <th class="px-3 py-2">Side</th>
         <th class="px-3 py-2 text-right">Qty</th>
@@ -109,6 +110,10 @@
         <td class="px-3 py-2 whitespace-nowrap">
           <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] {{ e.status.color }}"
                 title="{{ e.status.tooltip }}">{{ e.status.icon }} {{ e.status.label }}</span>
+        </td>
+        <td class="px-3 py-2 whitespace-nowrap">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] {{ e.horizon.chip_class }}"
+                title="{{ e.horizon.tooltip }}">{{ e.horizon.icon }} {{ e.horizon.label }}</span>
         </td>
         <td class="px-3 py-2 whitespace-nowrap">
           {% set h = e.health.get('status') if e.health else None %}

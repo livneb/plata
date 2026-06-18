@@ -110,9 +110,13 @@
       series: [{ name: '{{ card.symbol }}', data: data }],
       colors: [up ? '#10b981' : '#ef4444'],
       fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0 } },
+      // Per-point price labels overlapped each other and the trade-marker
+      // annotations into an unreadable mess. Disabled — exact values are
+      // available via the hover tooltip below.
+      dataLabels: { enabled: false },
       xaxis: { type: 'datetime', labels: { style: { fontSize: '10px' } } },
       yaxis: { labels: { formatter: (v) => v.toFixed(4), style: { fontSize: '10px' } } },
-      tooltip: { x: { format: 'HH:mm dd MMM' } },
+      tooltip: { x: { format: 'HH:mm dd MMM' }, y: { formatter: (v) => v.toFixed(4) } },
       grid: { borderColor: 'rgba(128,128,128,0.15)' },
       annotations: { points: pointAnnos },
     });
