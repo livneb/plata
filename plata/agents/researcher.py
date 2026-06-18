@@ -135,12 +135,41 @@ class Researcher:
         self.log = _log
 
     async def run(self) -> None:
-        # Stagger the first cycle so we don't all-fire on container boot.
-        await asyncio.sleep(15)
+        # See Postmortem.run for the rationale: split heartbeat (10s) from
+        # the slow cycle loop (30min default) so the sysop's stale-agent
+        # watcher doesn't flag us as dead between cycles.
+        self._last_status: dict = {"cycle": "pending_first"}
+        await asyncio.sleep(5)
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(self._heartbeat_loop(), name="researcher-heartbeat")
+            tg.create_task(self._cycle_loop(),     name="researcher-cycle")
+
+    async def _heartbeat_loop(self) -> None:
+        import os as _os
+        container = _os.environ.get("SERVICE_ENTRYPOINT", "unknown")
+        while True:
+            try:
+                await get_redis().hset(
+                    f"agent_status:{self.name}",
+                    mapping={
+                        "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+                        "container": container,
+                        "halted": "false",
+                        **{f"cycle_{k}": str(v) for k, v in self._last_status.items()},
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                self.log.warning("researcher_heartbeat_failed")
+            await asyncio.sleep(10)
+
+    async def _cycle_loop(self) -> None:
+        await asyncio.sleep(10)
         while True:
             try:
                 await self.cycle()
+                self._last_status = {"last_ok_at": datetime.now(timezone.utc).isoformat()}
             except Exception as exc:  # noqa: BLE001
+                self._last_status = {"error": str(exc)[:200]}
                 self.log.warning("researcher_cycle_failed",
                                   error=str(exc)[:200])
             interval_sec = await self._interval_sec()

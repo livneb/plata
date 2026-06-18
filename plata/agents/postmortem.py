@@ -149,32 +149,45 @@ class Postmortem:
         self.log = _log
 
     async def run(self) -> None:
-        await asyncio.sleep(30)  # stagger boot
+        # Two concurrent tasks: a fast heartbeat (so the sysop's
+        # stale-agent watcher doesn't flag us as dead between cycles) and
+        # the slow postmortem cycle loop. Mirrors BaseAgent's 10s heartbeat
+        # + work loop split — Postmortem isn't a BaseAgent because there's
+        # no input stream, so we replicate the heartbeat manually.
+        self._last_cycle_stats: dict = {"cycle": "pending_first"}
+        await asyncio.sleep(5)  # tiny stagger so the heartbeat starts first
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(self._heartbeat_loop(), name="postmortem-heartbeat")
+            tg.create_task(self._cycle_loop(),     name="postmortem-cycle")
+
+    async def _heartbeat_loop(self) -> None:
+        import os as _os
+        container = _os.environ.get("SERVICE_ENTRYPOINT", "unknown")
         while True:
-            stats: dict = {"cycle_started": datetime.now(timezone.utc).isoformat()}
-            try:
-                stats = await self.cycle()
-                self.log.info("postmortem_cycle_done", **stats)
-            except Exception as exc:  # noqa: BLE001
-                stats["error"] = str(exc)[:200]
-                self.log.warning("postmortem_cycle_failed",
-                                  error=str(exc)[:200])
-            # Self-report status so /agents/ and the operator can see the
-            # agent is alive + what it's doing each cycle. Mirrors the
-            # BaseAgent heartbeat field shape (this class isn't a
-            # BaseAgent — it's a pure periodic task — so we write it
-            # ourselves).
             try:
                 await get_redis().hset(
                     f"agent_status:{self.name}",
                     mapping={
                         "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+                        "container": container,
                         "halted": "false",
-                        **{k: str(v) for k, v in stats.items()},
+                        **{f"cycle_{k}": str(v) for k, v in self._last_cycle_stats.items()},
                     },
                 )
             except Exception:  # noqa: BLE001
-                pass
+                self.log.warning("postmortem_heartbeat_failed")
+            await asyncio.sleep(10)
+
+    async def _cycle_loop(self) -> None:
+        await asyncio.sleep(25)  # let the heartbeat post once first
+        while True:
+            try:
+                self._last_cycle_stats = await self.cycle()
+                self.log.info("postmortem_cycle_done", **self._last_cycle_stats)
+            except Exception as exc:  # noqa: BLE001
+                self._last_cycle_stats = {"error": str(exc)[:200]}
+                self.log.warning("postmortem_cycle_failed",
+                                  error=str(exc)[:200])
             interval = await self._interval_sec()
             await asyncio.sleep(interval)
 
