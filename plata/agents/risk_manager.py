@@ -135,6 +135,19 @@ DEFAULT_RISK_CONFIG: dict[str, Any] = {
     "horizon_few_days_budget_pct":   "25.0",
     "horizon_few_weeks_budget_pct":  "30.0",
     "horizon_long_term_budget_pct":  "35.0",
+    # Expected concurrent positions PER BUCKET — used by the v2.24.201
+    # dynamic sizing model. New position size =
+    #   (bucket_cap - bucket_used) / max(1, target_concurrent - open_in_bucket)
+    # Defaults assume a small portfolio: 5 fast turnover few_hours, fewer
+    # bigger concurrent positions as horizon lengthens.
+    "horizon_few_hours_target_concurrent":  "5",
+    "horizon_few_days_target_concurrent":   "3",
+    "horizon_few_weeks_target_concurrent":  "2",
+    "horizon_long_term_target_concurrent":  "1",
+    # Skip opening a position when remaining bucket capacity would size it
+    # below this floor (paper trading min would be ~$5; live exchanges have
+    # min-notional requirements, so override per venue if needed).
+    "horizon_min_position_usd":  "5.0",
 }
 
 

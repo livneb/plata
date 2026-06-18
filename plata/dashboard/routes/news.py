@@ -201,11 +201,11 @@ async def toggle_source(name: str):
 async def save(request: Request):
     form = await request.form()
     updates: dict = {}
-    for k in ("gdelt_enabled", "reddit_enabled", "cryptopanic_enabled",
-              "rss_enabled", "telegram_channels_enabled",
-              "market_ticker_enabled",
-              "require_keywords_enforce"):
-        if k in NEWS_DEFAULTS:
+    # Sweep ALL boolean keys defined in DEFAULTS so newly-added sources
+    # (sec_edgar_enabled, hackernews_enabled, etc. added in v2.24.198)
+    # automatically save without needing to be hand-listed here.
+    for k, default in NEWS_DEFAULTS.items():
+        if isinstance(default, bool):
             updates[k] = (form.get(k) == "on")
     if "gdelt_query" in form:
         updates["gdelt_query"] = (form.get("gdelt_query") or "").strip()

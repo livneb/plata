@@ -36,8 +36,16 @@ class RedditSource(BaseSource):
     name = "reddit"
     poll_interval_sec = 60
 
+    # Reddit's unauthenticated rate limit is ~10 req/min/IP. With 17+
+    # subreddits at 1s spacing we burn through it and start eating 429s.
+    # Cap how many subs we hit per cycle; rotate the offset across cycles
+    # so every sub eventually gets polled.
+    PER_CYCLE_LIMIT = 6
+    INTER_REQUEST_SLEEP_SEC = 2.0
+
     def __init__(self) -> None:
         self._seen_ids: set[str] = set()
+        self._rotation_offset = 0
 
     async def poll(self) -> list[RawSignal]:
         try:
@@ -48,9 +56,28 @@ class RedditSource(BaseSource):
             await record_poll_probe("reddit", error_type="Disabled",
                                      error_message="Source is disabled in /news/ config")
             return []
-        subreddits = cfg.get("reddit_subreddits") or NEWS_DEFAULTS["reddit_subreddits"]
+        all_subs = list(cfg.get("reddit_subreddits") or NEWS_DEFAULTS["reddit_subreddits"])
+        # Rotate which subs we poll each cycle — first call hits subs
+        # [0:6], next [6:12], etc., wrapping at the end. Each sub gets
+        # polled every (len/6) cycles instead of every cycle, keeping us
+        # under Reddit's anonymous limit.
+        if not all_subs:
+            await record_poll_probe("reddit", item_count=0,
+                                     error_message="no subreddits configured")
+            return []
+        n = len(all_subs)
+        per_cycle = min(self.PER_CYCLE_LIMIT, n)
+        start = self._rotation_offset % n
+        # Slice with wrap-around.
+        subreddits = (all_subs[start:start + per_cycle]
+                       + all_subs[: max(0, (start + per_cycle) - n)])
+        self._rotation_offset = (start + per_cycle) % n
         signals: list[RawSignal] = []
-        probe_kwargs: dict = {"subreddits": ",".join(subreddits)}
+        probe_kwargs: dict = {
+            "subreddits_this_cycle": ",".join(subreddits),
+            "total_configured": n,
+            "rotation_offset": start,
+        }
         last_status: int | None = None
         async with httpx.AsyncClient(
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -105,8 +132,10 @@ class RedditSource(BaseSource):
                             "post_id": pid,
                         },
                     ))
-                # Be polite — 1s between subreddits.
-                await asyncio.sleep(1.0)
+                # 2s between subreddits keeps us safely under Reddit's
+                # ~10 req/min unauthenticated cap with margin for the page
+                # load itself.
+                await asyncio.sleep(self.INTER_REQUEST_SLEEP_SEC)
         probe_kwargs["item_count"] = len(signals)
         if last_status is not None:
             probe_kwargs["http_status"] = last_status

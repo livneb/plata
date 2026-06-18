@@ -245,9 +245,14 @@
     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
       <div class="flex items-center justify-between mb-2">
         <h3 class="font-semibold">Filter drops (since last reset)</h3>
-        <form method="post" action="/news/filter_drops/reset">
-          <button type="submit" class="text-xs text-blue-500 hover:underline">Reset</button>
-        </form>
+        {# Plain button + fetch — was a nested <form> inside the page-wide
+           Save form, which HTML forbids and silently broke the outer
+           submit. The whole "Save news config" button looked dead because
+           of this. v2.24.201 fix. #}
+        <button type="button" class="text-xs text-blue-500 hover:underline"
+                onclick="(async () => { await fetch('/news/filter_drops/reset', { method: 'POST' }); location.reload(); })();">
+          Reset
+        </button>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs font-mono">
         {% for reason, count in news_drops.items() %}

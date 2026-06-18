@@ -143,27 +143,110 @@ async def _bucket_quota(bucket: str) -> tuple[int, int]:
         return 999, 0
 
 
-async def _bucket_per_position_usd(bucket: str) -> float:
-    """The dollar size each new position in `bucket` should be opened at,
-    derived from the operator's total daily budget × bucket pct / target count.
-    Returns 0 to mean "fall back to risk_per_trade_pct sizing"."""
+async def _bucket_per_position_usd(bucket: str) -> tuple[float, dict]:
+    """Compute the per-position dollar size for a `bucket` based on:
+
+      1. The operator's true account size (`account_baseline_equity_usd`)
+      2. The bucket's share of that equity (`horizon_<bucket>_budget_pct`)
+      3. How much is ALREADY deployed in the bucket right now
+      4. How many concurrent positions are expected in the bucket
+         (`horizon_<bucket>_target_concurrent`)
+
+    Returns `(size_usd, breakdown)`. Size is `bucket_remaining / open_slots`
+    so an empty bucket gets a fat position and a nearly-full one gets a
+    thin one. Capped at `bucket_remaining` so we never exceed the
+    bucket's allotted cap. Returns 0 when there's no slot or
+    remaining capacity is below `horizon_min_position_usd`.
+
+    The breakdown dict is persisted on Proposal.extras so the trade detail
+    page can render WHY the position was sized the way it was — the
+    operator was right to ask why every position was $10.
+    """
     from plata.core.bus import get_redis
+    from sqlalchemy import select as _select
+    from plata.core.db import Proposal as _P, TradeLedger as _TL, session_scope as _ss
+    breakdown: dict = {"bucket": bucket, "method": "bucket_remaining"}
     try:
         r = get_redis()
         cfg = await r.hgetall("risk_config") or {}
-        total = float(cfg.get("horizon_total_daily_budget_usd") or 0)
-        if total <= 0:
-            return 0.0
+        baseline = float(cfg.get("account_baseline_equity_usd") or 0)
+        if baseline <= 0:
+            breakdown["fallback_reason"] = "no_baseline_equity"
+            return 0.0, breakdown
         DEFAULT_PCTS = {"few_hours": 10.0, "few_days": 25.0,
                           "few_weeks": 30.0, "long_term": 35.0}
-        DEFAULT_COUNTS = {"few_hours": 35, "few_days": 15, "few_weeks": 10, "long_term": 5}
+        DEFAULT_CONCURRENT = {"few_hours": 5, "few_days": 3,
+                                "few_weeks": 2, "long_term": 1}
         pct = float(cfg.get(f"horizon_{bucket}_budget_pct")
                      or DEFAULT_PCTS.get(bucket, 25.0))
-        count = max(1, int(cfg.get(f"horizon_{bucket}_daily_count")
-                            or DEFAULT_COUNTS.get(bucket, 10)))
-        return round(total * pct / 100.0 / count, 2)
-    except Exception:  # noqa: BLE001
-        return 0.0
+        target_concurrent = max(1, int(
+            cfg.get(f"horizon_{bucket}_target_concurrent")
+            or DEFAULT_CONCURRENT.get(bucket, 3)))
+        bucket_cap = baseline * pct / 100.0
+        # Sum currently-open notional FOR THIS BUCKET — need to JOIN
+        # TradeLedger to Proposal.extras.horizon_bucket. Fast: open trades
+        # are typically a handful at this scale.
+        bucket_used = 0.0
+        bucket_open_count = 0
+        try:
+            async with _ss() as session:
+                # Open trades + their proposals (already indexed by ulid).
+                open_rows = (await session.execute(
+                    _select(_TL).where(_TL.exit_price.is_(None))
+                )).scalars().all()
+                if open_rows:
+                    ulids = [r.proposal_id for r in open_rows if r.proposal_id]
+                    props = {}
+                    if ulids:
+                        props = {p.proposal_ulid: p for p in
+                                  (await session.execute(
+                                      _select(_P).where(_P.proposal_ulid.in_(ulids))
+                                  )).scalars().all()}
+                    for r in open_rows:
+                        p = props.get(r.proposal_id or "")
+                        b = (p.extras or {}).get("horizon_bucket") if (p and p.extras) else None
+                        if b == bucket:
+                            bucket_used += float(r.qty or 0) * float(r.entry_price or 0)
+                            bucket_open_count += 1
+        except Exception:  # noqa: BLE001
+            pass
+        bucket_remaining = max(0.0, bucket_cap - bucket_used)
+        open_slots = max(0, target_concurrent - bucket_open_count)
+        min_size = float(cfg.get("horizon_min_position_usd") or 5.0)
+        if open_slots == 0 or bucket_remaining <= 0:
+            breakdown.update({
+                "baseline_equity_usd": baseline,
+                "bucket_pct": pct,
+                "bucket_cap_usd": round(bucket_cap, 2),
+                "bucket_used_usd": round(bucket_used, 2),
+                "bucket_open_count": bucket_open_count,
+                "target_concurrent": target_concurrent,
+                "open_slots": open_slots,
+                "fallback_reason": "bucket_full",
+            })
+            return 0.0, breakdown
+        size = bucket_remaining / open_slots
+        # Round to 2dp and floor at min_size.
+        size = round(min(size, bucket_remaining), 2)
+        breakdown.update({
+            "baseline_equity_usd": baseline,
+            "bucket_pct": pct,
+            "bucket_cap_usd": round(bucket_cap, 2),
+            "bucket_used_usd": round(bucket_used, 2),
+            "bucket_open_count": bucket_open_count,
+            "target_concurrent": target_concurrent,
+            "open_slots": open_slots,
+            "bucket_remaining_usd": round(bucket_remaining, 2),
+            "min_position_usd": min_size,
+            "size_usd": size,
+        })
+        if size < min_size:
+            breakdown["fallback_reason"] = "below_min_position"
+            return 0.0, breakdown
+        return size, breakdown
+    except Exception as exc:  # noqa: BLE001
+        breakdown["fallback_reason"] = f"error:{type(exc).__name__}"
+        return 0.0, breakdown
 
 
 async def _current_thresholds() -> tuple[float, int]:
@@ -461,15 +544,25 @@ class Strategist(BaseAgent):
             await redis.hincrby(f"agent_stats:{self.name}",
                                  f"dropped_quota_{bucket}", 1)
             return
-        per_position_usd = await _bucket_per_position_usd(bucket)
+        per_position_usd, size_breakdown = await _bucket_per_position_usd(bucket)
+        # If the bucket has no slots left, drop the proposal here rather
+        # than letting risk_manager reject it for "account_equity_exhausted"
+        # — clearer audit trail and avoids burning the conviction.
+        if per_position_usd <= 0:
+            self.log.info("proposal_dropped_bucket_full",
+                           event_ulid=event.ulid, bucket=bucket,
+                           reason=size_breakdown.get("fallback_reason"))
+            await redis.hincrby(f"agent_stats:{self.name}",
+                                 f"dropped_bucket_full_{bucket}", 1)
+            return
 
         # Clamp symbol to 64 chars defensively — free models occasionally
         # produce hallucinated long strings that previously overflowed
         # proposals.symbol(varchar 32) and silently lost the row.
         raw_symbol = str(decision.get("symbol") or "").strip()[:64]
-        # If the operator has set a non-zero total daily budget, use the
-        # per-bucket $-per-position derived above; otherwise leave None so
-        # the risk_manager falls back to risk_per_trade_pct sizing.
+        # Per-bucket $-per-position derived above is now ALWAYS used (we'd
+        # have returned above if it was zero). Risk manager still enforces
+        # the global account-equity hard cap as a safety net.
         from decimal import Decimal as _Dec
         sized_usd = _Dec(str(per_position_usd)) if per_position_usd > 0 else None
         proposal = TradeProposal(
@@ -516,6 +609,9 @@ class Strategist(BaseAgent):
                 "horizon_max_eta_min": int(max_eta),
                 "horizon_per_position_usd": float(per_position_usd),
                 "horizon_today_count_after": int(new_count),
+                # WHY this position was sized the way it was — operator
+                # asked: "why $10 per position?". Now visible on /trades/<ulid>.
+                "size_breakdown": size_breakdown,
             }
             if council_extras is not None:
                 published_extras["council"] = council_extras
