@@ -99,7 +99,15 @@ class StreamMessage(BaseModel):
 # ---------------------------------------------------------------------------
 
 class RawSignal(StreamMessage):
-    source: SignalSource
+    # Loosened from SignalSource to str in v2.24.199. Reason: when the
+    # scraper service redeploys with a new SignalSource value (e.g.
+    # "hackernews") and the graph_ingestion service hasn't restarted yet,
+    # the consumer's frozen enum rejected the new value with a
+    # ValidationError every time it saw one — crashlooping the agent.
+    # Now the consumer accepts any string; the producer still emits
+    # SignalSource members (str-coerced) so the practical contract is
+    # unchanged.
+    source: str
     source_published_at: datetime | None = None
     url: str | None = None
     title: str | None = None
@@ -125,7 +133,15 @@ class EntityRef(BaseModel):
 
 class EnrichedEvent(StreamMessage):
     source_signal_ulid: str
-    source: SignalSource
+    # Loosened from SignalSource to str in v2.24.199. Reason: when the
+    # scraper service redeploys with a new SignalSource value (e.g.
+    # "hackernews") and the graph_ingestion service hasn't restarted yet,
+    # the consumer's frozen enum rejected the new value with a
+    # ValidationError every time it saw one — crashlooping the agent.
+    # Now the consumer accepts any string; the producer still emits
+    # SignalSource members (str-coerced) so the practical contract is
+    # unchanged.
+    source: str
     summary: str
     category: EventCategory
     sentiment_magnitude: float = Field(ge=0.0, le=1.0)

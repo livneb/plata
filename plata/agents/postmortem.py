@@ -151,12 +151,30 @@ class Postmortem:
     async def run(self) -> None:
         await asyncio.sleep(30)  # stagger boot
         while True:
+            stats: dict = {"cycle_started": datetime.now(timezone.utc).isoformat()}
             try:
-                processed = await self.cycle()
-                self.log.info("postmortem_cycle_done", processed=processed)
+                stats = await self.cycle()
+                self.log.info("postmortem_cycle_done", **stats)
             except Exception as exc:  # noqa: BLE001
+                stats["error"] = str(exc)[:200]
                 self.log.warning("postmortem_cycle_failed",
                                   error=str(exc)[:200])
+            # Self-report status so /agents/ and the operator can see the
+            # agent is alive + what it's doing each cycle. Mirrors the
+            # BaseAgent heartbeat field shape (this class isn't a
+            # BaseAgent — it's a pure periodic task — so we write it
+            # ourselves).
+            try:
+                await get_redis().hset(
+                    f"agent_status:{self.name}",
+                    mapping={
+                        "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+                        "halted": "false",
+                        **{k: str(v) for k, v in stats.items()},
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                pass
             interval = await self._interval_sec()
             await asyncio.sleep(interval)
 
@@ -169,93 +187,124 @@ class Postmortem:
             min_m = 60
         return max(300, min_m * 60)
 
-    async def cycle(self) -> int:
-        """Scan proposals whose next checkpoint is due, write lessons for them.
-        Returns count of lessons written this cycle."""
+    async def cycle(self) -> dict:
+        """Scan proposals whose next checkpoint is due, write lessons.
+        Returns a stats dict with candidate counts + skip reasons so the
+        operator can see WHY the library isn't growing when it isn't."""
+        from datetime import timedelta as _td
+        stats: dict = {"candidates": 0, "checkpoints_due": 0, "written": 0,
+                        "skipped_no_price": 0, "skipped_llm_fail": 0,
+                        "skipped_embed_fail": 0}
         try:
             r = get_redis()
             cfg = await r.hgetall("risk_config") or {}
             if (cfg.get("postmortem_enabled") or "true").lower() not in ("true", "1", "yes"):
-                return 0
-            per_cycle_cap = int(cfg.get("postmortem_max_per_cycle") or 20)
+                stats["skipped_disabled"] = True
+                return stats
+            per_cycle_cap = int(cfg.get("postmortem_max_per_cycle") or 50)
         except Exception:  # noqa: BLE001
-            per_cycle_cap = 20
+            per_cycle_cap = 50
 
-        # Pull a generous slice; we filter in Python by due-time.
+        # Only fetch proposals OLD ENOUGH for at least one checkpoint.
+        # Smallest checkpoint across all buckets is 1440 min (few_hours[0]).
+        # Order OLDEST-FIRST so we work through the backlog instead of
+        # repeatedly looking at fresh proposals that aren't due yet. This was
+        # the bug that left the library empty after 24h — the previous
+        # newest-first / limit-500 query pushed eligible old rows off the end.
         now = datetime.now(timezone.utc)
+        oldest_eligible_cutoff = now - _td(minutes=1440)
         async with session_scope() as session:
             rows = (await session.execute(
                 select(Proposal)
-                .where(Proposal.created_at < now)  # all of them
-                .order_by(Proposal.created_at.desc())
-                .limit(500)
+                .where(Proposal.created_at <= oldest_eligible_cutoff)
+                .order_by(Proposal.created_at.asc())
+                .limit(2000)
             )).scalars().all()
+        stats["candidates"] = len(rows)
 
-        written = 0
         for p in rows:
-            if written >= per_cycle_cap:
+            if stats["written"] >= per_cycle_cap:
+                stats["hit_cycle_cap"] = True
                 break
             extras = dict(p.extras or {})
             bucket = extras.get("horizon_bucket") or "few_days"
             schedule = await _schedule_for(bucket)
             done = set(extras.get("postmortem_done") or [])
             age_min = int((now - p.created_at).total_seconds() // 60)
+            persisted_this_proposal = False
             for ckpt in schedule:
                 key = f"{ckpt}"
                 if key in done:
                     continue
                 if age_min < ckpt:
                     continue
-                # Run this checkpoint.
+                stats["checkpoints_due"] += 1
                 try:
-                    ok = await self._run_checkpoint(p, ckpt)
+                    outcome = await self._run_checkpoint(p, ckpt)
                 except Exception as exc:  # noqa: BLE001
                     self.log.warning("postmortem_checkpoint_failed",
                                       proposal=p.proposal_ulid, ckpt=ckpt,
                                       error=str(exc)[:200])
-                    ok = False
-                if ok:
-                    written += 1
+                    outcome = "error"
+                if outcome == "ok":
+                    stats["written"] += 1
                     done.add(key)
-                # Persist progress (also when skipped after a failure — so we
-                # don't loop forever on a permanently-broken row).
-                extras["postmortem_done"] = sorted(done)
+                    persisted_this_proposal = True
+                elif outcome == "no_price":
+                    stats["skipped_no_price"] += 1
+                elif outcome == "llm_fail":
+                    stats["skipped_llm_fail"] += 1
+                elif outcome == "embed_fail":
+                    stats["skipped_embed_fail"] += 1
+                if stats["written"] >= per_cycle_cap:
+                    break
+            # Persist `done` ONCE per proposal at the end, not per checkpoint.
+            if persisted_this_proposal:
                 async with session_scope() as session:
                     fresh = (await session.execute(
                         select(Proposal).where(Proposal.proposal_ulid == p.proposal_ulid)
                     )).scalar_one_or_none()
                     if fresh is not None:
                         merged = dict(fresh.extras or {})
-                        merged["postmortem_done"] = extras["postmortem_done"]
+                        merged["postmortem_done"] = sorted(done)
                         fresh.extras = merged
-                if written >= per_cycle_cap:
-                    break
-        return written
+        return stats
 
-    async def _run_checkpoint(self, p: Proposal, checkpoint_min: int) -> bool:
-        """One LLM call for one (proposal, checkpoint) combination. Writes a
-        lesson if the LLM responded successfully."""
-        cur_price = await _current_price(p.symbol)
-        if cur_price is None or cur_price <= 0:
-            return False
-        # Look up the entry / decision-time price. Best-effort: the proposal
-        # row has analogs/milestones but no entry price; if a TradeLedger
-        # exists, use that. Otherwise the very first sampler tick after the
-        # proposal works; if neither, skip this checkpoint.
+    async def _run_checkpoint(self, p: Proposal, checkpoint_min: int) -> str:
+        """One LLM call for one (proposal, checkpoint) combination. Returns
+        "ok" / "no_price" / "llm_fail" / "embed_fail" so the cycle stats
+        can show the operator what's failing."""
+        # First: prefer the trade's exit_price (closed) or entry_price as a
+        # reference. The symbol watcher only refreshes for OPEN positions,
+        # so for closed-position symbols `symbol:latest:<sym>` is stale.
+        entry_price: float | None = None
+        exit_price: float | None = None
         try:
             from plata.core.db import TradeLedger
             async with session_scope() as session:
                 tl = (await session.execute(
                     select(TradeLedger).where(TradeLedger.proposal_id == p.proposal_ulid)
                 )).scalar_one_or_none()
-            entry_price = float(tl.entry_price) if tl and tl.entry_price else None
+            if tl:
+                entry_price = float(tl.entry_price) if tl.entry_price else None
+                exit_price = float(tl.exit_price) if tl.exit_price else None
         except Exception:  # noqa: BLE001
-            entry_price = None
+            pass
+
+        # "Current" reference price: live mark when we have it, else
+        # exit_price (for closed trades), else None — in which case we
+        # can still write a lesson using entry_price's catalyst context
+        # but without an actual-move number.
+        cur_price = await _current_price(p.symbol)
+        if cur_price is None or cur_price <= 0:
+            cur_price = exit_price  # closed-trade fallback
+        if cur_price is None and entry_price is None:
+            # Nothing to compare against — skip silently, retry next cycle.
+            return "no_price"
         if entry_price is None:
-            # No executed trade — try the first sample we have for the symbol
-            # ulid via Redis history; if none, fall back to current price
-            # (lesson becomes about catalysts only, no actual_pct).
-            entry_price = cur_price
+            entry_price = cur_price  # dropped proposals: anchor at first known
+        if cur_price is None:
+            cur_price = entry_price  # truly no movement data; lesson still possible
         actual_pct = (cur_price - entry_price) / entry_price if entry_price else 0.0
         predicted_pct = await _predicted_move(p, checkpoint_min)
 
@@ -293,7 +342,7 @@ class Postmortem:
         except Exception as exc:  # noqa: BLE001
             self.log.warning("postmortem_llm_failed",
                               proposal=p.proposal_ulid, error=str(exc)[:200])
-            return False
+            return "llm_fail"
 
         # Embed the lesson text (with symbol + category for grouping) so the
         # strategist can KNN-retrieve later.
@@ -306,7 +355,7 @@ class Postmortem:
         except Exception as exc:  # noqa: BLE001
             self.log.warning("postmortem_embed_failed",
                               proposal=p.proposal_ulid, error=str(exc)[:200])
-            return False
+            return "embed_fail"
 
         await upsert_lesson(
             ulid=new_ulid(),
@@ -328,7 +377,7 @@ class Postmortem:
                        proposal=p.proposal_ulid, symbol=p.symbol,
                        checkpoint_min=checkpoint_min,
                        severity=verdict["severity"])
-        return True
+        return "ok"
 
 
 if __name__ == "__main__":  # pragma: no cover
