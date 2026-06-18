@@ -638,6 +638,9 @@
           { name: 'Actual',    type: 'line', data: initial },
         ],
         fill: { type: ['gradient', 'solid'], gradient: { shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0, stops: [0, 90, 100] } },
+        // Data labels off — the per-point %-values overlay was unreadable on
+        // dense series. Values are still available via the hover tooltip below.
+        dataLabels: { enabled: false },
         xaxis: { type: 'numeric', title: { text: 'Hours from entry' }, labels: { formatter: v => Number(v).toFixed(1) + 'h', style: { fontFamily: 'Inter, sans-serif' } }, axisBorder: { show: false }, axisTicks: { show: false } },
         yaxis: { title: { text: '% move from entry' }, labels: { formatter: v => Number(v).toFixed(2) + '%', style: { fontFamily: 'Inter, sans-serif' } } },
         markers: { size: [6, 0], hover: { size: 8 } },
