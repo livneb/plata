@@ -393,3 +393,66 @@ async def closures_since(since: str | None = None, limit: int = 25):
         })
     return JSONResponse({"closures": out,
                           "as_of": datetime.now(timezone.utc).isoformat()})
+
+
+@router.get("/openings")
+async def openings_since(since: str | None = None, limit: int = 25):
+    """Recently opened positions, with the strategist's reasoning. Powers the
+    sibling section on the closures banner: "X positions opened since your
+    last visit, here's WHY." JOINs the Proposal row so we surface the LLM
+    reasoning that justified each open.
+    """
+    cutoff: datetime | None = None
+    if since:
+        try:
+            cutoff = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            if cutoff.tzinfo is None:
+                cutoff = cutoff.replace(tzinfo=timezone.utc)
+        except ValueError:
+            cutoff = None
+    # Floor at system:reset_at so opens from before "Start from scratch"
+    # don't pollute the banner.
+    try:
+        ra_raw = await get_redis().get("system:reset_at")
+        if ra_raw:
+            reset_at = datetime.fromisoformat(ra_raw)
+            if reset_at.tzinfo is None:
+                reset_at = reset_at.replace(tzinfo=timezone.utc)
+            if cutoff is None or cutoff < reset_at:
+                cutoff = reset_at
+    except Exception:  # noqa: BLE001
+        pass
+    async with session_scope() as session:
+        q = select(TradeLedger)
+        if cutoff:
+            q = q.where(TradeLedger.opened_at > cutoff)
+        q = q.order_by(TradeLedger.opened_at.desc()).limit(max(1, min(100, limit)))
+        rows = (await session.execute(q)).scalars().all()
+        proposal_map: dict[str, Proposal] = {}
+        if rows:
+            ids = [r.proposal_id for r in rows if r.proposal_id]
+            if ids:
+                proposals = (await session.execute(
+                    select(Proposal).where(Proposal.proposal_ulid.in_(ids))
+                )).scalars().all()
+                proposal_map = {p.proposal_ulid: p for p in proposals}
+
+    out = []
+    for r in rows:
+        p = proposal_map.get(r.proposal_id or "")
+        reasoning = (p.reasoning if p else None) or None
+        conviction = float(p.conviction) if (p and p.conviction is not None) else None
+        notional = float(r.qty or 0) * float(r.entry_price or 0)
+        out.append({
+            "trade_ulid": r.trade_ulid,
+            "symbol": r.symbol,
+            "side": r.side,
+            "qty": float(r.qty or 0),
+            "entry_price": float(r.entry_price or 0),
+            "notional_usd": round(notional, 4),
+            "conviction": conviction,
+            "reasoning": reasoning,
+            "opened_at": r.opened_at.isoformat() if r.opened_at else None,
+        })
+    return JSONResponse({"openings": out,
+                          "as_of": datetime.now(timezone.utc).isoformat()})

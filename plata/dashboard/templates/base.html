@@ -714,7 +714,9 @@
     (function () {
       const banner = document.getElementById('closures-banner');
       const listEl = document.getElementById('closures-list');
+      const openingsEl = document.getElementById('openings-list');
       const countEl = document.getElementById('closures-count');
+      const openCountEl = document.getElementById('openings-count');
       const dismissBtn = document.getElementById('closures-dismiss-all');
       if (!banner || !listEl || !countEl || !dismissBtn) return;
       const LS_KEY = 'plataLastClosureSeen';
@@ -739,10 +741,60 @@
         if (sec < 86400) return (sec / 3600).toFixed(1) + ' h';
         return (sec / 86400).toFixed(1) + ' d';
       }
-      function render(closures) {
+      function renderOpenings(openings) {
         const dismissed = dismissedSet();
-        const fresh = closures.filter(c => !dismissed.has(c.trade_ulid));
-        if (!fresh.length) {
+        const fresh = (openings || []).filter(o => !dismissed.has(o.trade_ulid));
+        openCountEl.textContent = fresh.length;
+        openingsEl.innerHTML = '';
+        fresh.slice(0, 10).forEach(o => {
+          const row = document.createElement('div');
+          row.className = 'flex items-start justify-between gap-2 p-2 rounded bg-white dark:bg-gray-800 border border-emerald-100 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 cursor-pointer';
+          row.addEventListener('click', (e) => {
+            if (e.target.closest('.row-dismiss')) return;
+            window.location.href = '/trades/' + o.trade_ulid;
+          });
+          const sideArrow = (o.side || '').toLowerCase() === 'long' ? '↑' : '↓';
+          const why = o.reasoning
+            ? `<div class="text-[11px] text-gray-600 dark:text-gray-300 italic mt-0.5">"${o.reasoning.replace(/"/g, '&quot;').slice(0, 240)}${o.reasoning.length > 240 ? '…' : ''}"</div>`
+            : '';
+          const convChip = o.conviction != null
+            ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 ml-2">${(o.conviction * 100).toFixed(0)}%</span>`
+            : '';
+          row.innerHTML = `
+            <div class="flex-1 min-w-0">
+              <div class="text-sm">
+                <span class="text-emerald-600 dark:text-emerald-400">🟢 Opened</span>
+                <span class="font-mono font-semibold ml-2">${o.symbol}</span>
+                <span class="text-xs text-gray-500">${sideArrow} ${o.side}</span>
+                <span class="text-xs text-gray-500 ml-2">@ $${(o.entry_price || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+                <span class="font-mono text-xs ml-2">$${(o.notional_usd || 0).toFixed(2)} notional</span>
+                ${convChip}
+              </div>
+              ${why}
+            </div>
+            <button type="button" class="row-dismiss text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-0.5"
+                    title="Dismiss this one">✕</button>
+          `;
+          row.querySelector('.row-dismiss').addEventListener('click', (e) => {
+            e.stopPropagation();
+            rememberDismissed([o.trade_ulid]);
+            refresh();
+          });
+          openingsEl.appendChild(row);
+        });
+        if (fresh.length > 10) {
+          const more = document.createElement('div');
+          more.className = 'text-[11px] text-gray-500 px-2 pt-1';
+          more.textContent = `+ ${fresh.length - 10} more on /trades/`;
+          openingsEl.appendChild(more);
+        }
+        return fresh.length;
+      }
+      function render(closures, openings) {
+        const dismissed = dismissedSet();
+        const fresh = (closures || []).filter(c => !dismissed.has(c.trade_ulid));
+        const openCount = renderOpenings(openings);
+        if (!fresh.length && !openCount) {
           banner.classList.add('hidden');
           document.body.classList.remove('closures-visible');
           return;
@@ -797,7 +849,7 @@
         // Measure rendered height and publish so CSS shifts the rest of
         // the page by the exact amount — banner height varies with row count.
         requestAnimationFrame(() => {
-          const h = Math.min(banner.offsetHeight, Math.round(window.innerHeight * 0.35));
+          const h = Math.min(banner.offsetHeight, Math.round(window.innerHeight * 0.50));
           document.documentElement.style.setProperty('--closures-banner-h', h + 'px');
         });
       }
@@ -810,11 +862,14 @@
       }
       async function refresh() {
         try {
-          const r = await fetch('/money/closures?since=' + encodeURIComponent(lastSeenISO),
-                                { cache: 'no-store' });
-          if (!r.ok) return;
-          const j = await r.json();
-          render(j.closures || []);
+          const since = encodeURIComponent(lastSeenISO);
+          const [cR, oR] = await Promise.all([
+            fetch('/money/closures?since=' + since, { cache: 'no-store' }),
+            fetch('/money/openings?since=' + since, { cache: 'no-store' }),
+          ]);
+          const closures = cR.ok ? (await cR.json()).closures : [];
+          const openings = oR.ok ? (await oR.json()).openings : [];
+          render(closures, openings);
         } catch {}
       }
       dismissBtn.addEventListener('click', () => {
@@ -826,8 +881,9 @@
       });
       refresh();
       setInterval(refresh, 30000);
-      // SSE: when a trade closes, refresh immediately so we don't wait 30s.
+      // SSE: refresh immediately on open/close so the banner stays live.
       document.addEventListener('plata:trade_closed', refresh);
+      document.addEventListener('plata:trade_opened', refresh);
     })();
 
     // ---------- Server-Sent Events (live updates from agents) ----------

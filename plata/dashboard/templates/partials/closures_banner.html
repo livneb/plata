@@ -10,13 +10,16 @@
 #}
 <div id="closures-banner"
      class="hidden fixed top-0 inset-x-0 z-[58] border-b border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 shadow-md"
-     style="max-height:35vh; overflow-y:auto"
+     style="max-height:50vh; overflow-y:auto"
      role="status" aria-live="polite">
   <div class="px-4 py-2 flex items-center justify-between flex-wrap gap-2">
-    <div class="flex items-center gap-2">
-      <span class="text-blue-700 dark:text-blue-300 text-lg">💼</span>
-      <span class="text-sm font-semibold text-blue-900 dark:text-blue-100">
-        <span id="closures-count">0</span> position(s) closed since your last visit
+    <div class="flex items-center gap-2 text-sm font-semibold text-blue-900 dark:text-blue-100">
+      <span>Since your last visit:</span>
+      <span class="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-800 text-xs">
+        <span id="openings-count">0</span> opened
+      </span>
+      <span class="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-800 text-xs">
+        <span id="closures-count">0</span> closed
       </span>
     </div>
     <button id="closures-dismiss-all"
@@ -25,6 +28,6 @@
       Got it
     </button>
   </div>
-  <div id="closures-list"
-       class="px-4 pb-3 space-y-1 max-h-72 overflow-y-auto"></div>
+  <div id="openings-list" class="px-4 pb-2 space-y-1"></div>
+  <div id="closures-list" class="px-4 pb-3 space-y-1"></div>
 </div>

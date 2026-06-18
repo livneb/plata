@@ -311,6 +311,42 @@ class RiskManager(BaseAgent):
             risk_pct = Decimal(self._config.get("risk_per_trade_pct", "1.0")) / Decimal("100")
             notional_usd = (Decimal(str(equity)) * risk_pct) if equity else Decimal("100")
 
+        # ===== Hard cap: total open notional ≤ account_baseline_equity_usd =====
+        # The operator's "Start from scratch" amount is the TRUE account size.
+        # If admitting this new position would push aggregate open notional
+        # over that, shrink it to the remaining slot; if no slot remains,
+        # reject. Without this cap, the system happily opened 4 positions at
+        # $1000 each on a stated $1000 account (4× over-leverage).
+        try:
+            baseline = Decimal(str(self._config.get("account_baseline_equity_usd") or 0))
+        except (TypeError, ValueError):
+            baseline = Decimal("0")
+        if baseline > 0:
+            from plata.core.db import TradeLedger as _TL, session_scope as _ss
+            from sqlalchemy import select as _select
+            try:
+                async with _ss() as _session:
+                    _open_rows = (await _session.execute(
+                        _select(_TL).where(_TL.exit_price.is_(None))
+                    )).scalars().all()
+                open_notional = sum(
+                    (Decimal(str(r.qty or 0)) * Decimal(str(r.entry_price or 0)))
+                    for r in _open_rows
+                )
+            except Exception:  # noqa: BLE001
+                open_notional = Decimal("0")
+            remaining = baseline - Decimal(str(open_notional))
+            if remaining <= 0:
+                await self._reject(proposal, "account_equity_exhausted")
+                return
+            if notional_usd > remaining:
+                self.log.info("notional_clamped_to_remaining_equity",
+                               proposal_ulid=proposal.proposal_ulid,
+                               want=float(notional_usd),
+                               remaining=float(remaining),
+                               baseline=float(baseline))
+                notional_usd = remaining
+
         ticker = await self._fetch_price(proposal.symbol)
         if ticker is None:
             await self._reject(proposal, "no_price_feed")
@@ -431,7 +467,21 @@ class RiskManager(BaseAgent):
 
     async def _fetch_equity(self, venue: str = "bybit") -> float | None:
         """Return free equity (USD) at the given venue, or None if unconfigured.
-        Caller passes the venue resolved from `venue_for(proposal.symbol)`."""
+        Caller passes the venue resolved from `venue_for(proposal.symbol)`.
+
+        Paper-mode override: when paper_trading_mode is on, we return the
+        operator's stated account size (account_baseline_equity_usd) instead
+        of the venue's testnet balance. The testnet typically reports a huge
+        mock balance which made every position size up to ~$1000 (1% of
+        $100k) regardless of what the operator told us their account
+        should hold. With this fix, "Start from scratch / $1000" means $1000.
+        """
+        paper = (self._config.get("paper_trading_mode", "true") or "true").lower() == "true"
+        if paper:
+            try:
+                return float(self._config.get("account_baseline_equity_usd") or 10000)
+            except (TypeError, ValueError):
+                return 10000.0
         if venue == "alpaca":
             if not self._alpaca:
                 return None
