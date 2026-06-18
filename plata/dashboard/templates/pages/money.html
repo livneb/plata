@@ -76,6 +76,131 @@
     </div>
   </section>
 
+  {# ===== Capital allocation =====
+     Where the operator's stated $ is right now: how much is deployed,
+     how much is unused, and which buckets / positions it's in. Operator
+     explicitly asked: "I need to see how much money total I put on the
+     table. how much is unused. how much used. and what it's used for." #}
+  {% if allocation %}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+      <div>
+        <h2 class="text-sm font-semibold">Capital allocation</h2>
+        <p class="text-[11px] text-gray-500">
+          Your stated account size from the last "Start from scratch": the bar shows where every dollar lives right now.
+        </p>
+      </div>
+      <div class="text-right">
+        <div class="text-[10px] uppercase text-gray-500">Total on the table</div>
+        <div class="text-xl font-mono font-bold">${{ '%.2f' % allocation.baseline_equity_usd }}</div>
+      </div>
+    </div>
+
+    {# Stacked bar: used per bucket + unused. #}
+    {% if allocation.baseline_equity_usd > 0 %}
+    <div class="flex w-full h-7 rounded overflow-hidden border border-gray-200 dark:border-gray-700 text-[10px] font-mono">
+      {% for b in allocation.buckets %}
+        {% set width = (b.used_usd / allocation.baseline_equity_usd * 100) if allocation.baseline_equity_usd > 0 else 0 %}
+        {% if width > 0.3 %}
+        <div class="flex items-center justify-center text-white" style="width: {{ width }}%; background: {{ b.dot }}"
+             title="{{ b.label }}: ${{ '%.2f' % b.used_usd }} used of ${{ '%.2f' % b.cap_usd }} cap ({{ b.open_count }} open)">
+          {% if width > 6 %}{{ b.icon }} ${{ '%.0f' % b.used_usd }}{% endif %}
+        </div>
+        {% endif %}
+      {% endfor %}
+      {% set unused_w = (allocation.available_usd / allocation.baseline_equity_usd * 100) %}
+      {% if unused_w > 0.3 %}
+      <div class="flex items-center justify-center text-gray-700 dark:text-gray-300"
+           style="width: {{ unused_w }}%; background: repeating-linear-gradient(45deg, #e5e7eb, #e5e7eb 6px, #f3f4f6 6px, #f3f4f6 12px)"
+           title="Available: ${{ '%.2f' % allocation.available_usd }} unused">
+        {% if unused_w > 8 %}💵 ${{ '%.0f' % allocation.available_usd }}{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="flex items-center justify-between text-xs">
+      <span><span class="text-gray-500">Used:</span>
+        <b class="font-mono text-amber-600 dark:text-amber-400">${{ '%.2f' % allocation.total_used_usd }}</b>
+        <span class="text-gray-400">({{ allocation.used_pct }}%)</span>
+      </span>
+      <span><span class="text-gray-500">Available:</span>
+        <b class="font-mono text-emerald-600 dark:text-emerald-400">${{ '%.2f' % allocation.available_usd }}</b>
+        <span class="text-gray-400">({{ '%.1f' % (100 - allocation.used_pct) }}%)</span>
+      </span>
+    </div>
+    {% else %}
+    <div class="text-xs text-gray-500 italic">
+      No baseline equity set — click <a href="/settings/?tab=controls" class="text-blue-500 hover:underline">Start from scratch</a> on Settings → Controls and enter your account size.
+    </div>
+    {% endif %}
+
+    {# Per-bucket cards: cap, used, available, slots, positions. #}
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 pt-2">
+      {% for b in allocation.buckets %}
+      <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] {{ b.color }} border">
+            {{ b.icon }} {{ b.label }}
+          </span>
+          <span class="text-[10px] text-gray-500">{{ b.pct_of_equity }}% cap · target {{ b.target_concurrent }}</span>
+        </div>
+        <div class="text-xs">
+          <div class="flex justify-between">
+            <span class="text-gray-500">Cap</span>
+            <span class="font-mono">${{ '%.2f' % b.cap_usd }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-500">Used</span>
+            <span class="font-mono text-amber-600 dark:text-amber-400">${{ '%.2f' % b.used_usd }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-500">Available</span>
+            <span class="font-mono text-emerald-600 dark:text-emerald-400">${{ '%.2f' % b.available_usd }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-500">Slots</span>
+            <span class="font-mono">{{ b.open_count }}/{{ b.target_concurrent }} open · {{ b.open_slots }} free</span>
+          </div>
+          {% if b.closed_count > 0 %}
+          <div class="flex justify-between pt-1 border-t border-gray-100 dark:border-gray-700 mt-1">
+            <span class="text-gray-500">Realized (this window)</span>
+            <span class="font-mono {% if b.realized_usd > 0 %}text-green-600{% elif b.realized_usd < 0 %}text-red-600{% else %}text-gray-400{% endif %}">${{ '%+.2f' % b.realized_usd }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-500">Closed</span>
+            <span class="font-mono text-gray-600 dark:text-gray-400">{{ b.closed_count }} ({{ b.winners }}W · {{ b.losers }}L)</span>
+          </div>
+          {% endif %}
+        </div>
+        {% if b.positions %}
+        <details class="text-[11px]">
+          <summary class="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">What it's used for ↓</summary>
+          <ul class="mt-1 space-y-1">
+            {% for pos in b.positions %}
+            <li class="border border-gray-100 dark:border-gray-700 rounded p-1.5">
+              <a href="/trades/{{ pos.trade_ulid }}" class="font-mono font-semibold hover:text-blue-500">{{ pos.symbol }}</a>
+              <span class="text-gray-500">{{ pos.side }}</span>
+              <span class="font-mono ml-2">${{ '%.2f' % pos.used_usd }}</span>
+              {% if pos.unrealized_usd %}
+              <span class="font-mono text-[10px] {% if pos.unrealized_usd > 0 %}text-green-500{% elif pos.unrealized_usd < 0 %}text-red-500{% endif %}">
+                ({{ '%+.2f' % pos.unrealized_usd }})
+              </span>
+              {% endif %}
+              {% if pos.reasoning %}
+              <div class="text-[10px] text-gray-500 italic mt-0.5">"{{ pos.reasoning }}{% if pos.reasoning|length >= 240 %}…{% endif %}"</div>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% else %}
+        <div class="text-[11px] text-gray-400 italic">No open positions in this bucket.</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {# ===== Charts ===== #}
   <section class="grid grid-cols-1 lg:grid-cols-3 gap-3">
     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 lg:col-span-2">

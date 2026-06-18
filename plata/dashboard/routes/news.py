@@ -58,11 +58,8 @@ async def _diagnose(name: str, h: dict, cfg: dict, now_ts: float,
             pass
 
     # 3. Source-specific prerequisites
-    if name == "reddit":
-        if not (settings_obj.reddit_client_id and settings_obj.reddit_client_secret):
-            return ("warn", "Reddit credentials are missing — `reddit_client_id` "
-                    "and `reddit_client_secret` are not set in /settings/?tab=api "
-                    "or as env vars. The poll() method returns [] until they're set.")
+    # Reddit no longer needs an OAuth app since v2.24.198. The credential
+    # check that used to live here has been removed.
     if name == "rss":
         feeds = cfg.get("rss_feeds") or []
         if not feeds:

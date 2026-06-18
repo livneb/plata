@@ -288,6 +288,153 @@ async def index(request: Request,
             "losses": d["losses"],
         })
 
+    # ===== Capital allocation breakdown =====
+    # The operator's $X "Start from scratch" amount is the TRUE account
+    # size. This panel answers the operator's question: "how much have I
+    # used / how much is unused / where is the money / what did it earn?"
+    cfg = await redis.hgetall("risk_config") or {}
+    try:
+        baseline_equity = float(cfg.get("account_baseline_equity_usd") or 0)
+    except (TypeError, ValueError):
+        baseline_equity = 0.0
+    BUCKET_META = {
+        "few_hours": {"label": "Few hours",  "icon": "⚡",
+                        "color": "bg-yellow-100 text-yellow-800 border-yellow-200",
+                        "dot": "#eab308"},
+        "few_days":  {"label": "Few days",   "icon": "🌊",
+                        "color": "bg-blue-100 text-blue-800 border-blue-200",
+                        "dot": "#3b82f6"},
+        "few_weeks": {"label": "Few weeks",  "icon": "🌒",
+                        "color": "bg-cyan-100 text-cyan-800 border-cyan-200",
+                        "dot": "#06b6d4"},
+        "long_term": {"label": "Long-term",  "icon": "🌱",
+                        "color": "bg-purple-100 text-purple-800 border-purple-200",
+                        "dot": "#a855f7"},
+    }
+    DEFAULT_PCTS = {"few_hours": 10.0, "few_days": 25.0,
+                     "few_weeks": 30.0, "long_term": 35.0}
+    DEFAULT_CONC = {"few_hours": 5, "few_days": 3, "few_weeks": 2,
+                     "long_term": 1}
+    buckets_view: list[dict] = []
+    # Per-bucket aggregates: cap, used (sum entry-notional of open),
+    # mark (sum current-mark notional of open), realized (sum closed
+    # net_pnl filtered by reset_at), open positions detail list.
+    bucket_state: dict[str, dict] = {
+        b: {"used": 0.0, "mark": 0.0, "realized": 0.0, "positions": [],
+             "closed_positions": 0, "winners": 0, "losers": 0}
+        for b in BUCKET_META
+    }
+    # Join open + closed trades to their Proposal.extras.horizon_bucket
+    from plata.core.db import Proposal as _P
+    ulids_needed = [r.proposal_id for r in rows if r.proposal_id]
+    prop_by_ulid: dict[str, "_P"] = {}
+    if ulids_needed:
+        async with session_scope() as _session:
+            try:
+                prs = (await _session.execute(
+                    select(_P).where(_P.proposal_ulid.in_(ulids_needed))
+                )).scalars().all()
+                prop_by_ulid = {p.proposal_ulid: p for p in prs}
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _bucket_of(trade) -> str | None:
+        p = prop_by_ulid.get(trade.proposal_id or "")
+        if p and p.extras:
+            b = (p.extras or {}).get("horizon_bucket")
+            if b in bucket_state:
+                return b
+        return None
+
+    for r in rows:
+        b = _bucket_of(r)
+        if b is None:
+            continue
+        st = bucket_state[b]
+        qty = float(r.qty or 0)
+        entry = float(r.entry_price or 0)
+        if r.exit_price is None:
+            # Open — use entry notional for "used" (matches the sizing model)
+            # and current mark notional for "mark" (shows current value).
+            try:
+                sym = await redis.hgetall(f"symbol:latest:{r.symbol}") or {}
+                cur = float(sym.get("price") or 0)
+            except Exception:  # noqa: BLE001
+                cur = 0.0
+            mark_price = cur or entry
+            used_n = qty * entry
+            mark_n = qty * mark_price
+            st["used"] += used_n
+            st["mark"] += mark_n
+            sign = 1.0 if (r.side or "").lower() == "long" else -1.0
+            unr = (sign * (mark_price - entry) * qty) if (mark_price and entry) else 0.0
+            p = prop_by_ulid.get(r.proposal_id or "")
+            st["positions"].append({
+                "trade_ulid": r.trade_ulid,
+                "symbol": r.symbol,
+                "side": r.side,
+                "used_usd": round(used_n, 2),
+                "mark_usd": round(mark_n, 2),
+                "unrealized_usd": round(unr, 2),
+                "reasoning": ((p.reasoning or "")[:240] if p and p.reasoning else None),
+            })
+        else:
+            close_ts = r.closed_at or r.opened_at
+            if not _in_range(close_ts):
+                continue
+            pnl = float(r.net_pnl or 0)
+            st["realized"] += pnl
+            st["closed_positions"] += 1
+            if pnl > 0:
+                st["winners"] += 1
+            elif pnl < 0:
+                st["losers"] += 1
+
+    # Compose the view rows.
+    total_used = 0.0
+    for b, meta in BUCKET_META.items():
+        try:
+            pct = float(cfg.get(f"horizon_{b}_budget_pct")
+                         or DEFAULT_PCTS[b])
+        except (TypeError, ValueError):
+            pct = DEFAULT_PCTS[b]
+        try:
+            conc = int(cfg.get(f"horizon_{b}_target_concurrent")
+                        or DEFAULT_CONC[b])
+        except (TypeError, ValueError):
+            conc = DEFAULT_CONC[b]
+        cap = baseline_equity * pct / 100.0 if baseline_equity > 0 else 0.0
+        st = bucket_state[b]
+        # Sort positions by used_usd desc so the biggest stake reads first.
+        st["positions"].sort(key=lambda p: p["used_usd"], reverse=True)
+        total_used += st["used"]
+        buckets_view.append({
+            "key": b,
+            **meta,
+            "pct_of_equity": pct,
+            "target_concurrent": conc,
+            "cap_usd": round(cap, 2),
+            "used_usd": round(st["used"], 2),
+            "mark_usd": round(st["mark"], 2),
+            "available_usd": round(max(0.0, cap - st["used"]), 2),
+            "fill_pct": round((st["used"] / cap * 100.0), 1) if cap > 0 else 0.0,
+            "open_count": len(st["positions"]),
+            "open_slots": max(0, conc - len(st["positions"])),
+            "realized_usd": round(st["realized"], 2),
+            "closed_count": st["closed_positions"],
+            "winners": st["winners"],
+            "losers": st["losers"],
+            "positions": st["positions"],
+        })
+    available_cash = max(0.0, baseline_equity - total_used)
+    allocation = {
+        "baseline_equity_usd": round(baseline_equity, 2),
+        "total_used_usd": round(total_used, 2),
+        "available_usd": round(available_cash, 2),
+        "used_pct": round((total_used / baseline_equity * 100.0), 1) if baseline_equity > 0 else 0.0,
+        "buckets": buckets_view,
+    }
+
     return templates.TemplateResponse(
         request,
         "pages/money.html",
@@ -310,6 +457,7 @@ async def index(request: Request,
             "range_from": range_from.isoformat() if range_from else "",
             "range_to": range_to.isoformat() if range_to else "",
             "as_of": datetime.now(timezone.utc).isoformat(),
+            "allocation": allocation,
         },
     )
 

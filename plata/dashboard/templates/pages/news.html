@@ -31,7 +31,7 @@
       <tbody>
         {% set verify_hints = {
           'gdelt':       'Click ▶ Run now → status flips to ⏳ polling → idle. "Fetched" > 0 if any new GDELT article matched the query. Click 📜 Last results to see the actual rows.',
-          'reddit':      'Click ▶ Run now → status flips to ⏳ polling → idle. Needs Reddit creds in /settings/?tab=api. "Fetched" > 0 = new post from a listed subreddit. Click 📜 Last results to see titles.',
+          'reddit':      'Click ▶ Run now → status flips to ⏳ polling → idle. No auth needed (v2.24.198+ uses old.reddit.com JSON + RSS fallback). "Fetched" > 0 = new post from a listed subreddit. Click 📜 Last results to see titles.',
           'cryptopanic': 'Click ▶ Run now → status flips to ⏳ polling. Free tier returns ~30 titles per call; "Fetched" should be small but ≥ 0. Click 📜 Last results to see titles.',
           'rss':         'Add a feed under "RSS feeds" below, save, click ▶ Run now. Status reaches ⏳ polling and "Fetched" > 0 if the feed has new entries since last poll. Click 📜 Last results to inspect.',
           'market_ticker': 'Polls live prices for top crypto (CoinGecko free) + stocks (Alpaca, if creds set) every 5 min. Emits a PRICE_ACTION signal when |% change| over the window crosses the threshold. First poll just records prices ("warming"); first signal can take one window worth of time.',
