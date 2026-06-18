@@ -92,51 +92,68 @@ class RedditSource(BaseSource):
             "subreddits": (",".join(subreddits)
                            + f"  ({len(subreddits)}/{n}, offset {start})"),
         }
+        # Track outcomes per sub so the probe can distinguish "everything
+        # is blocked" (escalate to error_type) from "one private/banned
+        # sub returned 403" (just note it, source is healthy).
+        ok_subs: list[str] = []
+        failed_subs: list[str] = []
         last_status: int | None = None
         fallback_used = 0
+        # Per-sub consecutive-failure counter (Redis) so we auto-quarantine
+        # permanently-unreachable subs (private, banned, deleted) instead
+        # of retrying them forever and noising up the probe.
+        from plata.core.bus import get_redis as _gr
+        _redis_ = _gr()
         async with httpx.AsyncClient(
             headers=BROWSER_HEADERS,
             timeout=15.0,
             follow_redirects=True,
         ) as client:
             for sub_name in subreddits:
-                # 1. Try old.reddit.com JSON first — anti-bot WAF is laxer
-                #    here than on the modern www. endpoint.
+                # Skip subs we've quarantined (5+ consecutive failures
+                # in the last 24h). The probe will show how many got
+                # skipped at the end.
+                try:
+                    fails = int(await _redis_.get(f"reddit:fail:{sub_name}") or 0)
+                except Exception:  # noqa: BLE001
+                    fails = 0
+                if fails >= 5:
+                    failed_subs.append(f"{sub_name}(quarantined)")
+                    continue
                 items, status, err = await self._fetch_json(client, sub_name)
                 last_status = status
-                # 2. If JSON 403s (cloud-egress IP block), fall back to
-                #    the per-subreddit RSS feed. RSS is served by a
-                #    different code path on Reddit's side and rarely
-                #    blocked. Successfully recovered fetches DON'T break
-                #    the cycle; they just feed RawSignals normally.
                 if status == 403:
                     rss_items = await self._fetch_rss(client, sub_name)
                     if rss_items:
                         items = rss_items
                         fallback_used += 1
-                        last_status = 200  # the RSS call succeeded
+                        last_status = 200
                     else:
-                        # Avoid stuffing the 30KB HTML body into
-                        # error_message — operator can't read it on the
-                        # tiny news-page chip. Concise summary instead.
-                        probe_kwargs["error_type"] = "HTTP403"
-                        probe_kwargs["error_message"] = (
-                            f"r/{sub_name}: JSON blocked by Reddit WAF "
-                            "(IP or UA fingerprint). RSS fallback also "
-                            "failed — likely the same block. Try "
-                            "reducing reddit_subreddits count or wait "
-                            "for the cloudflare cooldown.")
+                        failed_subs.append(sub_name)
+                        try:
+                            await _redis_.incr(f"reddit:fail:{sub_name}")
+                            await _redis_.expire(f"reddit:fail:{sub_name}", 86400)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        await asyncio.sleep(self.INTER_REQUEST_SLEEP_SEC)
                         continue
                 elif status == 429:
+                    # Real rate limit — stop hitting them this cycle.
                     probe_kwargs["error_type"] = "RateLimited"
                     probe_kwargs["error_message"] = (
-                        "429 — backing off this cycle "
-                        f"(sub={sub_name})")
+                        "429 — Reddit's anti-bot rate limit kicked in. "
+                        "Will retry next cycle.")
                     break
                 elif status >= 400:
-                    probe_kwargs["error_type"] = f"HTTP{status}"
-                    probe_kwargs["error_message"] = (err or "")[:200]
+                    failed_subs.append(f"{sub_name}({status})")
+                    await asyncio.sleep(self.INTER_REQUEST_SLEEP_SEC)
                     continue
+                ok_subs.append(sub_name)
+                # Reset the failure counter on success.
+                try:
+                    await _redis_.delete(f"reddit:fail:{sub_name}")
+                except Exception:  # noqa: BLE001
+                    pass
                 for item in items:
                     pid = item["id"]
                     if pid in self._seen_ids:
@@ -159,10 +176,29 @@ class RedditSource(BaseSource):
                     ))
                 await asyncio.sleep(self.INTER_REQUEST_SLEEP_SEC)
         probe_kwargs["item_count"] = len(signals)
-        if last_status is not None:
+        # http_status reflects the FIRST successful sub when at least one
+        # worked — that's the honest source-level status. The page
+        # currently colors >=400 red; we don't want a single private sub
+        # painting the whole source red while 5 others are fine.
+        if ok_subs:
+            probe_kwargs["http_status"] = 200
+        elif last_status is not None:
             probe_kwargs["http_status"] = last_status
         if fallback_used:
             probe_kwargs["rss_fallback_used"] = fallback_used
+        if failed_subs:
+            probe_kwargs["failed_subs"] = ",".join(failed_subs)
+        # Only escalate to error_type when EVERYTHING failed. Per-sub
+        # failures are now expected (private/banned subs return 403 on
+        # both JSON and RSS regardless of who's asking) and shouldn't
+        # alarm the operator if the source overall is healthy.
+        if not ok_subs and not signals and not probe_kwargs.get("error_type"):
+            probe_kwargs["error_type"] = "AllSubsFailed"
+            probe_kwargs["error_message"] = (
+                f"All {len(failed_subs)} subreddit(s) returned 403/4xx "
+                f"this cycle. If this persists, Reddit's WAF may be "
+                f"blocking the cloud egress IP — consider reducing "
+                f"reddit_subreddits to high-traffic public ones only.")
         await record_poll_probe("reddit", **probe_kwargs)
         if len(self._seen_ids) > 5000:
             self._seen_ids = set(list(self._seen_ids)[-2500:])

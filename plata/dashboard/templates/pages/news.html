@@ -90,6 +90,8 @@
                 {% if src.probe.response_size %}<div>response: {{ src.probe.response_size }} bytes</div>{% endif %}
                 {% if src.probe.per_feed %}<div class="break-words">per-feed: <span class="text-gray-300">{{ src.probe.per_feed }}</span></div>{% endif %}
                 {% if src.probe.subreddits %}<div class="break-words">subreddits tried: <span class="text-gray-400">{{ src.probe.subreddits }}</span></div>{% endif %}
+                {% if src.probe.failed_subs %}<div class="break-words text-amber-600 dark:text-amber-400">unreachable subs: <span class="font-mono">{{ src.probe.failed_subs }}</span> <span class="text-gray-500" title="A sub that fails 5 times in 24h is auto-quarantined; remove it from reddit_subreddits to clean up.">(private / banned / quarantined are normal)</span></div>{% endif %}
+                {% if src.probe.rss_fallback_used %}<div class="text-emerald-500">RSS fallback used for {{ src.probe.rss_fallback_used }} sub(s) this cycle</div>{% endif %}
                 {% if src.probe.query %}<div class="break-words">query: <span class="text-gray-400">{{ src.probe.query[:120] }}{% if src.probe.query|length > 120 %}…{% endif %}</span></div>{% endif %}
                 {% if src.probe.error_type %}
                   <div class="text-red-500">⚠ {{ src.probe.error_type }}{% if src.probe.error_message %} — <span class="text-red-400">{{ src.probe.error_message }}</span>{% endif %}</div>
