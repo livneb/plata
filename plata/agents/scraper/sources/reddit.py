@@ -58,6 +58,12 @@ class RedditSource(BaseSource):
     def __init__(self) -> None:
         self._seen_ids: set[str] = set()
         self._rotation_offset = 0
+        # v2.24.206: one-shot clear of any existing reddit:fail:* counters
+        # that built up under the old too-aggressive quarantine logic.
+        # Healthy public subs (r/Bitcoin, r/stocks etc.) were getting
+        # quarantined during WAF blocks. Quarantines will rebuild from
+        # zero under the new ok_subs-gated logic.
+        self._needs_quarantine_reset = True
 
     async def poll(self) -> list[RawSignal]:
         try:
@@ -97,27 +103,39 @@ class RedditSource(BaseSource):
         # sub returned 403" (just note it, source is healthy).
         ok_subs: list[str] = []
         failed_subs: list[str] = []
+        # Subs we'd increment the quarantine counter for IF the cycle
+        # also had at least one success — proves the sub itself is the
+        # problem and not a WAF block. Otherwise (everything failed) we
+        # don't increment, so a temporary IP/WAF block doesn't quarantine
+        # healthy public subs like r/Bitcoin, r/stocks etc.
+        increment_quarantine_for: list[str] = []
         last_status: int | None = None
         fallback_used = 0
-        # Per-sub consecutive-failure counter (Redis) so we auto-quarantine
-        # permanently-unreachable subs (private, banned, deleted) instead
-        # of retrying them forever and noising up the probe.
         from plata.core.bus import get_redis as _gr
         _redis_ = _gr()
+        if self._needs_quarantine_reset:
+            try:
+                async for k in _redis_.scan_iter(match="reddit:fail:*", count=200):
+                    await _redis_.delete(k)
+            except Exception:  # noqa: BLE001
+                pass
+            self._needs_quarantine_reset = False
         async with httpx.AsyncClient(
             headers=BROWSER_HEADERS,
             timeout=15.0,
             follow_redirects=True,
         ) as client:
             for sub_name in subreddits:
-                # Skip subs we've quarantined (5+ consecutive failures
-                # in the last 24h). The probe will show how many got
-                # skipped at the end.
+                # Skip subs we've quarantined (10+ consecutive failures
+                # in the last 24h, AND only counting failures from cycles
+                # where other subs succeeded). v2.24.206: threshold raised
+                # 5 -> 10 since healthy public subs were getting falsely
+                # quarantined during transient IP blocks.
                 try:
                     fails = int(await _redis_.get(f"reddit:fail:{sub_name}") or 0)
                 except Exception:  # noqa: BLE001
                     fails = 0
-                if fails >= 5:
+                if fails >= 10:
                     failed_subs.append(f"{sub_name}(quarantined)")
                     continue
                 items, status, err = await self._fetch_json(client, sub_name)
@@ -130,11 +148,12 @@ class RedditSource(BaseSource):
                         last_status = 200
                     else:
                         failed_subs.append(sub_name)
-                        try:
-                            await _redis_.incr(f"reddit:fail:{sub_name}")
-                            await _redis_.expire(f"reddit:fail:{sub_name}", 86400)
-                        except Exception:  # noqa: BLE001
-                            pass
+                        # Defer the counter increment until after the
+                        # cycle — see comment above. If everything fails
+                        # we DON'T quarantine, since that's almost
+                        # certainly a WAF/IP block, not a sub-specific
+                        # issue.
+                        increment_quarantine_for.append(sub_name)
                         await asyncio.sleep(self.INTER_REQUEST_SLEEP_SEC)
                         continue
                 elif status == 429:
@@ -175,6 +194,15 @@ class RedditSource(BaseSource):
                         },
                     ))
                 await asyncio.sleep(self.INTER_REQUEST_SLEEP_SEC)
+        # Deferred quarantine: only credit failures when others succeeded.
+        # Otherwise treat it as a global block and don't touch counters.
+        if ok_subs and increment_quarantine_for:
+            for sub_name in increment_quarantine_for:
+                try:
+                    await _redis_.incr(f"reddit:fail:{sub_name}")
+                    await _redis_.expire(f"reddit:fail:{sub_name}", 86400)
+                except Exception:  # noqa: BLE001
+                    pass
         probe_kwargs["item_count"] = len(signals)
         # http_status reflects the FIRST successful sub when at least one
         # worked — that's the honest source-level status. The page
@@ -262,7 +290,12 @@ class RedditSource(BaseSource):
             return []
         if resp.status_code != 200:
             return []
-        feed = feedparser.parse(resp.text)
+        # feedparser is SYNCHRONOUS — on a malformed feed it can spin
+        # inside the parser and wedge the event loop. Run in a worker
+        # thread so the loop stays responsive. v2.24.206 fix.
+        feed = await asyncio.get_running_loop().run_in_executor(
+            None, feedparser.parse, resp.text,
+        )
         items: list[dict] = []
         for entry in feed.entries:
             eid = entry.get("id") or entry.get("link") or ""

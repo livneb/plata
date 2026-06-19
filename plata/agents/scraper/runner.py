@@ -73,7 +73,13 @@ class Scraper(BaseAgent):
             })
             await redis.hdel(key, "run_now")
             try:
-                signals = await src.poll()
+                # Hard outer timeout so a hung source can't wedge the loop
+                # forever. Reddit RSS body parsing via feedparser is
+                # SYNCHRONOUS — if a malformed feed loops inside the
+                # parser, the entire event loop blocks. v2.24.206 fix:
+                # bound any single poll() at 90s wall and recycle on
+                # timeout. Other sources keep polling normally.
+                signals = await asyncio.wait_for(src.poll(), timeout=90.0)
                 outcomes: dict[str, int] = {"dup": 0, "injection": 0, "published": 0}
                 filtered_reasons: dict[str, int] = {}
                 for s in signals:
@@ -121,6 +127,14 @@ class Scraper(BaseAgent):
                 })
                 await redis.lpush(log_key, entry)
                 await redis.ltrim(log_key, 0, 19)
+            except asyncio.TimeoutError:
+                next_at = (datetime.now(timezone.utc).timestamp() + interval)
+                await redis.hset(key, mapping={
+                    "status": "error", "last_poll_at": now,
+                    "last_error": "TimeoutError: poll() exceeded 90s wall budget — likely a sync parse stall (feedparser) or a slow upstream. Loop recovered and will retry on next interval.",
+                    "next_poll_at": str(int(next_at)),
+                })
+                self.log.warning("source_poll_timeout", source=src.name)
             except Exception as e:
                 next_at = (datetime.now(timezone.utc).timestamp() + interval)
                 await self.error_reporter.capture_exception(
