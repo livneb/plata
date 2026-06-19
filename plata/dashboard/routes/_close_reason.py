@@ -14,8 +14,8 @@ _REASON_MAP: dict[str, tuple[str, str]] = {
                      "Price hit the stop-loss level — automatic exit."),
     "tp":          ("🎯 Take-profit reached",
                      "Price hit the take-profit level — automatic exit."),
-    "manual":      ("✋ Closed manually",
-                     "Someone clicked Close at market on this trade."),
+    "manual":      ("✋ Closed by you",
+                     "You clicked Close at market on this trade."),
     "kill_switch": ("🛑 Kill switch",
                      "System-wide halt triggered — every open position was force-closed."),
     "timeout":     ("⏰ Held too long",
@@ -26,13 +26,25 @@ _REASON_MAP: dict[str, tuple[str, str]] = {
                      "Position monitor's LLM judged this trade had drifted from the predicted trajectory and recommended close."),
     "event_driven":("📰 Event-driven exit",
                      "A new high-impact event arrived while we held this position; the LLM recommended close."),
+    "agent_close": ("🤖 Closed by agent",
+                     "Position monitor closed this trade automatically — either an auto-close rule fired or its LLM judged the trade should exit. The agent's reasoning is on the trade detail page."),
 }
 
 
-def label_for(reason: str | None) -> tuple[str, str]:
+def label_for(reason: str | None,
+              *, llm_reasoning_present: bool = False) -> tuple[str, str]:
     """Return (display_label, tooltip) for `reason`. Unknown reasons echo
-    back as `Closed (<reason>)` so the source isn't lost."""
+    back as `Closed (<reason>)` so the source isn't lost.
+
+    `llm_reasoning_present` retroactively corrects pre-v2.24.205 rows
+    where position-monitor LLM closures were stored as close_reason='manual':
+    if the manual row also has adjustment_executed_reasoning attached, we
+    KNOW it was actually an agent close (no human path writes that field)
+    so we render it as such.
+    """
     r = (reason or "").lower().strip()
+    if r == "manual" and llm_reasoning_present:
+        return _REASON_MAP["agent_close"]
     if r in _REASON_MAP:
         return _REASON_MAP[r]
     if r:

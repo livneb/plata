@@ -110,19 +110,36 @@ async def index(request: Request):
                 pass
         # Status: open / closed-with-reason. Title + colour combo.
         STATUS_META = {
-            "sl":          {"label": "SL hit",      "icon": "🛑", "color": "bg-red-100 text-red-800"},
-            "tp":          {"label": "TP hit",      "icon": "🎯", "color": "bg-emerald-100 text-emerald-800"},
-            "manual":      {"label": "Closed by you","icon": "✋", "color": "bg-blue-100 text-blue-800"},
-            "timeout":     {"label": "Timed out",   "icon": "⏱",  "color": "bg-amber-100 text-amber-800"},
-            "kill_switch": {"label": "Kill switch", "icon": "⚠",  "color": "bg-red-200 text-red-900"},
+            "sl":          {"label": "SL hit",        "icon": "🛑", "color": "bg-red-100 text-red-800"},
+            "tp":          {"label": "TP hit",        "icon": "🎯", "color": "bg-emerald-100 text-emerald-800"},
+            "manual":      {"label": "Closed by you", "icon": "✋", "color": "bg-blue-100 text-blue-800"},
+            "agent_close": {"label": "Closed by agent","icon": "🤖", "color": "bg-indigo-100 text-indigo-800"},
+            "timeout":     {"label": "Timed out",     "icon": "⏱",  "color": "bg-amber-100 text-amber-800"},
+            "kill_switch": {"label": "Kill switch",   "icon": "⚠",  "color": "bg-red-200 text-red-900"},
+            "reset":       {"label": "Reset",         "icon": "🔄", "color": "bg-gray-200 text-gray-700"},
         }
         if r.exit_price is None:
             status = {"label": "Open", "icon": "●", "color": "bg-emerald-100 text-emerald-800 animate-pulse",
                       "tooltip": "Position still open — live mark-to-market shown."}
         else:
             cr = (str(r.close_reason) if r.close_reason else "").lower() or "—"
+            # Retroactive correction: pre-v2.24.205 agent closures were
+            # stored as 'manual'. If we have adjustment_executed_reasoning
+            # on the originating proposal, no human did it — relabel.
+            if cr == "manual" and prop and prop.extras and \
+                    (prop.extras or {}).get("adjustment_executed_reasoning"):
+                cr = "agent_close"
             meta = STATUS_META.get(cr, {"label": cr, "icon": "✓", "color": "bg-gray-200 text-gray-700"})
-            status = {**meta, "tooltip": f"Closed automatically by rule: {cr}" if cr in ("sl", "tp", "timeout", "kill_switch") else ("Closed manually" if cr == "manual" else "Closed")}
+            cr_tooltips = {
+                "sl":          "Closed automatically — stop-loss hit.",
+                "tp":          "Closed automatically — take-profit hit.",
+                "timeout":     "Closed automatically — max-hold-minutes elapsed.",
+                "kill_switch": "Closed automatically — system kill switch fired.",
+                "manual":      "You clicked Close at market on this trade.",
+                "agent_close": "Position monitor closed it — see the agent's reasoning on the detail page.",
+                "reset":       "Force-closed at last mark when you clicked 'Start from scratch'.",
+            }
+            status = {**meta, "tooltip": cr_tooltips.get(cr, "Closed")}
 
         prop = prop_by_ulid.get(r.proposal_id or "")
         # Cheap health lookup from position monitor (None when closed/untracked).
@@ -631,7 +648,16 @@ async def detail(request: Request, trade_ulid: str):
                 verdict_label = "Break-even"
                 verdict_class = "text-gray-400"
             from plata.dashboard.routes._close_reason import label_for
-            reason_label, reason_tooltip = label_for(trade.close_reason)
+            # Same retroactive hint as the trades list / closures banner:
+            # pre-v2.24.205 agent closes were stored as 'manual'.
+            _llm_reasoning_present = bool(
+                (pr.extras or {}).get("adjustment_executed_reasoning")
+                if (pr and pr.extras) else False
+            )
+            reason_label, reason_tooltip = label_for(
+                trade.close_reason,
+                llm_reasoning_present=_llm_reasoning_present,
+            )
             held_sec = int((trade.closed_at - trade.opened_at).total_seconds()) \
                 if trade.opened_at else 0
             outcome = {

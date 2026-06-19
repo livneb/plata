@@ -79,6 +79,12 @@ class CloseReason(StrEnum):
     KILL_SWITCH = "kill_switch"
     TIMEOUT = "timeout"
     RESET = "reset"   # operator clicked "Start from scratch" — paper book-close
+    # Position monitor closed the position automatically — either an
+    # auto-close rule fired (e.g. drift exceeded review-window threshold)
+    # or the LLM's off-track / event-driven verdict recommended close.
+    # MANUAL is now strictly for human-initiated closes (operator clicks
+    # "Close at market" on /trades/<ulid> or approves an HITL adjustment).
+    AGENT_CLOSE = "agent_close"
 
 
 # ---------------------------------------------------------------------------

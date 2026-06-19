@@ -302,7 +302,12 @@ class PositionMonitor(BaseAgent):
             if triggered_rule:
                 self.log.info("auto_close_rule_triggered",
                               trade=trade.trade_ulid, rule=triggered_rule)
-                await self._publish_closure(trade, cur_price, CloseReason.MANUAL)
+                # The auto-close rule fired (drift/review threshold) —
+                # this is the AGENT closing the position, not the human.
+                # Was CloseReason.MANUAL until v2.24.205, which made the
+                # UI mislabel agent closures as "Closed by you".
+                await self._publish_closure(trade, cur_price, CloseReason.AGENT_CLOSE,
+                                              llm_reasoning=f"Auto-close rule: {triggered_rule}")
                 return
 
         # --- 1) SL / TP hit ---------------------------------------------------
@@ -720,8 +725,12 @@ class PositionMonitor(BaseAgent):
             except (TypeError, ValueError):
                 price = 0.0
             if price > 0:
+                # LLM verdict close — was CloseReason.MANUAL until
+                # v2.24.205, which made the UI mislabel agent closures
+                # as "Closed by you" alongside the agent's own quoted
+                # reasoning. Now correctly AGENT_CLOSE.
                 await self._publish_closure(
-                    trade, price, CloseReason.MANUAL,
+                    trade, price, CloseReason.AGENT_CLOSE,
                     llm_reasoning=llm_reasoning,
                 )
             return

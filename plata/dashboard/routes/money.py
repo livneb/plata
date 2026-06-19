@@ -511,15 +511,19 @@ async def closures_since(since: str | None = None, limit: int = 25):
 
     out = []
     for r in rows:
-        label, tooltip = label_for(r.close_reason)
-        pnl = float(r.net_pnl or 0)
-        inv = (float(r.qty or 0) * float(r.entry_price or 0)) or 0
-        pct = (pnl / inv * 100.0) if inv > 0 else 0.0
         # LLM reasoning, if any — position monitor stores it on the proposal.
         llm_reasoning = None
         p = proposal_map.get(r.trade_ulid)
         if p and p.extras:
             llm_reasoning = (p.extras or {}).get("adjustment_executed_reasoning")
+        # Pass `llm_reasoning_present` so pre-v2.24.205 rows that stored
+        # agent closes as close_reason='manual' get the correct label
+        # retroactively (no human path attaches LLM reasoning).
+        label, tooltip = label_for(r.close_reason,
+                                     llm_reasoning_present=bool(llm_reasoning))
+        pnl = float(r.net_pnl or 0)
+        inv = (float(r.qty or 0) * float(r.entry_price or 0)) or 0
+        pct = (pnl / inv * 100.0) if inv > 0 else 0.0
         held_sec = int((r.closed_at - r.opened_at).total_seconds()) \
             if (r.closed_at and r.opened_at) else 0
         out.append({
