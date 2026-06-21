@@ -72,6 +72,33 @@ def _parse_changelog(text: str) -> list[dict]:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    # Wait for Redis to finish loading the dataset into memory before any
+    # other lifespan block touches it. Without this, the cost-backfill
+    # scan_iter below raises BusyLoadingError during container boot
+    # (especially after a Railway redis restart), and the exception
+    # escapes async-with teardown in a way our broad try/excepts can't
+    # catch — wedging the whole dashboard startup. v2.24.207 fix.
+    try:
+        from plata.core.bus import get_redis as _gr_boot
+        import asyncio as _asyncio_boot
+        import logging as _logging_boot
+        _r_boot = _gr_boot()
+        for _attempt in range(15):
+            try:
+                await _r_boot.ping()
+                break
+            except Exception as _exc:  # noqa: BLE001
+                # BusyLoadingError / ConnectionError both flow through here.
+                _logging_boot.getLogger("dashboard").info(
+                    "redis_not_ready_yet: attempt %d/15: %s",
+                    _attempt + 1, str(_exc)[:120])
+                await _asyncio_boot.sleep(2.0)
+        else:
+            _logging_boot.getLogger("dashboard").warning(
+                "redis_ping_timeout: proceeding without Redis-ready confirm; "
+                "individual blocks will degrade gracefully.")
+    except Exception:  # noqa: BLE001
+        pass
     try:
         await ensure_admin_bootstrapped()
     except Exception as exc:  # noqa: BLE001
@@ -102,6 +129,15 @@ async def _lifespan(_app: FastAPI):
         from plata.core.db import LLMCost as _LLMCost, session_scope as _ss
         from sqlalchemy import select as _sel, func as _f
         r = _gr()
+        # Bail early if Redis is still loading — the readiness wait at the
+        # top should have covered it, but BusyLoadingError can re-appear
+        # if Redis flushes its RDB during boot. Cheap ping, no allocation.
+        try:
+            await r.ping()
+        except Exception as _exc:  # noqa: BLE001
+            _log.warning("llm_cost_backfill_skipped_redis_not_ready",
+                          error=str(_exc)[:120])
+            raise
         moved = 0
         async with _ss() as session:
             async for ck in r.scan_iter(match="cost:daily:*:agent:*", count=500):
