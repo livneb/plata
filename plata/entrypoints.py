@@ -117,6 +117,27 @@ def _agent_task(name: str, factory) -> asyncio.Task:
 
 async def _bind_then_run(http_runner, agent_factories: list[tuple[str, Any]]) -> None:
     """Bind the HTTP server first (so healthchecks pass), then start agents."""
+    # Wait for Redis to finish loading the RDB before any agent touches it.
+    # Same defense as the dashboard lifespan v2.24.207. Without this, agents
+    # boot during Railway's Redis cold-start window, hit BusyLoadingError on
+    # the first scan_iter / FT.INFO / hget call, crash, and the supervisor
+    # races the same window on every restart -- silently wedging the whole
+    # service. v2.24.210 fix.
+    try:
+        from plata.core.bus import get_redis as _gr
+        r = _gr()
+        for attempt in range(15):
+            try:
+                await r.ping()
+                break
+            except Exception as exc:  # noqa: BLE001 -- BusyLoading + Connection
+                _log.info("entrypoint_waiting_for_redis",
+                            attempt=attempt + 1, error=str(exc)[:120])
+                await asyncio.sleep(2.0)
+        else:
+            _log.warning("entrypoint_redis_ping_timeout_proceeding")
+    except Exception:  # noqa: BLE001
+        pass
     # Make sure aux tables exist BEFORE any agent starts writing to them.
     # Each Railway service runs this independently — no service depends on
     # the dashboard having booted first.

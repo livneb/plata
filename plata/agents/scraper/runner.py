@@ -42,6 +42,22 @@ class Scraper(BaseAgent):
         self._sources = all_sources()
 
     async def setup(self) -> None:
+        # Wait for Redis to finish loading the RDB before doing anything --
+        # same defense as the dashboard lifespan v2.24.207. Without this,
+        # ensure_recent_index() raises BusyLoadingError during Railway's
+        # post-deploy cold-start window and the agent crashes before its
+        # poll loops ever start. The supervisor restarts but each restart
+        # races the same window. v2.24.210 fix.
+        from plata.core.bus import get_redis as _gr
+        r = _gr()
+        for attempt in range(15):
+            try:
+                await r.ping()
+                break
+            except Exception as exc:  # noqa: BLE001 -- BusyLoading + Connection both
+                self.log.info("scraper_waiting_for_redis",
+                                attempt=attempt + 1, error=str(exc)[:120])
+                await asyncio.sleep(2.0)
         await ensure_recent_index()
         for src in self._sources:
             asyncio.create_task(self._poll_loop(src), name=f"scraper-{src.name}")
