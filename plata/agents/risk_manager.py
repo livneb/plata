@@ -317,10 +317,16 @@ class RiskManager(BaseAgent):
         #      bucket budget split when the operator has configured
         #      horizon_total_daily_budget_usd > 0).
         #   2. equity × risk_per_trade_pct (fallback).
+        # `equity` is read by the risk_snapshot dict at the end of handle()
+        # regardless of which sizing path runs — must be bound here. Was
+        # only bound inside the else-branch before v2.24.209, which raised
+        # UnboundLocalError on every proposal that arrived with a
+        # suggested_notional_usd (i.e. every proposal since v2.24.201's
+        # dynamic bucket sizing rolled out).
+        equity = await self._fetch_equity(venue)
         if proposal.suggested_notional_usd and Decimal(str(proposal.suggested_notional_usd)) > 0:
             notional_usd = Decimal(str(proposal.suggested_notional_usd))
         else:
-            equity = await self._fetch_equity(venue)
             risk_pct = Decimal(self._config.get("risk_per_trade_pct", "1.0")) / Decimal("100")
             notional_usd = (Decimal(str(equity)) * risk_pct) if equity else Decimal("100")
 
