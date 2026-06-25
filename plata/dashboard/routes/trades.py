@@ -109,6 +109,10 @@ async def index(request: Request):
             except Exception:  # noqa: BLE001
                 pass
         # Status: open / closed-with-reason. Title + colour combo.
+        # `prop` is looked up here (was line 144 before v2.24.208) because
+        # the close-reason retroactive correction below needs it. The
+        # later `enriched.append(...)` reuses the same binding.
+        prop = prop_by_ulid.get(r.proposal_id or "")
         STATUS_META = {
             "sl":          {"label": "SL hit",        "icon": "🛑", "color": "bg-red-100 text-red-800"},
             "tp":          {"label": "TP hit",        "icon": "🎯", "color": "bg-emerald-100 text-emerald-800"},
@@ -141,7 +145,6 @@ async def index(request: Request):
             }
             status = {**meta, "tooltip": cr_tooltips.get(cr, "Closed")}
 
-        prop = prop_by_ulid.get(r.proposal_id or "")
         # Cheap health lookup from position monitor (None when closed/untracked).
         health: dict = {}
         try:
