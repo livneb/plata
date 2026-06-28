@@ -360,7 +360,7 @@ class RiskManager(BaseAgent):
                 return
             if notional_usd > remaining:
                 self.log.info("notional_clamped_to_remaining_equity",
-                               proposal_ulid=proposal.proposal_ulid,
+                               proposal_ulid=proposal.ulid,
                                want=float(notional_usd),
                                remaining=float(remaining),
                                baseline=float(baseline))
