@@ -47,6 +47,11 @@ AGENT_MODELS: dict[str, str] = {
     "researcher": "anthropic/claude-sonnet-4-6",   # quality matters for the brain
     "council": "anthropic/claude-sonnet-4-6",      # deliberation aggregator
     "postmortem": "anthropic/claude-haiku-4-5",    # short lesson notes — Haiku is enough
+    # Self-improver gets a large mixed-content bundle (recent trades,
+    # config snapshot, calibration deltas, past-tweak effects) and must
+    # produce one structured tweak. Sonnet handles the reasoning well at
+    # acceptable cost; budget is capped per-day in the agent itself.
+    "self_improver": "anthropic/claude-sonnet-4-6",
 }
 
 # Agents whose system prompts should be prepended with the current

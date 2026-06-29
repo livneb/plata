@@ -172,6 +172,8 @@ async def _run_ingestion_hub() -> None:
 
 
 async def _run_intelligence_sandbox() -> None:
+    from plata.agents import calibrator as _calibrator
+    from plata.agents import self_improver as _self_improver
     from plata.agents.graph_ingestion import GraphIngestion
     from plata.agents.historian import HistorianResearchAgent
     from plata.agents.position_monitor import PositionMonitor
@@ -190,6 +192,10 @@ async def _run_intelligence_sandbox() -> None:
             ("historian_research", lambda: HistorianResearchAgent().run()),
             ("researcher", lambda: Researcher().run()),
             ("postmortem", lambda: Postmortem().run()),
+            # Layer 1: deterministic conviction calibration from realised win-rates.
+            ("calibrator", lambda: _calibrator.run()),
+            # Layer 3: LLM-driven strategic tuning, queued to /tuning/ as HITL.
+            ("self_improver", lambda: _self_improver.run()),
         ],
     )
 

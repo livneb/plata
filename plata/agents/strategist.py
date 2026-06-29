@@ -465,10 +465,42 @@ class Strategist(BaseAgent):
             except Exception:  # noqa: BLE001
                 continue
 
+        # Conviction calibration — closes the Reviewer feedback loop.
+        # If the calibrator has enough trades in this (symbol|category,
+        # bucket) cell, replace the LLM's raw conviction with the empirical
+        # win-rate. Both numbers are stashed in extras for the trade page.
+        raw_conviction = float(decision.get("conviction") or 0)
+        conv = raw_conviction
+        calibration_extras: dict | None = None
+        try:
+            from plata.agents.calibrator import lookup as _calibration_lookup
+            cell = await _calibration_lookup(
+                category=str(event.category) if event.category else None,
+                symbol=str(decision.get("symbol") or "") or None,
+                conviction=raw_conviction,
+            )
+            if cell:
+                conv = cell["wr"]
+                decision["conviction"] = conv
+                calibration_extras = {
+                    "raw_conviction":        raw_conviction,
+                    "calibrated_conviction": conv,
+                    "delta":                 round(conv - raw_conviction, 4),
+                    "source":                cell["source"],
+                    "trades_observed":       cell["trades"],
+                    "bucket_midpoint":       cell["midpoint"],
+                }
+                self.log.info("conviction_calibrated",
+                               event_ulid=event.ulid,
+                               raw=raw_conviction, calibrated=conv,
+                               source=cell["source"], trades=cell["trades"])
+        except Exception as exc:  # noqa: BLE001
+            self.log.warning("conviction_calibration_failed",
+                              event_ulid=event.ulid, error=str(exc)[:200])
+
         # Min-conviction filter — operator-tunable. Below this, the proposal
         # is dropped without persistence so we don't pile up no-op rows in
         # the proposals table. Default 0.3.
-        conv = float(decision.get("conviction") or 0)
         try:
             min_conv = float((await redis.hget(
                 "risk_config", "min_conviction_to_publish")) or 0.3)
@@ -615,6 +647,8 @@ class Strategist(BaseAgent):
             }
             if council_extras is not None:
                 published_extras["council"] = council_extras
+            if calibration_extras is not None:
+                published_extras["calibration"] = calibration_extras
             await record_published(proposal, extras=published_extras)
         except Exception:  # noqa: BLE001
             pass

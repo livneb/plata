@@ -24,6 +24,7 @@ GROUPS: list[tuple[str, str, str]] = [
     ("guards",      "Behavioural guards",     "Per-proposal sanity checks that block obviously-bad trades."),
     ("strategist",  "Strategist tuning",      "Pre-LLM gates — what makes the strategist even consider an event."),
     ("monitor",     "Position monitor",       "Watches every open position: auto-exits SL/TP/timeout, judges drift, reacts to new events."),
+    ("learning",    "Learning & calibration", "Closed-loop self-improvement — empirical calibration of conviction and LLM-proposed tuning."),
 ]
 
 FIELDS: dict[str, dict] = {
@@ -229,6 +230,47 @@ FIELDS: dict[str, dict] = {
         "type": "currency",
         "min": 100, "max": 10000000, "step": 100,
         "help": "Reference equity used to compute % change in the topbar's Show-details panel and in dashboard PnL summaries. Paper accounts default to $10k; bump to match your live account size.",
+    },
+
+    "calibrator_enabled": {
+        "label": "Calibrator enabled",
+        "group": "learning",
+        "type": "bool",
+        "help": "When ON, a deterministic agent reads recent trade outcomes per (category, conviction-bucket) every Calibrator interval and writes a Beta-smoothed empirical win-rate table. The Strategist then REPLACES the LLM's raw conviction with the empirical number whenever a bucket has enough samples — so '0.7 conviction' starts meaning what it actually predicts. No LLM cost.",
+    },
+    "calibrator_interval_min": {
+        "label": "Calibrator interval",
+        "group": "learning",
+        "type": "minutes",
+        "min": 5, "max": 1440, "step": 5,
+        "help": "How often (minutes) the calibrator rebuilds the conviction table. Default 30. Cheaper to run often — no LLM calls.",
+    },
+    "calibrator_min_samples": {
+        "label": "Calibrator min samples / cell",
+        "group": "learning",
+        "type": "int",
+        "min": 1, "max": 50, "step": 1,
+        "help": "Minimum closed trades in a (category, conviction-bucket) cell before the calibrator trusts its empirical win-rate to override the LLM. Lower = faster but noisier learning; higher = more conservative.",
+    },
+    "self_improver_enabled": {
+        "label": "Self-improver enabled",
+        "group": "learning",
+        "type": "bool",
+        "help": "When ON, an LLM agent wakes every N hours, reviews the full system state (recent trades, calibration deltas, past-tweak effects), and queues ONE structured config tweak to /tuning/ for your approval. Counts against the self-improver daily budget below.",
+    },
+    "self_improver_interval_hours": {
+        "label": "Self-improver interval",
+        "group": "learning",
+        "type": "float",
+        "min": 0.5, "max": 48, "step": 0.5,
+        "help": "Hours between LLM-driven self-improvement runs. Default 6 (4 runs/day). Combine with the daily budget for a hard cost ceiling.",
+    },
+    "self_improver_daily_budget_usd": {
+        "label": "Self-improver daily $ budget",
+        "group": "learning",
+        "type": "currency",
+        "min": 0, "max": 10, "step": 0.10,
+        "help": "Hard cap on LLM spend by the self-improver per UTC day. Once exceeded, runs are skipped until midnight. Default $0.50 ≈ ~5–10 cycles/day on Sonnet.",
     },
 }
 
