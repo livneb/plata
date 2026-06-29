@@ -50,3 +50,24 @@ def test_trade_proposal_serializable():
     )
     json_str = p.model_dump_json()
     assert "BTCUSDT" in json_str
+
+
+def test_trade_proposal_ulid_field_name():
+    """TradeProposal exposes its id as `ulid` (inherited from StreamMessage),
+    NOT `proposal_ulid`. The `proposal_ulid` field belongs to downstream
+    schemas (RiskDecision, ExecutedTrade, TradeClosure) which reference the
+    originating proposal. Mixing them up has burned us before — risk_manager
+    log lines and dashboard handlers both crashed with AttributeError when
+    code accessed `proposal.proposal_ulid` on a TradeProposal instance."""
+    import pytest
+    p = TradeProposal(
+        triggering_event_ulid="A" * 26,
+        symbol="BTCUSDT",
+        side=Side.LONG,
+        conviction=0.7,
+        reasoning="rationale",
+    )
+    assert hasattr(p, "ulid")
+    assert len(p.ulid) == 26
+    with pytest.raises(AttributeError):
+        _ = p.proposal_ulid  # type: ignore[attr-defined]
