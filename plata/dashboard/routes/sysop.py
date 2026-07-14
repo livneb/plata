@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 
 from plata.agents import sysop as sysop_agent
 from plata.core.db import SysopFinding, session_scope
@@ -48,6 +48,20 @@ async def index(request: Request, show: str = "open"):
         request, "pages/sysop.html",
         {"active": "sysop", "findings": findings, "show": show},
     )
+
+
+@router.post("/clear-all")
+async def clear_all(request: Request):
+    """Dismiss every OPEN finding in one click. Same semantics as dismissing
+    each row individually: a finding re-appears within 1h if still detected."""
+    actor = current_user_email(request) or "anonymous"
+    async with session_scope() as session:
+        await session.execute(
+            update(SysopFinding)
+            .where(SysopFinding.state == "new")
+            .values(state="dismissed", actor=actor)
+        )
+    return RedirectResponse(url="/sysop/", status_code=303)
 
 
 @router.post("/{finding_id}/apply")

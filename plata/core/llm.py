@@ -103,8 +103,9 @@ FREE_FALLBACKS: list[str] = [
     "qwen/qwen-2.5-72b-instruct:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "deepseek/deepseek-r1:free",
-    # Google AI Studio (heavier reasoning, stricter quota)
-    "google-ai-studio/gemini-2.5-pro",
+    # google-ai-studio/gemini-2.5-pro was removed v2.24.211: Google retired it
+    # (404 "no longer available") and it kept re-entering the rotation because
+    # 404s only earn a 10-min cooldown. See PERMANENTLY_RETIRED_FREE.
 ]
 
 
@@ -121,6 +122,9 @@ def _is_free_model(model: str) -> bool:
 PERMANENTLY_RETIRED_FREE: frozenset[str] = frozenset({
     "google/gemini-2.0-flash-exp:free",
     "mistralai/mistral-small-24b-instruct-2501:free",
+    # Google AI Studio retired the 2.5-pro endpoint (~v2.24.211): every call
+    # returns 404 "This model models/gemini-2.5-pro is no longer available".
+    "google-ai-studio/gemini-2.5-pro",
 })
 
 
@@ -204,9 +208,8 @@ async def refresh_free_catalog() -> int:
                 await r_.delete("llm_config:auto_active_free")
         except Exception:  # noqa: BLE001
             pass
-        if repointed or to_delete:
-            _log.info("free_catalog_reconciled",
-                      repointed=len(repointed), deleted=len(to_delete))
+        if to_delete:
+            _log.info("free_catalog_reconciled", deleted=len(to_delete))
     except Exception as exc:  # noqa: BLE001
         _log.warning("free_catalog_repoint_failed", error=str(exc)[:160])
     _log.info("free_catalog_refreshed", count=len(free))
@@ -450,7 +453,7 @@ MODEL_CATALOG_GOOGLE_FREE: list[str] = [
     "google-ai-studio/gemini-2.5-flash",
     "google-ai-studio/gemini-2.0-flash",
     "google-ai-studio/gemini-2.5-flash-lite",
-    "google-ai-studio/gemini-2.5-pro",
+    # gemini-2.5-pro removed v2.24.211 — retired by Google (persistent 404)
 ]
 MODEL_CATALOG_PAID: list[str] = [
     "anthropic/claude-sonnet-4-6",
@@ -905,6 +908,8 @@ class LLMClient:
                 # Free-pool failure classification (re-derived in v2.24.164):
                 #   PERMANENT (mark dead 24h)
                 #     - "unavailable for free" (OpenRouter explicit retirement)
+                #     - "no longer available" (Google AI Studio retirement —
+                #       404 body says "update your code to use a newer model")
                 #     - "response_format is not supported" (model can't do
                 #       structured output at all)
                 #   TRANSIENT (10-min garbage cooldown; model may come back)
@@ -916,6 +921,7 @@ class LLMClient:
                 is_free = _is_free_model(current_model)
                 is_perm_unavail = is_free and (
                     "unavailable for free" in low
+                    or "no longer available" in low
                     or "response_format is not supported" in low
                     or ("response_format" in low and "not supported" in low)
                 )

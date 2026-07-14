@@ -10,6 +10,16 @@
               class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Copy every visible finding as one markdown block, ready to paste into chat for diagnosis.">📋 Copy all ({{ findings | length }})</button>
       {% endif %}
+      {% set open_count = findings | selectattr('state', 'equalto', 'new') | list | length %}
+      {% if open_count %}
+      <form method="post" action="/sysop/clear-all" class="inline"
+            data-confirm="Dismiss all {{ open_count }} open finding(s)? Each will reappear within 1h if still detected."
+            data-confirm-title="Clear all findings" data-confirm-label="Clear all" data-confirm-danger>
+        <button type="submit"
+                class="px-2 py-1 rounded border border-red-300 dark:border-red-700 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
+                title="Dismiss every open finding in one click. Anything still broken re-surfaces within the hour.">🧹 Clear all ({{ open_count }})</button>
+      </form>
+      {% endif %}
       <a href="/sysop/?show=open" class="px-2 py-1 rounded {% if show == 'open' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">Open</a>
       <a href="/sysop/?show=history" class="px-2 py-1 rounded {% if show == 'history' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">History</a>
       <a href="/sysop/?show=all" class="px-2 py-1 rounded {% if show == 'all' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">All</a>

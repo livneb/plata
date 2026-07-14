@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.211 — 2026-07-14
+- **🐛 Retire `google-ai-studio/gemini-2.5-pro` from the free rotation.** Google shut the endpoint down — every call returns 404 *"This model models/gemini-2.5-pro is no longer available"*. Because 404s are classified TRANSIENT (10-min cooldown), the dead model kept re-entering the chain walk every 10 minutes, burning an attempt on a guaranteed failure and contributing to `All free models exhausted` errors (seen from graph_ingestion / strategist in the `execution_vault` stale-agents finding). Removed from `FREE_FALLBACKS` + the Settings catalog, added to `PERMANENTLY_RETIRED_FREE`.
+- **🩺 "no longer available" now classified as PERMANENT.** Google AI Studio's retirement message earns the 24h dead-cache (like OpenRouter's "unavailable for free") instead of a 10-min cooldown, so the next provider-side retirement stops being retried forever without a code change.
+- **🐛 Fix `NameError: repointed` in `refresh_free_catalog`.** Leftover from the v2.24.178 repoint-removal refactor — the daily catalog refresh logged a spurious `free_catalog_repoint_failed` warning on every run.
+- **🧹 `/sysop/` "Clear all" button.** One click dismisses every open finding (same semantics as dismissing rows individually — anything still broken re-surfaces within the hour). Confirm dialog shows the count.
+
 ## 2.24.164 — 2026-06-08
 - **🐛 ROOT cause of "12 attempts on obscure models, never reached llama/deepseek".** Even though v2.24.163 put static FREE_FALLBACKS first in the priority order, the curated models were ALL in the `llm:dead_free_models` Redis set from earlier "no endpoints found" hits (which v2.24.158 wrongly classified as PERMANENT 24h-dead). The pre-call check and chain walk both skipped every curated model → chain only used obscure live-catalog ones (nvidia/liquid/google-gemma-4/kimi/...) → all 429'd.
   - **Reclassification**: `"no endpoints found"` + `"404"` are now TRANSIENT (10-min cooldown). `"unavailable for free"` + `"response_format is not supported"` stay PERMANENT (24h). Provider load shouldn't blacklist a model for a day.
