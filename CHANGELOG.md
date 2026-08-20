@@ -2,6 +2,9 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.214 — 2026-08-20
+- **Proposals retention: keep exactly the last week.** Both `proposals_dropped_days` and `proposals_days` default to **7** now — recent decisions (including drop reasons) stay available for study, everything older goes. Proposals that became real trades are still kept forever.
+
 ## 2.24.213 — 2026-08-20
 - **🧹 Janitor now cleans the proposals table (was: 72k+ rows, kept forever).** Root cause of the huge count: the strategist writes one diagnostic `state=dropped` Proposal row for **every** event it rejects, so drop records dominate the table. New retention split:
   - `dropped` rows (pure diagnostics): deleted after **14 days** (`proposals_dropped_days`).

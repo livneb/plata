@@ -32,10 +32,10 @@ def test_merge_config_zero_disables():
 
 
 def test_proposal_defaults_clean_noise_but_not_trades():
-    # dropped diagnostic rows die fast, never-traded proposals eventually,
-    # and there is intentionally NO knob that deletes traded proposals.
-    assert DEFAULTS["proposals_dropped_days"] == 14
-    assert DEFAULTS["proposals_days"] == 90
+    # Exactly the last week of proposal records is kept for study, and
+    # there is intentionally NO knob that deletes traded proposals.
+    assert DEFAULTS["proposals_dropped_days"] == 7
+    assert DEFAULTS["proposals_days"] == 7
     assert not any("executed" in k or "traded" in k for k in DEFAULTS)
 
 

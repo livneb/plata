@@ -86,11 +86,12 @@ DEFAULTS: dict[str, int] = {
     "llm_cost_days": 400,
     # `dropped` rows are pure diagnostics — the strategist writes one for
     # EVERY event it rejects, so they dominate the table (tens of thousands).
-    "proposals_dropped_days": 14,
+    # Keep exactly the last week so recent decisions can still be studied.
+    "proposals_dropped_days": 7,
     # Proposals that never became a trade (rejected / hitl_rejected /
     # timed out / stale). Ones WITH a trade_ulid are kept forever — they're
     # the learning set tied to trade_ledger.
-    "proposals_days": 90,
+    "proposals_days": 7,
     "config_settings_keep_versions": 20,   # per key
     # -- Postgres batching ----------------------------------------------------
     "pg_delete_batch": 5_000,

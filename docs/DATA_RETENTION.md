@@ -52,8 +52,8 @@ run so a large backlog drains over several cycles instead of one long pass.
 | `event_price_windows` | 365 days |
 | `llm_cost` | 400 days |
 | `config_settings` | last 20 versions per key |
-| `proposals` — `dropped` rows (one diagnostic row per event the strategist rejects; they dominate the table) | 14 days |
-| `proposals` — never became a trade (`trade_ulid IS NULL`: rejected / HITL-rejected / timed out / stale) | 90 days |
+| `proposals` — `dropped` rows (one diagnostic row per event the strategist rejects; they dominate the table) | 7 days |
+| `proposals` — never became a trade (`trade_ulid IS NULL`: rejected / HITL-rejected / timed out / stale) | 7 days |
 | `proposals` — became a real trade (`trade_ulid` set) | **never touched** (the learning set tied to `trade_ledger`) |
 | `trade_ledger`, `backtest_*`, `users`, `api_credentials` | **never touched** |
 
