@@ -319,6 +319,48 @@ async def _mark_dead_free(model: str) -> None:
         pass
 
 
+def _classify_free_failure(exc: Exception, msg: str) -> str | None:
+    """Classify a free-pool call failure (re-derived in v2.24.164).
+
+    Returns:
+      "permanent"  → mark dead 24h ("unavailable for free" retirement, or
+                     the model can't do structured output at all)
+      "transient"  → 10-min garbage cooldown, walk the chain ("no endpoints
+                     found", 404, 429/rate limit, provider unreachable, or
+                     an upstream-provider 400)
+      None         → unclassified; plain retry on the same model.
+
+    Caller is responsible for checking the model is actually free.
+
+    v2.24.213 added the 400 case: OpenRouter wraps upstream-provider
+    rejections as `400 {'message': 'Provider returned error', ...,
+    'provider_name': 'AtlasCloud'}` — e.g. AtlasCloud 400-ing a
+    json_schema request it can't serve. These are deterministic per
+    provider, and OpenRouter routing is sticky enough that retrying the
+    same model usually lands on the same broken provider — so 3 same-model
+    retries all failed and the error escaped to the agent's consume loop
+    (strategist crash, 2026-08-20). Cool the model down and walk the
+    chain instead.
+    """
+    low = msg.lower()
+    if (
+        "unavailable for free" in low
+        or ("response_format" in low and "not supported" in low)
+    ):
+        return "permanent"
+    if (
+        "no endpoints found" in low
+        or "404" in msg
+        or "rate limit" in low
+        or "429" in msg
+        or "provider_unreachable" in msg
+        or "provider returned error" in low
+        or getattr(exc, "status_code", None) == 400
+    ):
+        return "transient"
+    return None
+
+
 async def _free_provider_preference() -> str:
     """Read llm_config:default_free_provider — `openrouter` / `google_ai_studio`
     / `both` (default). Used by the chain walk to filter candidates."""
@@ -902,30 +944,16 @@ class LLMClient:
                         kwargs["max_tokens"] = affordable
                         _log.warning("llm_max_tokens_shrunk", new_max=affordable)
                         continue
-                # Free-pool failure classification (re-derived in v2.24.164):
-                #   PERMANENT (mark dead 24h)
-                #     - "unavailable for free" (OpenRouter explicit retirement)
-                #     - "response_format is not supported" (model can't do
-                #       structured output at all)
-                #   TRANSIENT (10-min garbage cooldown; model may come back)
-                #     - "no endpoints found" (provider pool is loaded RIGHT NOW)
-                #     - 404 (could be misconfig OR temporary)
-                #     - "rate limit" / "429"
-                # Both walk FREE_FALLBACKS to the next non-tried non-dead model.
+                # Free-pool failure classification — see _classify_free_failure
+                # for the taxonomy. Both classes walk FREE_FALLBACKS to the
+                # next non-tried non-dead model.
                 current_model = kwargs.get("model") or ""
                 is_free = _is_free_model(current_model)
-                is_perm_unavail = is_free and (
-                    "unavailable for free" in low
-                    or "response_format is not supported" in low
-                    or ("response_format" in low and "not supported" in low)
+                failure_class = (
+                    _classify_free_failure(exc, msg) if is_free else None
                 )
-                is_transient = is_free and (
-                    "no endpoints found" in low
-                    or "404" in msg
-                    or "rate limit" in low
-                    or "429" in msg
-                    or "provider_unreachable" in msg
-                )
+                is_perm_unavail = failure_class == "permanent"
+                is_transient = failure_class == "transient"
                 if is_perm_unavail:
                     await _mark_dead_free(current_model)
                 elif is_transient:
@@ -960,7 +988,8 @@ class LLMClient:
                                      from_model=current_model,
                                      to_model=next_model,
                                      reason=("perm_unavail" if is_perm_unavail
-                                              else "rate_limited"))
+                                              else "transient"),
+                                     error=msg[:160])
                         kwargs["model"] = next_model
                         kwargs["_tried_free"] = list(tried)
                         self.model = next_model

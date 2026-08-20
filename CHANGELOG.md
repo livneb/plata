@@ -2,6 +2,12 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.213 — 2026-08-20
+- **🐛 Strategist crash on upstream-provider 400s (AtlasCloud "bad request").** OpenRouter wraps rejections from the provider actually serving a free model as `400 {'message': 'Provider returned error', 'provider_name': 'AtlasCloud', ...}` — e.g. AtlasCloud 400-ing a `json_schema` request it can't serve. That error matched neither the PERMANENT nor the TRANSIENT free-pool classification, so `complete()` burned its 3 same-model retries (routing is sticky enough that each landed on the same broken provider) and the `BadRequestError` escaped to the strategist's consume loop, dropping the event.
+  - Provider-returned 400s on free models (matched by message or HTTP status) are now classified TRANSIENT: 10-min garbage cooldown on the model, then walk `FREE_FALLBACKS` to the next candidate — same machinery as 404/429. 5xx and timeouts still take the plain same-model retry path.
+  - Classification extracted into `_classify_free_failure()` (pure function) + unit tests covering the whole taxonomy, anchored on the exact AtlasCloud error string.
+  - `llm_free_fallback` log line now includes the truncated triggering error and says `transient` instead of the misleading `rate_limited`.
+
 ## 2.24.212 — 2026-08-20
 - **🧹 New `/janitor/` page (Diagnostics group)** — the retention mechanism from v2.24.211 now has a screen:
   - Headline cards: last sweep time + duration, approximate next sweep, total reclaimed last run, sweep health (flags any Postgres sweep that errored).
