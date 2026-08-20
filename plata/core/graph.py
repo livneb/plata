@@ -52,6 +52,18 @@ def edge_key(src: str, rel: str, dst: str) -> str:
     return f"edge:{src}:{rel}:{dst}"
 
 
+def edge_index_key(src: str) -> str:
+    """SET of edge keys whose src is this node. Written by upsert_edge and
+    backfilled by the janitor's edge pass; lets readers fetch a node's edges
+    with one SMEMBERS instead of a full-keyspace SCAN."""
+    return f"edgeidx:{src}"
+
+
+# Flag set by the janitor once a full edge pass has backfilled edgeidx:* for
+# every existing edge. Until then, readers fall back to SCAN.
+EDGE_INDEX_READY_KEY = "graph:edgeidx_ready"
+
+
 # ---------------------------------------------------------------------------
 # Index creation
 # ---------------------------------------------------------------------------
@@ -245,6 +257,7 @@ async def upsert_edge(
         **(extra or {}),
     }
     await redis.json().set(key, "$", doc)
+    await redis.sadd(edge_index_key(src), key)
     return key
 
 
@@ -310,13 +323,41 @@ async def vector_search_events(
     return out
 
 
+async def edge_keys_for_sources(src_keys: list[str]) -> list[str]:
+    """Edge keys whose src is any of `src_keys`, via edgeidx:* SETs.
+    Falls back to ONE global scan while the index isn't backfilled yet."""
+    redis = get_redis()
+    if not src_keys:
+        return []
+    if await redis.get(EDGE_INDEX_READY_KEY):
+        pipe = redis.pipeline()
+        for sk in src_keys:
+            pipe.smembers(edge_index_key(sk))
+        results = await pipe.execute()
+        return sorted({k for members in results for k in (members or [])})
+    # Fallback: single keyspace walk with a big COUNT (pre-backfill window).
+    wanted = set(src_keys)
+    out: list[str] = []
+    async for k in redis.scan_iter(match="edge:*", count=5000):
+        parts = k.split(":", 3)
+        if len(parts) >= 4 and f"{parts[1]}:{parts[2]}" in wanted:
+            out.append(k)
+    return out
+
+
 async def neighbors(node_key: str, *, rel: str | None = None) -> list[dict[str, Any]]:
     """Return outgoing edges of a node, optionally filtered by relation."""
     redis = get_redis()
-    pattern = f"edge:{node_key}:{rel or '*'}:*"
-    keys = []
-    async for k in redis.scan_iter(match=pattern, count=200):
-        keys.append(k)
+    if await redis.get(EDGE_INDEX_READY_KEY):
+        keys = sorted(await redis.smembers(edge_index_key(node_key)) or [])
+        if rel is not None:
+            prefix = f"edge:{node_key}:{rel}:"
+            keys = [k for k in keys if k.startswith(prefix)]
+    else:
+        pattern = f"edge:{node_key}:{rel or '*'}:*"
+        keys = []
+        async for k in redis.scan_iter(match=pattern, count=2000):
+            keys.append(k)
     if not keys:
         return []
     pipe = redis.pipeline()

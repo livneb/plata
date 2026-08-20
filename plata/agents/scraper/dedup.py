@@ -103,32 +103,29 @@ async def _layer_entity_overlap(signal: RawSignal) -> str | None:
         return None
     now = int(time.time())
     # Sweep recent fingerprints (we store one HASH per signal w/ entities + ulid).
-    # For scale, this scan is bounded — entries expire after 6h.
-    cursor = 0
+    # For scale this is bounded — entries expire after 6h — and both the key
+    # collection and the hash reads are batched (was: one HGETALL per key).
+    from plata.core.bus import hgetall_many, scan_keys
     best_match: tuple[float, str] | None = None
-    while True:
-        cursor, keys = await redis.scan(cursor=cursor, match=f"{ENTITY_FP_PREFIX}*", count=200)
-        for k in keys:
-            data = await redis.hgetall(k)
-            if not data:
-                continue
-            other_fp_raw = data.get("fp", "")
-            ulid = data.get("ulid")
-            ts = int(data.get("ts", "0"))
-            if not ulid or now - ts > ENTITY_FP_TTL_SEC:
-                continue
-            other_fp = set(other_fp_raw.split("|")) if other_fp_raw else set()
-            if not other_fp:
-                continue
-            inter = len(new_fp & other_fp)
-            union = len(new_fp | other_fp)
-            if union == 0:
-                continue
-            jac = inter / union
-            if jac >= JACCARD_THRESHOLD and (best_match is None or jac > best_match[0]):
-                best_match = (jac, ulid)
-        if cursor == 0:
-            break
+    fp_keys = await scan_keys(f"{ENTITY_FP_PREFIX}*")
+    for data in await hgetall_many(fp_keys):
+        if not data:
+            continue
+        other_fp_raw = data.get("fp", "")
+        ulid = data.get("ulid")
+        ts = int(data.get("ts", "0"))
+        if not ulid or now - ts > ENTITY_FP_TTL_SEC:
+            continue
+        other_fp = set(other_fp_raw.split("|")) if other_fp_raw else set()
+        if not other_fp:
+            continue
+        inter = len(new_fp & other_fp)
+        union = len(new_fp | other_fp)
+        if union == 0:
+            continue
+        jac = inter / union
+        if jac >= JACCARD_THRESHOLD and (best_match is None or jac > best_match[0]):
+            best_match = (jac, ulid)
     # Store this signal's fingerprint regardless (so future signals can dedup against it).
     key = f"{ENTITY_FP_PREFIX}{signal.ulid}"
     await redis.hset(key, mapping={

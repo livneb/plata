@@ -42,7 +42,7 @@ class Orchestrator(BaseAgent):
         while True:
             await asyncio.sleep(60)
             keys = []
-            async for k in redis.scan_iter(match="dlq:stats:*", count=100):
+            async for k in redis.scan_iter(match="dlq:stats:*", count=2000):
                 keys.append(k)
             if not keys:
                 continue
@@ -77,21 +77,20 @@ class Orchestrator(BaseAgent):
             )
 
     async def _liveness_watcher(self) -> None:
+        from plata.core.bus import REGISTRY_AGENTS, hgetall_many, registry_names
         redis = get_redis()
         while True:
             await asyncio.sleep(30)
-            keys = []
-            async for k in redis.scan_iter(match="agent_status:*", count=100):
-                keys.append(k)
+            names = await registry_names(REGISTRY_AGENTS, fallback_pattern="agent_status:*",
+                                         fallback_strip_prefix="agent_status:")
             now = datetime.now(timezone.utc)
             alive_now: set[str] = set()
-            for k in keys:
-                status = await redis.hgetall(k)
+            statuses = await hgetall_many([f"agent_status:{n}" for n in names])
+            for agent_name, status in zip(names, statuses):
                 last_hb = status.get("last_heartbeat")
                 if not last_hb:
                     continue
                 last_dt = datetime.fromisoformat(last_hb)
-                agent_name = k.split(":")[-1]
                 is_dead = (now - last_dt).total_seconds() > DEAD_AGENT_THRESHOLD_SEC
                 if not is_dead:
                     alive_now.add(agent_name)
@@ -118,4 +117,4 @@ class Orchestrator(BaseAgent):
                         f"HALT triggered: critical agent dead ({agent_name})",
                         kind="err",
                     )
-            await log_action(self.name, f"Heartbeat check across {len(keys)} agents")
+            await log_action(self.name, f"Heartbeat check across {len(names)} agents")

@@ -43,9 +43,13 @@ async def index(request: Request):
 
     # Status hashes from Redis (live-only data, not historical).
     status_by_name: dict[str, dict] = {}
-    status_keys: list[str] = []
-    async for k in redis.scan_iter(match="agent_status:*", count=100):
-        status_keys.append(k)
+    from plata.core.bus import REGISTRY_AGENTS, registry_names
+    reg_names = await registry_names(
+        REGISTRY_AGENTS,
+        fallback_pattern="agent_status:*",
+        fallback_strip_prefix="agent_status:",
+    )
+    status_keys: list[str] = [f"agent_status:{n}" for n in reg_names]
     if status_keys:
         pipe = redis.pipeline()
         for k in status_keys:

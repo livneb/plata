@@ -65,13 +65,15 @@ CATEGORY = {
 
 async def _source_cards() -> list[dict[str, Any]]:
     """Per-source cards. Returned with `lane` set based on the source's current state."""
+    from plata.core.bus import REGISTRY_SOURCES, registry_names
     redis = get_redis()
     cards: list[dict[str, Any]] = []
-    keys: list[str] = []
-    async for k in redis.scan_iter(match="scraper:source:*", count=100):
-        if k.endswith(":log"):
-            continue
-        keys.append(k)
+    names = await registry_names(
+        REGISTRY_SOURCES,
+        fallback_pattern="scraper:source:*",
+        fallback_strip_prefix="scraper:source:",
+    )
+    keys: list[str] = [f"scraper:source:{n}" for n in names]
     if not keys:
         return cards
     pipe = redis.pipeline()
@@ -114,7 +116,7 @@ async def _historian_batch_cards() -> list[dict[str, Any]]:
     """One card per active historian batch (running / failed)."""
     redis = get_redis()
     out: list[dict[str, Any]] = []
-    async for k in redis.scan_iter(match="historian:batch:*", count=200):
+    async for k in redis.scan_iter(match="historian:batch:*", count=2000):
         data = await redis.hgetall(k)
         if not data:
             continue
@@ -355,11 +357,15 @@ async def _ready_cards() -> list[dict[str, Any]]:
 
 async def _doing_cards() -> list[dict[str, Any]]:
     """One card per agent with in_flight > 0."""
+    from plata.core.bus import REGISTRY_AGENTS, registry_names
     redis = get_redis()
     cards = []
-    keys: list[str] = []
-    async for k in redis.scan_iter(match="agent_status:*", count=100):
-        keys.append(k)
+    names = await registry_names(
+        REGISTRY_AGENTS,
+        fallback_pattern="agent_status:*",
+        fallback_strip_prefix="agent_status:",
+    )
+    keys: list[str] = [f"agent_status:{n}" for n in names]
     if not keys:
         return cards
     pipe = redis.pipeline()
@@ -412,12 +418,13 @@ async def _done_cards(limit: int = 24) -> list[dict[str, Any]]:
     # already shows the last action in its subtitle.
     skip = {"orchestrator", "telegram_bot", "scraper", "trade_sampler"}
     entries: list[tuple[str, str, str]] = []
-    keys: list[str] = []
-    async for k in redis.scan_iter(match="agent_activity:*", count=100):
-        agent = k.split(":")[-1]
-        if agent in skip:
-            continue
-        keys.append(k)
+    from plata.core.bus import REGISTRY_AGENTS, registry_names
+    names = await registry_names(
+        REGISTRY_AGENTS,
+        fallback_pattern="agent_activity:*",
+        fallback_strip_prefix="agent_activity:",
+    )
+    keys: list[str] = [f"agent_activity:{n}" for n in names if n not in skip]
     if keys:
         pipe = redis.pipeline()
         for k in keys:
@@ -572,14 +579,19 @@ async def resume_all_sources():
     Useful when 'Next poll: all halted' shows up."""
     from fastapi.responses import JSONResponse
     redis = get_redis()
+    from plata.core.bus import REGISTRY_SOURCES, registry_names
     cleared: list[str] = []
-    async for k in redis.scan_iter(match="scraper:source:*", count=100):
-        if k.endswith(":log"):
-            continue
+    names = await registry_names(
+        REGISTRY_SOURCES,
+        fallback_pattern="scraper:source:*",
+        fallback_strip_prefix="scraper:source:",
+    )
+    for name in names:
+        k = f"scraper:source:{name}"
         data = await redis.hgetall(k)
         if (data.get("status") or "").lower() == "halted":
             await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
-            cleared.append(k.rsplit(":", 1)[-1])
+            cleared.append(name)
     return JSONResponse({"ok": True, "cleared": cleared, "count": len(cleared)})
 
 

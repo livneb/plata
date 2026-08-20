@@ -68,9 +68,14 @@ class Scraper(BaseAgent):
 
     async def _poll_loop(self, src: BaseSource) -> None:
         # Stagger first runs to avoid thundering herd.
-        from plata.core.bus import get_redis
+        from plata.core.bus import REGISTRY_SOURCES, get_redis
         redis = get_redis()
         key = f"scraper:source:{src.name}"
+        # Registry so dashboards can list sources without a keyspace scan.
+        try:
+            await redis.sadd(REGISTRY_SOURCES, src.name)
+        except Exception:  # noqa: BLE001
+            pass
         await asyncio.sleep(2)
         while True:
             if self._halted.is_set():

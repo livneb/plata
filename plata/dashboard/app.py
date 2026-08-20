@@ -141,7 +141,7 @@ async def _lifespan(_app: FastAPI):
             raise
         moved = 0
         async with _ss() as session:
-            async for ck in r.scan_iter(match="cost:daily:*:agent:*", count=500):
+            async for ck in r.scan_iter(match="cost:daily:*:agent:*", count=2000):
                 if await r.exists(f"{ck}:backfilled"):
                     continue
                 parts = ck.split(":")
@@ -240,22 +240,25 @@ async def _lifespan(_app: FastAPI):
                 #    system halt that never cleaned up): AUTO-RESUME them.
                 #    For user-halted sources: WARN — those need a human.
                 if state == "RUNNING":
+                    from plata.core.bus import REGISTRY_SOURCES as _RSRC
+                    from plata.core.bus import hgetall_many as _hmany
+                    from plata.core.bus import registry_names as _rnames
                     seen_any = False
                     active_count = 0
                     auto_resumed: list[str] = []
                     still_halted_by_user: list[str] = []
-                    async for k in redis.scan_iter(match="scraper:source:*", count=100):
-                        if k.endswith(":log"):
-                            continue
+                    _src_names = await _rnames(_RSRC, fallback_pattern="scraper:source:*",
+                                               fallback_strip_prefix="scraper:source:")
+                    _src_datas = await _hmany([f"scraper:source:{n}" for n in _src_names])
+                    for name, data in zip(_src_names, _src_datas):
                         seen_any = True
-                        data = await redis.hgetall(k)
-                        name = k.rsplit(":", 1)[-1]
                         status = (data.get("status") or "").lower()
                         if status == "halted":
                             if (data.get("halted_by") or "system") == "system":
                                 # Self-healing: the resume action must have missed
                                 # this one (e.g. service was down then). Fix it now.
-                                await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
+                                await redis.hset(f"scraper:source:{name}",
+                                                 mapping={"status": "idle", "halted_by": ""})
                                 auto_resumed.append(name)
                                 active_count += 1
                             else:
@@ -343,11 +346,13 @@ async def _lifespan(_app: FastAPI):
                 # (severity=WARN so it shows up in red).
                 if state == "RUNNING":
                     # 4a. No signal published by ANY source in 30 min while RUNNING.
+                    from plata.core.bus import REGISTRY_SOURCES as _RS
+                    from plata.core.bus import hgetall_many as _hm
+                    from plata.core.bus import registry_names as _rn
                     last_pub_ts = None
-                    async for sk in redis.scan_iter(match="scraper:source:*", count=100):
-                        if sk.endswith(":log") or sk.endswith(":probe"):
-                            continue
-                        h = await redis.hgetall(sk)
+                    _names = await _rn(_RS, fallback_pattern="scraper:source:*",
+                                       fallback_strip_prefix="scraper:source:")
+                    for h in await _hm([f"scraper:source:{n}" for n in _names]):
                         lp = h.get("last_poll_at")
                         if not lp:
                             continue
@@ -455,7 +460,7 @@ async def _lifespan(_app: FastAPI):
             from datetime import date as _date
             today_pat = f"cost:daily:{_date.today().isoformat()}*"
             r_ = _gr()
-            async for k in r_.scan_iter(match=today_pat, count=200):
+            async for k in r_.scan_iter(match=today_pat, count=2000):
                 await r_.delete(k)
         except Exception:  # noqa: BLE001
             pass
@@ -466,7 +471,7 @@ async def _lifespan(_app: FastAPI):
         try:
             r_ = _gr()
             for key_pat in ("llm:garbage_producer:*", "llm:free_throttle:*"):
-                async for k in r_.scan_iter(match=key_pat, count=200):
+                async for k in r_.scan_iter(match=key_pat, count=2000):
                     await r_.delete(k)
         except Exception:  # noqa: BLE001
             pass
@@ -520,7 +525,7 @@ async def _lifespan(_app: FastAPI):
                         body = "Trading is paused — tap to manage"
                         url = "/agents/"
                     # Fan out to every user with a saved subscription.
-                    async for sub_key in get_redis().scan_iter(match="push:sub:*", count=50):
+                    async for sub_key in get_redis().scan_iter(match="push:sub:*", count=2000):
                         user_email = sub_key.split(":", 2)[-1]
                         try:
                             await send_to_user(user_email, title=title, body=body, url=url, tag=kind)
@@ -646,16 +651,20 @@ def create_app() -> FastAPI:
         # User-cancelled sources keep their flag (they have halted_by=user).
         cleared: list[str] = []
         try:
-            async for k in redis.scan_iter(match="scraper:source:*", count=100):
-                # Skip the per-source log lists (lpush keys end in :log).
-                if k.endswith(":log"):
-                    continue
-                data = await redis.hgetall(k)
+            from plata.core.bus import REGISTRY_SOURCES, hgetall_many, registry_names
+            names = await registry_names(
+                REGISTRY_SOURCES,
+                fallback_pattern="scraper:source:*",
+                fallback_strip_prefix="scraper:source:",
+            )
+            keys = [f"scraper:source:{n}" for n in names]
+            for name, data in zip(names, await hgetall_many(keys)):
                 if (data.get("status") or "").lower() != "halted":
                     continue
                 if (data.get("halted_by") or "system") == "system":
-                    await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
-                    cleared.append(k.rsplit(":", 1)[-1])
+                    await redis.hset(f"scraper:source:{name}",
+                                     mapping={"status": "idle", "halted_by": ""})
+                    cleared.append(name)
         except Exception:  # noqa: BLE001
             pass
         # Clear the per-agent halted flag so the /agents/ card pill no longer
@@ -664,11 +673,17 @@ def create_app() -> FastAPI:
         # above wakes any live agent; dead ones get marked correctly here.
         agents_cleared: list[str] = []
         try:
-            async for k in redis.scan_iter(match="agent_status:*", count=100):
-                data = await redis.hgetall(k)
+            from plata.core.bus import REGISTRY_AGENTS, hgetall_many, registry_names
+            names = await registry_names(
+                REGISTRY_AGENTS,
+                fallback_pattern="agent_status:*",
+                fallback_strip_prefix="agent_status:",
+            )
+            keys = [f"agent_status:{n}" for n in names]
+            for name, data in zip(names, await hgetall_many(keys)):
                 if (data.get("halted") or "").lower() == "true":
-                    await redis.hset(k, "halted", "False")
-                    agents_cleared.append(k.split(":", 1)[-1])
+                    await redis.hset(f"agent_status:{name}", "halted", "False")
+                    agents_cleared.append(name)
         except Exception:  # noqa: BLE001
             pass
         await publish_channel("dashboard:events", {"kind": "system_state", "state": "RUNNING"})
@@ -705,8 +720,14 @@ def create_app() -> FastAPI:
         halted: list[str] = []
         now_utc = _dt.now(_tz.utc)
         try:
-            async for k in redis.scan_iter(match="agent_status:*", count=100):
-                data = await redis.hgetall(k)
+            from plata.core.bus import REGISTRY_AGENTS, hgetall_many, registry_names
+            names = await registry_names(
+                REGISTRY_AGENTS,
+                fallback_pattern="agent_status:*",
+                fallback_strip_prefix="agent_status:",
+            )
+            keys = [f"agent_status:{n}" for n in names]
+            for name, data in zip(names, await hgetall_many(keys)):
                 if (data.get("halted") or "").lower() != "true":
                     continue
                 hb = data.get("last_heartbeat")
@@ -716,7 +737,7 @@ def create_app() -> FastAPI:
                             continue
                     except Exception:  # noqa: BLE001
                         continue
-                halted.append(k.split(":")[-1])
+                halted.append(name)
             system_state = await redis.get("system:state") or "RUNNING"
         except Exception:  # noqa: BLE001 — transient Redis latency, etc.
             return {"count": 0, "names": [], "system_state": "UNKNOWN",
@@ -819,10 +840,8 @@ def create_app() -> FastAPI:
         except Exception:  # noqa: BLE001
             pass
         try:
-            n = 0
-            async for k in redis.scan_iter(match="proposal:pending:*", count=100):
-                n += 1
-            stats["pending_hitl"] = n
+            from plata.core.bus import scan_keys
+            stats["pending_hitl"] = len(await scan_keys("proposal:pending:*"))
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -846,15 +865,19 @@ def create_app() -> FastAPI:
         # Always returns SOMETHING so the topbar chip can render an informative
         # state instead of silently hiding.
         try:
+            from plata.core.bus import REGISTRY_SOURCES, hgetall_many, registry_names
             soonest: tuple[float, str] | None = None
             seen_any = False
             all_halted = True
             now_ts = datetime.now(timezone.utc).timestamp()
-            async for k in redis.scan_iter(match="scraper:source:*", count=100):
-                if k.endswith(":log"):
-                    continue
+            src_names = await registry_names(
+                REGISTRY_SOURCES,
+                fallback_pattern="scraper:source:*",
+                fallback_strip_prefix="scraper:source:",
+            )
+            src_datas = await hgetall_many([f"scraper:source:{n}" for n in src_names])
+            for name, data in zip(src_names, src_datas):
                 seen_any = True
-                data = await redis.hgetall(k)
                 if (data.get("status") or "").lower() == "halted":
                     continue
                 all_halted = False
@@ -870,7 +893,6 @@ def create_app() -> FastAPI:
                 except Exception:  # noqa: BLE001
                     continue
                 eta = last_ts + interval
-                name = k.rsplit(":", 1)[-1]
                 if soonest is None or eta < soonest[0]:
                     soonest = (eta, name)
             if soonest:

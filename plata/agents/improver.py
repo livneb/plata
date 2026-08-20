@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from plata.core.bus import get_redis
 from plata.core.db import ErrorLog, LLMCost, Proposal, TradeLedger, session_scope
 from plata.core.observability import get_logger
 from sqlalchemy import desc, func, select
@@ -33,12 +32,18 @@ async def _survey() -> tuple[list[str], list[str]]:
     findings: list[str] = []
     suggestions: list[str] = []
     now = datetime.now(timezone.utc)
-    redis = get_redis()
 
     # --- Agent health
+    from plata.core.bus import (
+        REGISTRY_AGENTS,
+        REGISTRY_SOURCES,
+        hgetall_many,
+        registry_names,
+    )
     stale = []
-    async for k in redis.scan_iter(match="agent_status:*", count=100):
-        data = await redis.hgetall(k)
+    ag_names = await registry_names(REGISTRY_AGENTS, fallback_pattern="agent_status:*",
+                                    fallback_strip_prefix="agent_status:")
+    for name, data in zip(ag_names, await hgetall_many([f"agent_status:{n}" for n in ag_names])):
         hb = data.get("last_heartbeat")
         if not hb:
             continue
@@ -47,7 +52,7 @@ async def _survey() -> tuple[list[str], list[str]]:
         except Exception:  # noqa: BLE001
             continue
         if age > 300:
-            stale.append((k.split(":")[-1], int(age // 60)))
+            stale.append((name, int(age // 60)))
     if stale:
         names = ", ".join(f"{n} ({m}m)" for n, m in stale[:5])
         findings.append(f"{len(stale)} agent(s) have stale heartbeats: {names}.")
@@ -55,10 +60,9 @@ async def _survey() -> tuple[list[str], list[str]]:
 
     # --- News pipeline output
     pub_total = 0
-    async for sk in redis.scan_iter(match="scraper:source:*", count=100):
-        if sk.endswith(":log") or sk.endswith(":probe"):
-            continue
-        h = await redis.hgetall(sk)
+    src_names = await registry_names(REGISTRY_SOURCES, fallback_pattern="scraper:source:*",
+                                     fallback_strip_prefix="scraper:source:")
+    for h in await hgetall_many([f"scraper:source:{n}" for n in src_names]):
         try:
             pub_total += int(h.get("lifetime_published") or 0)
         except (TypeError, ValueError):

@@ -43,20 +43,28 @@ async def _fix_force_resume_all(_args: dict) -> str:
     await publish_channel(Channels.SYSTEM_RESUME, {"reason": "sysop_auto_fix"})
     redis = get_redis()
     await redis.set("system:state", "RUNNING")
+    from plata.core.bus import (
+        REGISTRY_AGENTS,
+        REGISTRY_SOURCES,
+        hgetall_many,
+        registry_names,
+    )
     cleared_sources = 0
     cleared_agents = 0
-    async for k in redis.scan_iter(match="scraper:source:*", count=100):
-        if k.endswith(":log") or k.endswith(":probe"):
-            continue
-        data = await redis.hgetall(k)
+    src_names = await registry_names(REGISTRY_SOURCES, fallback_pattern="scraper:source:*",
+                                     fallback_strip_prefix="scraper:source:")
+    for name, data in zip(src_names,
+                          await hgetall_many([f"scraper:source:{n}" for n in src_names])):
         if (data.get("status") or "").lower() == "halted" \
                 and (data.get("halted_by") or "system") == "system":
-            await redis.hset(k, mapping={"status": "idle", "halted_by": ""})
+            await redis.hset(f"scraper:source:{name}", mapping={"status": "idle", "halted_by": ""})
             cleared_sources += 1
-    async for k in redis.scan_iter(match="agent_status:*", count=100):
-        data = await redis.hgetall(k)
+    ag_names = await registry_names(REGISTRY_AGENTS, fallback_pattern="agent_status:*",
+                                    fallback_strip_prefix="agent_status:")
+    for name, data in zip(ag_names,
+                          await hgetall_many([f"agent_status:{n}" for n in ag_names])):
         if (data.get("halted") or "").lower() == "true":
-            await redis.hset(k, "halted", "False")
+            await redis.hset(f"agent_status:{name}", "halted", "False")
             cleared_agents += 1
     return f"Resume broadcast; cleared {cleared_sources} sources, {cleared_agents} agent halt flags."
 
@@ -171,12 +179,13 @@ AUTO_APPLY_SAFE: set[str] = {
 # -----------------------------------------------------------------------------
 
 async def _detect_stale_agents() -> list[dict[str, Any]]:
+    from plata.core.bus import REGISTRY_AGENTS, hgetall_many, registry_names
     out = []
-    redis = get_redis()
     now = datetime.now(timezone.utc)
     stale: list[tuple[str, int, dict]] = []
-    async for k in redis.scan_iter(match="agent_status:*", count=100):
-        data = await redis.hgetall(k)
+    names = await registry_names(REGISTRY_AGENTS, fallback_pattern="agent_status:*",
+                                 fallback_strip_prefix="agent_status:")
+    for name, data in zip(names, await hgetall_many([f"agent_status:{n}" for n in names])):
         hb = data.get("last_heartbeat")
         if not hb:
             continue
@@ -185,7 +194,6 @@ async def _detect_stale_agents() -> list[dict[str, Any]]:
         except Exception:  # noqa: BLE001
             continue
         if age > 300:
-            name = k.split(":")[-1]
             stale.append((name, int(age // 60), data))
     if not stale:
         return out
@@ -220,13 +228,12 @@ async def _detect_news_silent() -> list[dict[str, Any]]:
     out = []
     redis = get_redis()
     now = datetime.now(timezone.utc)
+    from plata.core.bus import REGISTRY_SOURCES, hgetall_many, registry_names
     latest = None
     per_source: list[dict] = []
-    async for k in redis.scan_iter(match="scraper:source:*", count=100):
-        if k.endswith(":log") or k.endswith(":probe"):
-            continue
-        data = await redis.hgetall(k)
-        name = k.split(":")[-1]
+    _names = await registry_names(REGISTRY_SOURCES, fallback_pattern="scraper:source:*",
+                                  fallback_strip_prefix="scraper:source:")
+    for name, data in zip(_names, await hgetall_many([f"scraper:source:{n}" for n in _names])):
         lp = data.get("last_poll_at")
         published = int(data.get("lifetime_published") or 0)
         per_source.append({
@@ -445,7 +452,7 @@ async def _detect_supervisor_crashloop() -> list[dict[str, Any]]:
     """Surface agents the in-container supervisor has been restarting."""
     out = []
     redis = get_redis()
-    async for k in redis.scan_iter(match="agent_supervisor:*", count=100):
+    async for k in redis.scan_iter(match="agent_supervisor:*", count=2000):
         data = await redis.hgetall(k)
         try:
             count = int(data.get("restart_count") or 0)
@@ -490,12 +497,12 @@ async def _detect_signal_to_proposal_gap() -> list[dict[str, Any]]:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=1)
     # Count signals published in the last hour across all sources
+    from plata.core.bus import REGISTRY_SOURCES, hgetall_many, registry_names
     redis = get_redis()
     pub_in_hour = 0
-    async for sk in redis.scan_iter(match="scraper:source:*", count=100):
-        if sk.endswith(":log") or sk.endswith(":probe"):
-            continue
-        h = await redis.hgetall(sk)
+    _names = await registry_names(REGISTRY_SOURCES, fallback_pattern="scraper:source:*",
+                                  fallback_strip_prefix="scraper:source:")
+    for h in await hgetall_many([f"scraper:source:{n}" for n in _names]):
         # We track lifetime_published; use last_published as recent proxy
         try:
             pub_in_hour += int(h.get("last_published") or 0)

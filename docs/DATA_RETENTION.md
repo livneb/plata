@@ -28,8 +28,9 @@ consumer in this codebase ACKs immediately after handling.
 
 | Target | Default |
 |---|---|
-| `event:*` nodes **without** measured `price_impact` | deleted after **120 days** |
+| `event:*` nodes **without** measured `price_impact` | deleted after **120 days** (their edges + `edgeidx` set go with them) |
 | `event:*` nodes **with** `price_impact` (the historical-analog training set) | deleted after **365 days** |
+| `edge:*` whose src event no longer exists (orphans) | deleted on every edge pass |
 | `edge:*` `evidence_event_ids` lists (grow one entry per co-mention, forever) | capped at the **50** most recent |
 | `entity:*` nodes | **never touched** (bounded universe, EWMA history matters) |
 | `lesson:*` nodes | **never touched** (distilled learning, tiny, high-value) |
@@ -37,6 +38,12 @@ consumer in this codebase ACKs immediately after handling.
 Deleting an aged event also removes it from the RediSearch HNSW index, which
 keeps the strategist's KNN queries fast. At most 5,000 events are deleted per
 run so a large backlog drains over several cycles instead of one long pass.
+
+The edge pass additionally maintains `edgeidx:{src}` SETs (one per node,
+listing its outgoing edge keys) and sets `graph:edgeidx_ready` after a
+complete pass. Readers (`graph.neighbors`, `/graph/data`) then fetch a
+node's edges with one `SMEMBERS` instead of a full-keyspace `SCAN` — the
+keyspace walks were the main reason heavy dashboard pages took ~10 seconds.
 
 ### Postgres
 

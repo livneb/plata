@@ -115,7 +115,7 @@ class RedditSource(BaseSource):
         _redis_ = _gr()
         if self._needs_quarantine_reset:
             try:
-                async for k in _redis_.scan_iter(match="reddit:fail:*", count=200):
+                async for k in _redis_.scan_iter(match="reddit:fail:*", count=2000):
                     await _redis_.delete(k)
             except Exception:  # noqa: BLE001
                 pass

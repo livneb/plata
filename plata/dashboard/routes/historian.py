@@ -72,12 +72,28 @@ async def reset():
 async def events(limit: int = 100) -> JSONResponse:
     """Return recent events seeded by the historian (newest first by timestamp)."""
     redis = get_redis()
-    # Best-effort scan; cap at 1000 to keep latency bounded on big graphs.
+    # Fast path: pull historian-sourced events straight from the RediSearch
+    # index (source is an indexed tag) — one call, newest first. Fallback:
+    # bounded keyspace scan.
     keys: list[str] = []
-    async for k in redis.scan_iter(match="event:*", count=500):
-        keys.append(k)
-        if len(keys) >= 1000:
-            break
+    try:
+        from redis.commands.search.query import Query as FtQuery
+
+        from plata.core.graph import EVENT_INDEX
+        q = (
+            FtQuery("@source:{historian}")
+            .sort_by("ts_epoch", asc=False)
+            .return_fields("ts_epoch")
+            .dialect(2)
+            .paging(0, 1000)
+        )
+        result = await redis.ft(EVENT_INDEX).search(q)
+        keys = [doc.id for doc in result.docs]
+    except Exception:  # noqa: BLE001
+        async for k in redis.scan_iter(match="event:*", count=5000):
+            keys.append(k)
+            if len(keys) >= 1000:
+                break
     out: list[dict[str, Any]] = []
     if keys:
         pipe = redis.pipeline()

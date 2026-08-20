@@ -206,6 +206,65 @@ async def trim_stream(stream: str, maxlen: int = 100_000, approximate: bool = Tr
 
 
 # ---------------------------------------------------------------------------
+# Keyspace helpers
+#
+# SCAN MATCH walks the ENTIRE keyspace server-side regardless of the pattern,
+# so `scan_iter(count=100)` over a graph-sized keyspace (100k+ edge/event
+# keys) costs thousands of network roundtrips — this is what made dashboard
+# pages take seconds. Rules:
+#   • Use a registry SET (below) for small, known key families.
+#   • When you must scan, use scan_keys() — COUNT 2000 cuts roundtrips 20×.
+#   • Never call hgetall/json().get per key in a loop — pipeline in batches.
+# ---------------------------------------------------------------------------
+
+# Registry sets — maintained by the writers of the corresponding hashes so
+# readers never need a keyspace scan. Membership is refreshed on every write
+# (SADD is O(1) and idempotent).
+REGISTRY_AGENTS = "registry:agents"        # names behind agent_status:{name}
+REGISTRY_SOURCES = "registry:sources"      # names behind scraper:source:{name}
+
+
+async def scan_keys(pattern: str, *, count: int = 2000, limit: int | None = None) -> list[str]:
+    """Collect keys matching `pattern`. High COUNT = few roundtrips."""
+    redis = get_redis()
+    out: list[str] = []
+    async for k in redis.scan_iter(match=pattern, count=count):
+        out.append(k)
+        if limit is not None and len(out) >= limit:
+            break
+    return out
+
+
+async def registry_names(registry: str, *, fallback_pattern: str,
+                         fallback_strip_prefix: str) -> list[str]:
+    """Names from a registry SET, falling back to a keyspace scan while the
+    registry is still empty (e.g. right after this feature deploys, before
+    writers have re-registered)."""
+    redis = get_redis()
+    try:
+        names = await redis.smembers(registry)
+    except Exception:  # noqa: BLE001
+        names = None
+    if names:
+        return sorted(names)
+    keys = await scan_keys(fallback_pattern)
+    plen = len(fallback_strip_prefix)
+    return sorted({k[plen:] for k in keys if ":" not in k[plen:]})
+
+
+async def hgetall_many(keys: list[str]) -> list[dict[str, Any]]:
+    """Pipelined HGETALL for a list of keys (order preserved)."""
+    if not keys:
+        return []
+    redis = get_redis()
+    pipe = redis.pipeline()
+    for k in keys:
+        pipe.hgetall(k)
+    results = await pipe.execute()
+    return [r or {} for r in results]
+
+
+# ---------------------------------------------------------------------------
 # Pub/Sub helpers
 # ---------------------------------------------------------------------------
 

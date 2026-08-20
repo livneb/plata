@@ -253,6 +253,9 @@ class BaseAgent(ABC):
                         "halted": str(self._halted.is_set()),
                     },
                 )
+                # Registry so dashboards can list agents without a keyspace scan.
+                from plata.core.bus import REGISTRY_AGENTS
+                await redis.sadd(REGISTRY_AGENTS, self.name)
             except Exception:  # pragma: no cover
                 self.log.exception("heartbeat_failed")
 

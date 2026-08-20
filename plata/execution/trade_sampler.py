@@ -218,6 +218,8 @@ async def run_sampler_loop() -> None:
                 "in_flight": len(rows),
                 "halted": "False",
             })
+            from plata.core.bus import REGISTRY_AGENTS
+            await redis.sadd(REGISTRY_AGENTS, "trade_sampler")
             now = time.monotonic()
             # Refresh the per-symbol watch-list: every distinct symbol with an
             # open position gets a fresh price every SYMBOL_WATCH_CADENCE_SEC,

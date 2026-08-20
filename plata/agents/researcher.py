@@ -158,6 +158,8 @@ class Researcher:
                         **{f"cycle_{k}": str(v) for k, v in self._last_status.items()},
                     },
                 )
+                from plata.core.bus import REGISTRY_AGENTS
+                await get_redis().sadd(REGISTRY_AGENTS, self.name)
             except Exception:  # noqa: BLE001
                 self.log.warning("researcher_heartbeat_failed")
             await asyncio.sleep(10)

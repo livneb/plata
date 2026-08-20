@@ -199,7 +199,7 @@ class Reviewer(BaseAgent):
         from plata.core.bus import get_redis
         redis = get_redis()
         worst = None
-        async for k in redis.scan_iter(match="reviewer:stats:*", count=200):
+        async for k in redis.scan_iter(match="reviewer:stats:*", count=2000):
             data = await redis.hgetall(k)
             trades = int(data.get("trades") or 0)
             wins = int(data.get("wins") or 0)

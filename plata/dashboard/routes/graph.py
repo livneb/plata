@@ -82,30 +82,50 @@ async def graph_data(
     if focus:
         event_keys = [event_key(focus)]
     else:
-        scanned = []
-        async for k in redis.scan_iter(match="event:*", count=500):
-            scanned.append(k)
-            # Only short-circuit when we have a small bounded request; for "all"
-            # or oldest-first we need the full set to sort properly.
-            if not since and not is_all and newest_first and len(scanned) >= limit_int * 4:
-                break
-        if scanned:
-            pipe = redis.pipeline()
-            for k in scanned:
-                pipe.json().get(k, "$.ts_epoch")
-            ts_results = await pipe.execute()
-            paired = []
-            for k, ts in zip(scanned, ts_results, strict=True):
-                ts_val = (ts[0] if isinstance(ts, list) and ts else ts) or 0
-                try:
-                    ts_int = int(ts_val or 0)
-                except (TypeError, ValueError):
-                    ts_int = 0
-                if since is not None and ts_int < int(since):
-                    continue
-                paired.append((k, ts_int))
-            paired.sort(key=lambda kv: kv[1], reverse=newest_first)
-            event_keys = [k for k, _ in paired[:limit_int]] if since is None else [k for k, _ in paired]
+        # Fast path: the RediSearch index gives us the newest/oldest N event
+        # keys in ONE call. The old code SCANned the entire keyspace (all
+        # edge/entity/dedup keys included) — thousands of roundtrips and the
+        # main reason this endpoint took ~10s on a grown graph.
+        try:
+            from redis.commands.search.query import Query as FtQuery
+
+            from plata.core.graph import EVENT_INDEX
+            base = f"@ts_epoch:[{int(since)} +inf]" if since is not None else "*"
+            page_size = 5000 if (since is not None or is_all) else limit_int
+            q = (
+                FtQuery(base)
+                .sort_by("ts_epoch", asc=not newest_first)
+                .return_fields("ts_epoch")
+                .dialect(2)
+                .paging(0, page_size)
+            )
+            result = await redis.ft(EVENT_INDEX).search(q)
+            event_keys = [doc.id for doc in result.docs]
+        except Exception:  # noqa: BLE001 — index missing/rebuilding: fall back to scan
+            scanned = []
+            async for k in redis.scan_iter(match="event:*", count=5000):
+                scanned.append(k)
+                # Only short-circuit when we have a small bounded request; for "all"
+                # or oldest-first we need the full set to sort properly.
+                if not since and not is_all and newest_first and len(scanned) >= limit_int * 4:
+                    break
+            if scanned:
+                pipe = redis.pipeline()
+                for k in scanned:
+                    pipe.json().get(k, "$.ts_epoch")
+                ts_results = await pipe.execute()
+                paired = []
+                for k, ts in zip(scanned, ts_results, strict=True):
+                    ts_val = (ts[0] if isinstance(ts, list) and ts else ts) or 0
+                    try:
+                        ts_int = int(ts_val or 0)
+                    except (TypeError, ValueError):
+                        ts_int = 0
+                    if since is not None and ts_int < int(since):
+                        continue
+                    paired.append((k, ts_int))
+                paired.sort(key=lambda kv: kv[1], reverse=newest_first)
+                event_keys = [k for k, _ in paired[:limit_int]] if since is None else [k for k, _ in paired]
 
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
@@ -137,17 +157,10 @@ async def graph_data(
             }
 
     if event_keys:
-        # ONE global edge scan, filter by source-in-set. Was: N scans (one per event).
-        wanted = set(event_keys)
-        all_edge_keys: list[str] = []
-        async for k in redis.scan_iter(match="edge:*", count=1000):
-            # Edge keys look like edge:<src>:<rel>:<dst>; we want any where <src> is one of ours.
-            parts = k.split(":", 3)  # ['edge', '<srctype>', '<srcid>', '<rel>:<dst>'] OR for event:<ulid> as src: ['edge', 'event', '<ulid>', '<rel>:<dst>']
-            if len(parts) < 4:
-                continue
-            src_candidate = parts[1] + ":" + parts[2]
-            if src_candidate in wanted:
-                all_edge_keys.append(k)
+        # Edge lookup via edgeidx:* SETs (one pipelined SMEMBERS round);
+        # falls back to a single global scan until the janitor backfills.
+        from plata.core.graph import edge_keys_for_sources
+        all_edge_keys = await edge_keys_for_sources(event_keys)
         if all_edge_keys:
             pipe = redis.pipeline()
             for k in all_edge_keys:
@@ -221,7 +234,7 @@ async def _scan_planned_merges() -> list[dict]:
     classified as asset/ticker/org are caught too."""
     redis = get_redis()
     merges: list[dict] = []
-    async for key in redis.scan_iter(match="entity:*", count=200):
+    async for key in redis.scan_iter(match="entity:*", count=5000):
         parts = key.split(":", 2)
         if len(parts) < 3:
             continue
@@ -269,7 +282,7 @@ async def _apply_merge(m: dict) -> int:
     await redis.json().set(dst_key, "$", merged)
 
     rewritten = 0
-    async for ek in redis.scan_iter(match="edge:*", count=500):
+    async for ek in redis.scan_iter(match="edge:*", count=5000):
         edoc = await redis.json().get(ek)
         if not isinstance(edoc, dict):
             continue

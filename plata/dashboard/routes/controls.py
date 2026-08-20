@@ -124,7 +124,7 @@ async def reset_system(request: Request):
     # 3. Wipe transient per-day state — leaves history intact.
     counter_keys_wiped = 0
     try:
-        async for k in redis.scan_iter(match="horizon:count:*", count=200):
+        async for k in redis.scan_iter(match="horizon:count:*", count=2000):
             await redis.delete(k); counter_keys_wiped += 1
     except Exception as exc:  # noqa: BLE001
         _log.warning("reset_horizon_wipe_failed", error=str(exc)[:160])
@@ -152,7 +152,7 @@ async def reset_system(request: Request):
     # drops to 0 and we don't act on pre-reset queued approvals.
     hitl_wiped = 0
     try:
-        async for k in redis.scan_iter(match="proposal:pending:*", count=200):
+        async for k in redis.scan_iter(match="proposal:pending:*", count=2000):
             await redis.delete(k); hitl_wiped += 1
     except Exception as exc:  # noqa: BLE001
         _log.warning("reset_hitl_wipe_failed", error=str(exc)[:160])

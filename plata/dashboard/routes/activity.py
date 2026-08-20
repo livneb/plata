@@ -94,17 +94,27 @@ async def _pipeline_depths() -> list[dict[str, Any]]:
 
 
 async def _agent_states() -> list[dict[str, Any]]:
+    from plata.core.bus import REGISTRY_AGENTS, registry_names
     redis = get_redis()
-    keys: list[str] = []
-    async for k in redis.scan_iter(match="agent_status:*", count=100):
-        keys.append(k)
+    names = await registry_names(
+        REGISTRY_AGENTS,
+        fallback_pattern="agent_status:*",
+        fallback_strip_prefix="agent_status:",
+    )
+    # One pipeline for ALL per-agent reads (was 4 sequential calls × agent).
+    pipe = redis.pipeline()
+    for name in names:
+        pipe.hgetall(f"agent_status:{name}")
+        pipe.hgetall(f"dlq:stats:{name}")
+        pipe.hgetall(f"agent_stats:{name}")
+        pipe.lrange(f"agent_activity:{name}", 0, 7)
+    results = await pipe.execute()
     out = []
-    for k in sorted(keys):
-        data = await redis.hgetall(k)
-        name = k.split(":")[-1]
-        dlq_stats = await redis.hgetall(f"dlq:stats:{name}")
-        stats = await redis.hgetall(f"agent_stats:{name}")
-        activity = await redis.lrange(f"agent_activity:{name}", 0, 7)
+    for i, name in enumerate(names):
+        data = results[i * 4] or {}
+        dlq_stats = results[i * 4 + 1] or {}
+        stats = results[i * 4 + 2] or {}
+        activity = results[i * 4 + 3] or []
         parsed_activity = []
         for entry in activity:
             parts = entry.split("|", 2)
@@ -185,7 +195,7 @@ async def _api_statuses_with_limits() -> list[dict[str, Any]]:
     rows = _api_statuses()
     redis = get_redis()
     flags: dict[str, dict[str, Any]] = {}
-    async for k in redis.scan_iter(match="api_limit:*", count=200):
+    async for k in redis.scan_iter(match="api_limit:*", count=2000):
         try:
             raw = await redis.get(k)
             if raw:

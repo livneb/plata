@@ -37,10 +37,10 @@ async def create_pending(proposal_ulid: str, proposal: dict[str, Any], reason: s
 
 
 async def list_pending() -> list[dict[str, Any]]:
-    redis = get_redis()
+    from plata.core.bus import hgetall_many, scan_keys
     out: list[dict[str, Any]] = []
-    async for k in redis.scan_iter(match=f"{PENDING_PREFIX}*", count=200):
-        data = await redis.hgetall(k)
+    keys = await scan_keys(f"{PENDING_PREFIX}*")
+    for k, data in zip(keys, await hgetall_many(keys)):
         if not data or data.get("status") != "pending":
             continue
         try:

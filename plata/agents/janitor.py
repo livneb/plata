@@ -73,7 +73,9 @@ DEFAULTS: dict[str, int] = {
     "graph_event_delete_cap_per_run": 5_000,
     # Edge evidence lists grow unbounded (one entry per co-mention).
     "graph_edge_evidence_cap": 50,
-    "graph_edge_scan_cap_per_run": 20_000,
+    # High cap so a normal keyspace completes a FULL edge pass in one run —
+    # only a complete pass may set graph:edgeidx_ready (see _sweep_graph_edges).
+    "graph_edge_scan_cap_per_run": 500_000,
     # -- Postgres retention (days; 0 = keep forever) -------------------------
     "signal_archive_days": 180,
     "signal_archive_duplicate_days": 30,   # is_duplicate=true rows die sooner
@@ -223,7 +225,14 @@ async def _sweep_graph_events(cfg: dict[str, int]) -> dict[str, int]:
                 if has_impact and ts_epoch > impact_cutoff_epoch:
                     kept.add(key)
                     continue
-                await redis.delete(key)
+                # Delete the event's outgoing edges too (via its edgeidx SET)
+                # so they don't linger as keyspace-bloating orphans.
+                from plata.core.graph import edge_index_key
+                idx_key = edge_index_key(key)
+                edge_keys = await redis.smembers(idx_key) or set()
+                if edge_keys:
+                    await redis.delete(*edge_keys)
+                await redis.delete(idx_key, key)
                 deleted += 1
                 page_deleted += 1
             except Exception as exc:  # noqa: BLE001
@@ -238,34 +247,108 @@ async def _sweep_graph_events(cfg: dict[str, int]) -> dict[str, int]:
 
 
 async def _sweep_graph_edges(cfg: dict[str, int]) -> dict[str, int]:
-    """Cap edge evidence_event_ids lists (they grow by one per co-mention,
-    forever). Keeps the most recent `cap` entries."""
+    """Full edge maintenance pass. For every edge:* key (batched, pipelined):
+      • orphan cleanup — an edge whose src event no longer exists is deleted
+        (event deletions used to leave these behind forever, bloating the
+        keyspace and slowing every SCAN in the system);
+      • edgeidx backfill — SADD the edge into edgeidx:{src} so readers can
+        stop scanning (see plata.core.graph.edge_index_key);
+      • evidence cap — trim evidence_event_ids to the most recent `cap`.
+    Sets graph:edgeidx_ready after a COMPLETE pass, unlocking the fast
+    SMEMBERS path in graph.neighbors() / edge_keys_for_sources()."""
+    from plata.core.graph import EDGE_INDEX_READY_KEY, edge_index_key
+
     cap = cfg["graph_edge_evidence_cap"]
     scan_cap = cfg["graph_edge_scan_cap_per_run"]
-    if cap <= 0:
-        return {"scanned": 0, "capped": 0}
     redis = get_redis()
     scanned = 0
     capped = 0
-    async for key in redis.scan_iter(match="edge:*", count=500):
-        scanned += 1
-        if scanned > scan_cap:
+    orphans_deleted = 0
+    complete = True
+
+    all_keys: list[str] = []
+    async for key in redis.scan_iter(match="edge:*", count=5000):
+        all_keys.append(key)
+        if len(all_keys) >= scan_cap:
+            complete = False
             break
+
+    batch_size = 500
+    for i in range(0, len(all_keys), batch_size):
+        batch = all_keys[i:i + batch_size]
+        scanned += len(batch)
         try:
-            lengths = await redis.json().arrlen(key, "$.evidence_event_ids")
-            length = lengths[0] if lengths else None
-            if not length or length <= cap:
-                continue
-            doc = await redis.json().get(key)
-            if not doc:
-                continue
-            evidence = doc.get("evidence_event_ids") or []
-            doc["evidence_event_ids"] = evidence[-cap:]
-            await redis.json().set(key, "$", doc)
-            capped += 1
-        except Exception:  # noqa: BLE001
+            # Tiny pipelined reads: src + evidence length per edge.
+            pipe = redis.pipeline()
+            for k in batch:
+                pipe.json().get(k, "$.src")
+                pipe.json().arrlen(k, "$.evidence_event_ids")
+            reads = await pipe.execute(raise_on_error=False)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("janitor_edge_batch_read_failed", error=str(exc)[:120])
+            complete = False
             continue
-    return {"scanned": scanned, "capped": capped}
+
+        srcs: dict[str, str] = {}
+        needs_cap: list[str] = []
+        for j, k in enumerate(batch):
+            src_raw = reads[j * 2]
+            len_raw = reads[j * 2 + 1]
+            if isinstance(src_raw, list) and src_raw and isinstance(src_raw[0], str):
+                srcs[k] = src_raw[0]
+            if cap > 0 and isinstance(len_raw, list) and len_raw and \
+                    isinstance(len_raw[0], int) and len_raw[0] > cap:
+                needs_cap.append(k)
+
+        # Orphan check for event-sourced edges, one pipelined EXISTS round.
+        event_edges = [(k, s) for k, s in srcs.items() if s.startswith("event:")]
+        orphans: list[tuple[str, str]] = []
+        if event_edges:
+            pipe = redis.pipeline()
+            for _k, s in event_edges:
+                pipe.exists(s)
+            exist_flags = await pipe.execute(raise_on_error=False)
+            # Only a clean EXISTS == 0 marks an orphan — an errored EXISTS
+            # must never delete the edge.
+            orphans = [pair for pair, ex in zip(event_edges, exist_flags) if ex == 0]
+
+        orphan_keys = {k for k, _ in orphans}
+        pipe = redis.pipeline()
+        for k, s in orphans:
+            pipe.delete(k)
+            pipe.srem(edge_index_key(s), k)
+        # Backfill the index for every surviving edge.
+        for k, s in srcs.items():
+            if k not in orphan_keys:
+                pipe.sadd(edge_index_key(s), k)
+        try:
+            await pipe.execute(raise_on_error=False)
+            orphans_deleted += len(orphans)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("janitor_edge_batch_write_failed", error=str(exc)[:120])
+            complete = False
+
+        for k in needs_cap:
+            if k in orphan_keys:
+                continue
+            try:
+                doc = await redis.json().get(k)
+                if not doc:
+                    continue
+                evidence = doc.get("evidence_event_ids") or []
+                doc["evidence_event_ids"] = evidence[-cap:]
+                await redis.json().set(k, "$", doc)
+                capped += 1
+            except Exception:  # noqa: BLE001
+                continue
+
+    if complete:
+        try:
+            await redis.set(EDGE_INDEX_READY_KEY, "1")
+        except Exception:  # noqa: BLE001
+            pass
+    return {"scanned": scanned, "capped": capped,
+            "orphans_deleted": orphans_deleted, "complete": int(complete)}
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +504,8 @@ def summarize(summary: dict[str, Any]) -> str:
     if graph.get("deleted"):
         parts.append(f"aged out {graph['deleted']:,} graph events")
     edges = summary.get("graph_edges") or {}
+    if edges.get("orphans_deleted"):
+        parts.append(f"removed {edges['orphans_deleted']:,} orphan edges")
     if edges.get("capped"):
         parts.append(f"capped {edges['capped']:,} edge evidence lists")
     pg = summary.get("postgres") or {}

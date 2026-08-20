@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.215 — 2026-08-20
+- **⚡ Page loads: eliminated full-keyspace Redis SCANs (the ~10s pages).** `SCAN MATCH` walks the ENTIRE keyspace regardless of pattern; with a graph-sized keyspace, every page that "listed agents" or "listed sources" paid thousands of network roundtrips. Fixes:
+  - **Registry SETs** — agents (`registry:agents`) and scraper sources (`registry:sources`) now register themselves on every heartbeat/poll; the workflow, activity, agents pages, topbar polls (`/api/agents/halted`, header stats), sysop, orchestrator and improver read the registry + pipelined `HGETALL` instead of scanning. Fallback to scan until writers re-register after this deploy.
+  - **Edge index** — `upsert_edge` now maintains `edgeidx:{src}` SETs; the janitor backfills them for existing edges and flips `graph:edgeidx_ready`. `graph.neighbors()` (strategist hot path) and `/graph/data` fetch edges via `SMEMBERS` instead of scanning every key in Redis.
+  - **Orphan edge cleanup** — deleting a graph event now deletes its edges too, and the janitor's edge pass removes edges whose src event is already gone. These orphans were accumulating forever and inflating every SCAN in the system.
+  - **`/graph/data` + `/historian/events`** now pull event keys from the RediSearch index (one `FT.SEARCH`, sorted by `ts_epoch` / filtered by `@source:{historian}`) instead of scanning `event:*`.
+  - **N+1 fixes** — `/activity/` fetches all per-agent hashes in one pipeline (was 4 sequential calls per agent); dedup fingerprint sweep and HITL pending list are batched too.
+  - Remaining scans (rare/admin paths) raised from `COUNT 100–500` to `COUNT 2000–5000` — 10–20× fewer roundtrips.
+
 ## 2.24.214 — 2026-08-20
 - **Proposals retention: keep exactly the last week.** Both `proposals_dropped_days` and `proposals_days` default to **7** now — recent decisions (including drop reasons) stay available for study, everything older goes. Proposals that became real trades are still kept forever.
 
