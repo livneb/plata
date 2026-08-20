@@ -2,6 +2,15 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.212 — 2026-08-20
+- **🧹 New `/janitor/` page (Diagnostics group)** — the retention mechanism from v2.24.211 now has a screen:
+  - Headline cards: last sweep time + duration, approximate next sweep, total reclaimed last run, sweep health (flags any Postgres sweep that errored).
+  - **Run sweep now** button — queues an immediate sweep (picked up within ~30s); button shows "Sweep queued…" while pending.
+  - Last-run breakdown: per-stream trim counts, graph events aged out / kept-with-impact, edge lists capped, per-table Postgres delete counts.
+  - Run history table (last 30 sweeps).
+  - Effective retention config, grouped per storage layer, with each key's `janitor_config` name and an "override" badge when a value differs from the default.
+- The JSON endpoints (`/controls/janitor/*`) remain for scripting.
+
 ## 2.24.211 — 2026-08-20
 - **🧹 New Janitor agent — the system now cleans up after itself.** Every storage layer was append-only in practice: streams were never `XTRIM`'d (heartbeats alone add ~100k entries/day — `trim_stream()` existed but had zero callers), graph `event:*` nodes with 1024-float embeddings were kept forever, and `signal_archive` / `error_log` / `audit_log` grew without bound. A janitor loop (dashboard lifespan, next to sysop) now sweeps every 6h:
   - **Redis streams**: all 9 first-class streams + every DLQ trimmed to sane maxlens (heartbeats 5k, signals 20k, trading 10k, DLQs 2k).

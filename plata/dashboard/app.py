@@ -25,6 +25,7 @@ from plata.dashboard.routes import (
     historian,
     history,
     controls as controls_route,
+    janitor as janitor_route,
     lessons as lessons_route,
     money as money_route,
     news as news_route,
@@ -985,6 +986,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_route.router)
     app.include_router(tuning_route.router)
     app.include_router(sysop_route.router)
+    app.include_router(janitor_route.router)
     app.include_router(push_route.router)
     app.include_router(sse_route.router)
     app.include_router(translate_route.router)

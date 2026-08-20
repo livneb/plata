@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Janitor · Plata{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold">Janitor — retention sweeps</h1>
+      <details class="mt-1 text-sm text-gray-500">
+        <summary class="cursor-pointer">What does the janitor do?</summary>
+        <p class="mt-2 leading-relaxed max-w-3xl">
+          Every {{ config_groups[0][1][0].value }} hours the janitor trims Redis streams (heartbeats alone add
+          ~100k entries/day), ages out old knowledge-graph event nodes (keeping ones with measured
+          price impact much longer — they're the historical-analog training set), caps edge evidence
+          lists, and deletes expired rows from Postgres log/archive tables. Entities, lessons, the
+          trade ledger and proposals are never touched by default. Retention windows live in the
+          <span class="font-mono">janitor_config</span> Redis hash — see
+          <span class="font-mono">docs/DATA_RETENTION.md</span>.
+        </p>
+      </details>
+    </div>
+    <form method="post" action="/janitor/run_now" class="shrink-0">
+      <button type="submit" {% if run_now_pending %}disabled{% endif %}
+              class="text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium rounded-lg text-sm px-4 py-2">
+        {% if run_now_pending %}⏳ Sweep queued…{% else %}🧹 Run sweep now{% endif %}
+      </button>
+    </form>
+  </div>
+
+  {% if run_now_pending %}
+  <div class="p-3 text-sm rounded-lg bg-blue-50 text-blue-800 dark:bg-gray-800 dark:text-blue-300 border border-blue-200 dark:border-gray-700">
+    A sweep is queued — the janitor picks it up within ~30 seconds. Refresh this page to see the result.
+  </div>
+  {% endif %}
+
+  {# ---- Headline cards ---- #}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <p class="text-xs uppercase text-gray-500">Last sweep</p>
+      {% if last_run %}
+      <p class="text-lg font-semibold"><time data-utc="{{ last_run.ran_at }}">{{ last_run.ran_at }}</time></p>
+      <p class="text-xs text-gray-500">took {{ last_run.duration_ms }} ms</p>
+      {% else %}
+      <p class="text-lg font-semibold">never</p>
+      <p class="text-xs text-gray-500">first sweep runs ~90s after boot</p>
+      {% endif %}
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <p class="text-xs uppercase text-gray-500">Next sweep (approx.)</p>
+      {% if next_run_at %}
+      <p class="text-lg font-semibold"><time data-utc="{{ next_run_at }}">{{ next_run_at }}</time></p>
+      {% else %}
+      <p class="text-lg font-semibold">—</p>
+      {% endif %}
+      <p class="text-xs text-gray-500">or immediately via Run now</p>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <p class="text-xs uppercase text-gray-500">Reclaimed last run</p>
+      {% if last_totals %}
+      <p class="text-lg font-semibold">{{ "{:,}".format(last_totals.stream_entries + last_totals.pg_rows + last_totals.graph_events) }}</p>
+      <p class="text-xs text-gray-500">stream entries + rows + graph events</p>
+      {% else %}
+      <p class="text-lg font-semibold">—</p>
+      {% endif %}
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <p class="text-xs uppercase text-gray-500">Sweep health</p>
+      {% if last_totals and last_totals.pg_errors %}
+      <p class="text-lg font-semibold text-amber-500">{{ last_totals.pg_errors }} sweep(s) errored</p>
+      <p class="text-xs text-gray-500">details in service logs</p>
+      {% elif last_totals %}
+      <p class="text-lg font-semibold text-green-500">OK</p>
+      <p class="text-xs text-gray-500">all sweeps completed</p>
+      {% else %}
+      <p class="text-lg font-semibold">—</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---- Last run breakdown ---- #}
+  {% if last_run %}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    <div class="p-3 border-b border-gray-200 dark:border-gray-700">
+      <h2 class="font-semibold">Last run breakdown</h2>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 p-4 text-sm">
+      <div>
+        <h3 class="text-xs uppercase text-gray-500 mb-2">Redis streams trimmed</h3>
+        {% if last_run.streams %}
+        <table class="w-full text-left">
+          <tbody>
+            {% for stream, n in last_run.streams.items() %}
+            <tr class="border-t border-gray-100 dark:border-gray-700">
+              <td class="py-1 pr-2 font-mono text-xs">{{ stream }}</td>
+              <td class="py-1 text-right font-mono">{{ "{:,}".format(n) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="text-gray-500">Nothing to trim — all streams within limits.</p>
+        {% endif %}
+      </div>
+      <div class="space-y-4">
+        <div>
+          <h3 class="text-xs uppercase text-gray-500 mb-2">Knowledge graph</h3>
+          <p>Aged-out events deleted: <span class="font-mono">{{ "{:,}".format(last_run.graph_events.deleted if last_run.graph_events else 0) }}</span></p>
+          <p>Kept (recent price impact): <span class="font-mono">{{ "{:,}".format(last_run.graph_events.kept_with_impact if last_run.graph_events else 0) }}</span></p>
+          <p>Edge evidence lists capped: <span class="font-mono">{{ "{:,}".format(last_run.graph_edges.capped if last_run.graph_edges else 0) }}</span>
+             <span class="text-xs text-gray-500">(scanned {{ "{:,}".format(last_run.graph_edges.scanned if last_run.graph_edges else 0) }})</span></p>
+        </div>
+        <div>
+          <h3 class="text-xs uppercase text-gray-500 mb-2">Postgres rows deleted</h3>
+          {% if last_run.postgres %}
+          <table class="w-full text-left">
+            <tbody>
+              {% for table, n in last_run.postgres.items() %}
+              <tr class="border-t border-gray-100 dark:border-gray-700">
+                <td class="py-1 pr-2 font-mono text-xs">{{ table }}</td>
+                <td class="py-1 text-right font-mono {% if n == -1 %}text-amber-500{% endif %}">
+                  {% if n == -1 %}error{% else %}{{ "{:,}".format(n) }}{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p class="text-gray-500">No Postgres sweeps ran.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {# ---- Run history ---- #}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    <div class="p-3 border-b border-gray-200 dark:border-gray-700">
+      <h2 class="font-semibold">Run history <span class="text-xs text-gray-500 font-normal">(last {{ history | length }})</span></h2>
+    </div>
+    {% if history %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left">
+        <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-500">
+          <tr>
+            <th class="px-3 py-2">When</th>
+            <th class="px-3 py-2 text-right">Stream entries</th>
+            <th class="px-3 py-2 text-right">Graph events</th>
+            <th class="px-3 py-2 text-right">Edges capped</th>
+            <th class="px-3 py-2 text-right">PG rows</th>
+            <th class="px-3 py-2 text-right">Duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+          <tr class="border-t border-gray-100 dark:border-gray-700">
+            <td class="px-3 py-1.5"><time data-utc="{{ h.ran_at }}">{{ h.ran_at }}</time></td>
+            <td class="px-3 py-1.5 text-right font-mono">{{ "{:,}".format(h.stream_entries) }}</td>
+            <td class="px-3 py-1.5 text-right font-mono">{{ "{:,}".format(h.graph_events) }}</td>
+            <td class="px-3 py-1.5 text-right font-mono">{{ "{:,}".format(h.edges_capped) }}</td>
+            <td class="px-3 py-1.5 text-right font-mono">{{ "{:,}".format(h.pg_rows) }}{% if h.pg_errors %} <span class="text-amber-500" title="{{ h.pg_errors }} sweep(s) errored">⚠</span>{% endif %}</td>
+            <td class="px-3 py-1.5 text-right font-mono text-xs">{{ h.duration_ms }} ms</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="p-4 text-sm text-gray-500">No sweeps recorded yet.</p>
+    {% endif %}
+  </section>
+
+  {# ---- Effective config ---- #}
+  <section class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    <div class="p-3 border-b border-gray-200 dark:border-gray-700">
+      <h2 class="font-semibold">Effective retention config</h2>
+      <p class="text-xs text-gray-500 mt-0.5">
+        Override any value via <span class="font-mono">HSET janitor_config &lt;key&gt; &lt;value&gt;</span> in Redis
+        (0 = disabled / keep forever). Changes apply from the next sweep.
+      </p>
+    </div>
+    <div class="grid md:grid-cols-2 gap-x-8 p-4 text-sm">
+      {% for group_label, items in config_groups %}
+      <div class="mb-4">
+        <h3 class="text-xs uppercase text-gray-500 mb-2">{{ group_label }}</h3>
+        <table class="w-full text-left">
+          <tbody>
+            {% for it in items %}
+            <tr class="border-t border-gray-100 dark:border-gray-700">
+              <td class="py-1 pr-2">
+                {{ it.label }}
+                <span class="block font-mono text-[11px] text-gray-400">{{ it.key }}</span>
+              </td>
+              <td class="py-1 text-right font-mono align-top">
+                {{ "{:,}".format(it.value) }}
+                {% if it.overridden %}
+                <span class="ml-1 text-[10px] uppercase text-blue-500" title="Overridden in janitor_config (default: {{ it.default }})">override</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}
