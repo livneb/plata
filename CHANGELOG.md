@@ -2,6 +2,16 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.211 — 2026-08-20
+- **🧹 New Janitor agent — the system now cleans up after itself.** Every storage layer was append-only in practice: streams were never `XTRIM`'d (heartbeats alone add ~100k entries/day — `trim_stream()` existed but had zero callers), graph `event:*` nodes with 1024-float embeddings were kept forever, and `signal_archive` / `error_log` / `audit_log` grew without bound. A janitor loop (dashboard lifespan, next to sysop) now sweeps every 6h:
+  - **Redis streams**: all 9 first-class streams + every DLQ trimmed to sane maxlens (heartbeats 5k, signals 20k, trading 10k, DLQs 2k).
+  - **Knowledge graph**: `event:*` nodes without measured price impact age out after 120d; nodes *with* `price_impact` (the historical-analog training set) after 365d — deleting them also shrinks the HNSW index the strategist queries. `edge:*` evidence lists (previously unbounded) capped at the 50 most recent. Entities and lessons are never touched.
+  - **Postgres**: batched retention sweeps for `signal_archive` (dups 30d / all 180d), `error_log` (resolved 30d / all 90d), `agent_activity_log` (30d — replaces the old lifespan-local sweeper), `sysop_findings` (non-new 60d), `audit_log` (365d), `event_price_windows` (365d), `llm_cost` (400d), `config_settings` (last 20 versions per key). `trade_ledger`, `proposals`, backtests, users, credentials untouched by default.
+  - Everything tunable via the `janitor_config` Redis hash (0 = keep forever); each run stores a JSON summary in `janitor:last_run` + `janitor:history` and logs one activity-feed line.
+  - New endpoints: `POST /controls/janitor/run_now`, `GET /controls/janitor/status`.
+  - Docs: `docs/DATA_RETENTION.md`.
+- **📈 `docs/PROFITABILITY_ROADMAP.md`** — prioritized plan for turning "works" into "makes money": expectancy attribution report, stop auto-lowering the sentiment threshold (activity ≠ edge), paid models for decision-critical LLM calls, source pruning by measured predictive value, pipeline latency tracking, realistic paper-fill costs, vol-scaled sizing + correlation caps, quantitative priors in the strategist prompt.
+
 ## 2.24.164 — 2026-06-08
 - **🐛 ROOT cause of "12 attempts on obscure models, never reached llama/deepseek".** Even though v2.24.163 put static FREE_FALLBACKS first in the priority order, the curated models were ALL in the `llm:dead_free_models` Redis set from earlier "no endpoints found" hits (which v2.24.158 wrongly classified as PERMANENT 24h-dead). The pre-call check and chain walk both skipped every curated model → chain only used obscure live-catalog ones (nvidia/liquid/google-gemma-4/kimi/...) → all 429'd.
   - **Reclassification**: `"no endpoints found"` + `"404"` are now TRANSIENT (10-min cooldown). `"unavailable for free"` + `"response_format is not supported"` stay PERMANENT (24h). Provider load shouldn't blacklist a model for a day.

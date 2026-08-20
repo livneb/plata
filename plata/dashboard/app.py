@@ -190,23 +190,12 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("dashboard").warning("credentials_warmup_skipped: %s", exc)
-    # Periodic sweeper: delete agent_activity_log rows older than 30 days.
+    # Janitor: periodic retention sweeps across Redis streams, the knowledge
+    # graph, and Postgres (replaces the old agent_activity_log-only sweeper —
+    # that table is now one of the janitor's targets). See plata/agents/janitor.py.
     import asyncio as _asyncio
-    async def _activity_sweeper() -> None:
-        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-        from sqlalchemy import delete as _delete
-        from plata.core.db import AgentActivityLog, session_scope
-        while True:
-            try:
-                cutoff = _dt.now(_tz.utc) - _td(days=30)
-                async with session_scope() as session:
-                    await session.execute(
-                        _delete(AgentActivityLog).where(AgentActivityLog.ts < cutoff)
-                    )
-            except Exception as exc:  # noqa: BLE001
-                _log.warning("activity_sweep_failed", error=str(exc)[:160])
-            await _asyncio.sleep(6 * 60 * 60)  # every 6h
-    _sweeper_task = _asyncio.create_task(_activity_sweeper(), name="activity-sweeper")
+    from plata.agents import janitor as _janitor
+    _sweeper_task = _asyncio.create_task(_janitor.run(), name="janitor")
     _app.state._activity_sweeper = _sweeper_task
 
     # Health watchdog: detect "silently stuck" major functions and surface

@@ -197,3 +197,36 @@ async def reset_system(request: Request):
         "hitl_wiped": hitl_wiped,
         "counter_keys_wiped": counter_keys_wiped,
     })
+
+
+@router.post("/janitor/run_now")
+async def janitor_run_now():
+    """Queue an immediate retention sweep. The janitor loop (dashboard
+    lifespan) picks the flag up within ~30s; results land in
+    `janitor:last_run` and the janitor's activity feed entry."""
+    redis = get_redis()
+    await redis.set("janitor:run_now", "1", ex=600)
+    return JSONResponse({"ok": True, "queued": True})
+
+
+@router.get("/janitor/status")
+async def janitor_status():
+    """Last sweep summary + effective retention config, for inspection."""
+    import json as _json
+
+    from plata.agents.janitor import get_config
+
+    redis = get_redis()
+    last_raw = await redis.get("janitor:last_run")
+    last = None
+    if last_raw:
+        try:
+            last = _json.loads(last_raw)
+        except (TypeError, ValueError):
+            last = {"raw": last_raw}
+    return JSONResponse({
+        "ok": True,
+        "run_now_pending": bool(await redis.get("janitor:run_now")),
+        "last_run": last,
+        "config": await get_config(),
+    })
