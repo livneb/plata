@@ -46,7 +46,8 @@ CONFIG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("audit_log_days", "audit_log"),
         ("event_price_window_days", "event_price_windows"),
         ("llm_cost_days", "llm_cost"),
-        ("proposals_days", "proposals — terminal states"),
+        ("proposals_dropped_days", "proposals — dropped (diagnostics)"),
+        ("proposals_days", "proposals — never became a trade"),
         ("config_settings_keep_versions", "config_settings versions kept per key"),
     ]),
 ]

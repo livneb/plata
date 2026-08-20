@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.213 — 2026-08-20
+- **🧹 Janitor now cleans the proposals table (was: 72k+ rows, kept forever).** Root cause of the huge count: the strategist writes one diagnostic `state=dropped` Proposal row for **every** event it rejects, so drop records dominate the table. New retention split:
+  - `dropped` rows (pure diagnostics): deleted after **14 days** (`proposals_dropped_days`).
+  - Proposals that never became a trade (`trade_ulid IS NULL` — rejected / HITL-rejected / timed out / stale): deleted after **90 days** (`proposals_days`).
+  - Proposals that became real trades: **never deleted** — they document why trades happened and feed the learning loop.
+- The /janitor/ config panel and `docs/DATA_RETENTION.md` reflect the new keys. To drain the backlog faster: `HSET janitor_config proposals_dropped_days 1` then Run sweep now (each run deletes up to 200k rows per table).
+
 ## 2.24.212 — 2026-08-20
 - **🧹 New `/janitor/` page (Diagnostics group)** — the retention mechanism from v2.24.211 now has a screen:
   - Headline cards: last sweep time + duration, approximate next sweep, total reclaimed last run, sweep health (flags any Postgres sweep that errored).

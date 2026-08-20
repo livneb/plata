@@ -19,6 +19,7 @@ Design (mirrors the sysop agent's conventions):
 What is deliberately NOT touched:
   • trade_ledger, backtest_runs/trades, users, api_credentials — system of
     record / small.
+  • proposals that became real trades (trade_ulid set) — the learning set.
   • lesson:* graph nodes — the distilled learning; tiny and high-value.
   • entity:* graph nodes — bounded by the entity universe, sentiment EWMA
     history matters.
@@ -83,7 +84,13 @@ DEFAULTS: dict[str, int] = {
     "sysop_findings_days": 60,             # only non-`new` states
     "event_price_window_days": 365,
     "llm_cost_days": 400,
-    "proposals_days": 0,                   # decision history — keep by default
+    # `dropped` rows are pure diagnostics — the strategist writes one for
+    # EVERY event it rejects, so they dominate the table (tens of thousands).
+    "proposals_dropped_days": 14,
+    # Proposals that never became a trade (rejected / hitl_rejected /
+    # timed out / stale). Ones WITH a trade_ulid are kept forever — they're
+    # the learning set tied to trade_ledger.
+    "proposals_days": 90,
     "config_settings_keep_versions": 20,   # per key
     # -- Postgres batching ----------------------------------------------------
     "pg_delete_batch": 5_000,
@@ -365,12 +372,20 @@ async def _sweep_postgres(cfg: dict[str, int]) -> dict[str, int]:
             LLMCost.ts < cutoff_utc(cfg["llm_cost_days"], now=now),
             cfg,
         ))
+    if cfg["proposals_dropped_days"] > 0:
+        # Diagnostic drop records (state=dropped) — one per rejected event.
+        await run_sweep("proposals_dropped", _batched_delete(
+            Proposal, Proposal.proposal_ulid,
+            (Proposal.state == "dropped")
+            & (Proposal.created_at < cutoff_utc(cfg["proposals_dropped_days"], now=now)),
+            cfg,
+        ))
     if cfg["proposals_days"] > 0:
-        # Only terminal states — never delete rows still moving through HITL.
-        terminal = ("rejected", "hitl_rejected", "hitl_timeout", "executed", "failed_execution")
+        # Anything that never became a trade. Proposals WITH a trade_ulid
+        # are never deleted here — they document why real trades happened.
         await run_sweep("proposals", _batched_delete(
             Proposal, Proposal.proposal_ulid,
-            Proposal.state.in_(terminal)
+            (Proposal.trade_ulid.is_(None))
             & (Proposal.created_at < cutoff_utc(cfg["proposals_days"], now=now)),
             cfg,
         ))

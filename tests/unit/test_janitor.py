@@ -31,6 +31,14 @@ def test_merge_config_zero_disables():
     assert cfg["graph_event_retention_days"] == 0
 
 
+def test_proposal_defaults_clean_noise_but_not_trades():
+    # dropped diagnostic rows die fast, never-traded proposals eventually,
+    # and there is intentionally NO knob that deletes traded proposals.
+    assert DEFAULTS["proposals_dropped_days"] == 14
+    assert DEFAULTS["proposals_days"] == 90
+    assert not any("executed" in k or "traded" in k for k in DEFAULTS)
+
+
 def test_cutoff_utc():
     now = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
     assert cutoff_utc(30, now=now) == now - timedelta(days=30)
