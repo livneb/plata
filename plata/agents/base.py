@@ -85,15 +85,25 @@ from plata.core.bus import (
     consume,
     get_redis,
     publish,
+    publish_raw,
     subscribe,
     to_dlq,
 )
 from plata.core.error_reporter import get_error_reporter
+from plata.core.llm import LLMExhausted
 from plata.core.observability import get_logger
 from plata.core.schemas import AgentHeartbeat
 
 HEARTBEAT_INTERVAL_SEC = 10
 SYSTEM_STATE_KEY = "system:state"
+# LLMExhausted (whole free pool rate-limited) is transient: requeue the
+# message with a retry counter instead of dead-lettering it, and pause the
+# consumer between attempts so we stop hammering rate-limited providers.
+# 30 requeues × (~60s pause + attempt time) ≈ rides out a 30–60 min outage;
+# beyond that the message goes to the DLQ like any other failure.
+LLM_EXHAUSTED_MAX_RETRIES = 30
+LLM_EXHAUSTED_PAUSE_SEC = 60
+LLM_RETRY_FIELD = "_llm_retries"
 
 
 class BaseAgent(ABC):
@@ -189,44 +199,90 @@ class BaseAgent(ABC):
                         ))
                 except Exception:  # noqa: BLE001
                     pass
+            except LLMExhausted as e:
+                # Transient: every LLM candidate (free pool + paid rescue)
+                # failed at once. The message isn't poison — requeue it with
+                # a retry counter and pause this consumer so it stops burning
+                # 10 upstream attempts per message while providers recover.
+                retries = 0
+                try:
+                    retries = int(msg.payload.get(LLM_RETRY_FIELD) or 0)
+                except (TypeError, ValueError):
+                    retries = 0
+                if retries >= LLM_EXHAUSTED_MAX_RETRIES:
+                    await self._record_failure(msg, e, traceback.format_exc(), activity_key)
+                else:
+                    requeued = dict(msg.payload)
+                    requeued[LLM_RETRY_FIELD] = retries + 1
+                    await publish_raw(msg.stream, requeued)
+                    try:
+                        await redis.hincrby(
+                            f"agent_stats:{self.name}", "llm_exhausted_requeues", 1
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if retries == 0:
+                        # WARN once per message (first requeue), not 30×.
+                        await self.error_reporter.capture(
+                            agent=self.name,
+                            severity="WARN",
+                            error_type="LLMExhausted",
+                            message=(
+                                f"{str(e)[:400]} — message requeued "
+                                f"(retry 1/{LLM_EXHAUSTED_MAX_RETRIES})"
+                            ),
+                            context={"redis_id": msg.redis_id, "stream": msg.stream},
+                        )
+                    self.log.warning(
+                        "llm_exhausted_requeue",
+                        stream=msg.stream,
+                        redis_id=msg.redis_id,
+                        retry=retries + 1,
+                        max_retries=LLM_EXHAUSTED_MAX_RETRIES,
+                    )
+                    await asyncio.sleep(LLM_EXHAUSTED_PAUSE_SEC)
             except Exception as e:
-                self._error_count_60s += 1
-                tb = traceback.format_exc()
-                await self.error_reporter.capture(
-                    agent=self.name,
-                    severity="ERROR",
-                    error_type=type(e).__name__,
-                    message=str(e) or repr(e),
-                    traceback_str=tb,
-                    context={"redis_id": msg.redis_id, "stream": msg.stream},
-                )
-                await to_dlq(
-                    stream=msg.stream,
-                    redis_id=msg.redis_id,
-                    payload=msg.payload,
-                    error_type=type(e).__name__,
-                    traceback_str=tb,
-                    agent=self.name,
-                )
-                try:
-                    await redis.hincrby(f"agent_stats:{self.name}", "errors_total", 1)
-                    entry = f"{datetime.now(timezone.utc).isoformat()}|err|{type(e).__name__}: {str(e)[:120]}"
-                    await redis.lpush(activity_key, entry)
-                    await redis.ltrim(activity_key, 0, 49)
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
-                    from plata.core.db import AgentActivityLog, session_scope
-                    async with session_scope() as session:
-                        session.add(AgentActivityLog(
-                            agent=self.name[:64], kind="err",
-                            summary=f"{type(e).__name__}: {str(e)[:480]}",
-                        ))
-                except Exception:  # noqa: BLE001
-                    pass
+                await self._record_failure(msg, e, traceback.format_exc(), activity_key)
             finally:
                 self._in_flight -= 1
                 await ack(msg.stream, self.group, msg.redis_id)
+
+    async def _record_failure(self, msg, e: Exception, tb: str, activity_key: str) -> None:
+        """Hard failure: capture ERROR, dead-letter the message, bump stats."""
+        redis = get_redis()
+        self._error_count_60s += 1
+        await self.error_reporter.capture(
+            agent=self.name,
+            severity="ERROR",
+            error_type=type(e).__name__,
+            message=str(e) or repr(e),
+            traceback_str=tb,
+            context={"redis_id": msg.redis_id, "stream": msg.stream},
+        )
+        await to_dlq(
+            stream=msg.stream,
+            redis_id=msg.redis_id,
+            payload=msg.payload,
+            error_type=type(e).__name__,
+            traceback_str=tb,
+            agent=self.name,
+        )
+        try:
+            await redis.hincrby(f"agent_stats:{self.name}", "errors_total", 1)
+            entry = f"{datetime.now(timezone.utc).isoformat()}|err|{type(e).__name__}: {str(e)[:120]}"
+            await redis.lpush(activity_key, entry)
+            await redis.ltrim(activity_key, 0, 49)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from plata.core.db import AgentActivityLog, session_scope
+            async with session_scope() as session:
+                session.add(AgentActivityLog(
+                    agent=self.name[:64], kind="err",
+                    summary=f"{type(e).__name__}: {str(e)[:480]}",
+                ))
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _heartbeat_loop(self) -> None:
         last_error_count = 0

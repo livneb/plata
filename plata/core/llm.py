@@ -34,6 +34,16 @@ class BudgetExceededError(RuntimeError):
     """Raised when an agent's daily LLM budget is hit (circuit-breaker)."""
 
 
+class LLMExhausted(RuntimeError):
+    """Every candidate model failed transiently — typically the whole free
+    pool rate-limited at once (and the paid rescue, if attempted, failed too).
+
+    This is a RETRYABLE condition, not a poison message: BaseAgent catches it
+    and requeues the stream message with backoff instead of dead-lettering it.
+    Subclasses RuntimeError so existing `except RuntimeError` call sites keep
+    working."""
+
+
 # Per-agent paid-model defaults.
 AGENT_MODELS: dict[str, str] = {
     "graph_ingestion": "anthropic/claude-haiku-4-5",
@@ -925,6 +935,13 @@ class LLMClient:
                     or "rate limit" in low
                     or "429" in msg
                     or "provider_unreachable" in msg
+                    # Free-tier provider-side 400s ("Provider returned error",
+                    # e.g. AtlasCloud). Our request is identical across the
+                    # chain, so a 400 from ONE free provider is that
+                    # provider's problem — walk to the next model instead of
+                    # letting BadRequestError escape and DLQ the message.
+                    or "provider returned error" in low
+                    or "error code: 400" in low
                 )
                 if is_perm_unavail:
                     await _mark_dead_free(current_model)
@@ -990,7 +1007,7 @@ class LLMClient:
                             except Exception:  # noqa: BLE001
                                 pass
                             continue
-                    raise RuntimeError(
+                    raise LLMExhausted(
                         f"All free models exhausted while trying to serve "
                         f"agent={self.agent}. Tried: {sorted(tried)}. "
                         f"Mode={mode}. Switch llm_mode to `paid` on "
@@ -1088,13 +1105,13 @@ class LLMClient:
                     try:
                         response = await _attempt_once()
                     except Exception as exc:  # noqa: BLE001
-                        raise RuntimeError(
+                        raise LLMExhausted(
                             f"LLM call returned no response after {max_attempts} "
                             f"free attempts AND paid rescue ({paid}) also failed: "
                             f"{type(exc).__name__}: {str(exc)[:200]}"
                         ) from exc
         if response is None:
-            raise RuntimeError(
+            raise LLMExhausted(
                 f"LLM call returned no response after {max_attempts} attempts "
                 f"(tried free models: {kwargs.get('_tried_free', [])}). "
                 f"All free providers may be rate-limited; switch llm_mode to "
