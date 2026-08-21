@@ -5,11 +5,15 @@ Lives under the Knowledge sidebar group.
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from plata.agents.scraper.news_config import (
     DEFAULTS as NEWS_DEFAULTS,
+)
+from plata.agents.scraper.news_config import (
     get_config as get_news_config,
+)
+from plata.agents.scraper.news_config import (
     save_config as save_news_config,
 )
 from plata.core.bus import get_redis
@@ -70,7 +74,7 @@ async def _diagnose(name: str, h: dict, cfg: dict, now_ts: float,
     # 4. Disabled in config
     enabled_key = f"{name}_enabled"
     if enabled_key in cfg and not cfg.get(enabled_key):
-        return ("info", f"This source is disabled in the Sources panel below. "
+        return ("info", "This source is disabled in the Sources panel below. "
                 "Enable the checkbox + Save to start polling.")
 
     # 5. Last error?
@@ -94,6 +98,7 @@ async def _diagnose(name: str, h: dict, cfg: dict, now_ts: float,
 
 async def _source_rows(redis) -> list[dict]:
     import time
+
     from plata.config.settings import get_settings as _gs
     settings_obj = _gs()
     cfg = await get_news_config()
@@ -157,6 +162,40 @@ async def source_log(name: str, request: Request):
     )
 
 
+async def _telegram_user_panel(redis, cfg: dict) -> dict:
+    """State for the 'Public signal groups (user account)' section.
+
+    Written by the TelegramUserListener agent (plata/agents/scraper/telegram_user.py)
+    and the login routes below.
+    """
+    import json as _json
+
+    from plata.config import credentials as _creds
+    api_ok = bool(await _creds.get("telegram_api_id") and await _creds.get("telegram_api_hash"))
+    session_ok = bool(await _creds.get("telegram_user_session"))
+    info = await redis.hgetall("telegram:user_info") or {}
+    join_raw = await redis.hgetall("telegram:user_join_status") or {}
+    joins = {}
+    for k, v in join_raw.items():
+        try:
+            joins[k] = _json.loads(v)
+        except _json.JSONDecodeError:
+            continue
+    channels = []
+    for link in cfg.get("telegram_user_channels") or []:
+        st = joins.get(link) or {}
+        channels.append({
+            "link": link,
+            "status": st.get("status") or "pending",
+            "title": st.get("title") or link,
+            "error": st.get("error") or "",
+            "msg_count": st.get("msg_count") or 0,
+            "last_msg_at": st.get("last_msg_at"),
+        })
+    return {"api_ok": api_ok, "session_ok": session_ok, "info": info,
+            "channels": channels, "login_pending": _login_state.get("phone") is not None}
+
+
 async def _telegram_panel(redis, cfg: dict) -> dict:
     """Bot identity + known chats for the 'Telegram groups & channels' panel.
 
@@ -188,12 +227,170 @@ async def index(request: Request):
     drops = await redis.hgetall("scraper:filter_drops") or {}
     sources = await _source_rows(redis)
     telegram = await _telegram_panel(redis, cfg)
+    telegram_user = await _telegram_user_panel(redis, cfg)
     return templates.TemplateResponse(
         request, "pages/news.html",
         {"active": "news", "news_cfg": cfg, "news_drops": drops,
          "news_defaults": NEWS_DEFAULTS, "sources": sources,
-         "telegram": telegram},
+         "telegram": telegram, "telegram_user": telegram_user},
     )
+
+
+# ---------------------------------------------------------------------------
+# Telegram USER-account (MTProto) login + public-channel management.
+#
+# Bots can't join public groups the operator doesn't admin, so signal-group
+# ingestion runs on a logged-in user account (Telethon). The login handshake
+# (phone -> SMS/app code -> optional 2FA password) happens right here in the
+# dashboard; the resulting StringSession is stored in the encrypted
+# credentials store where the TelegramUserListener agent picks it up.
+#
+# _login_state holds the half-open Telethon client between send_code and
+# sign_in. In-memory is fine: the dashboard is a single process, and if it
+# restarts mid-login the user just requests a new code.
+# ---------------------------------------------------------------------------
+
+_login_state: dict = {}
+
+
+async def _login_client():
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+
+    from plata.config import credentials as _creds
+    api_id = await _creds.get("telegram_api_id")
+    api_hash = await _creds.get("telegram_api_hash")
+    if not (api_id and api_hash):
+        return None
+    client = TelegramClient(StringSession(), int(api_id), api_hash)
+    await client.connect()
+    return client
+
+
+@router.post("/telegram/user/setup")
+async def telegram_user_setup(request: Request):
+    """Store api_id + api_hash from my.telegram.org in the credentials store."""
+    from plata.config import credentials as _creds
+    from plata.dashboard.auth import current_user_email
+    form = await request.form()
+    api_id = (form.get("api_id") or "").strip()
+    api_hash = (form.get("api_hash") or "").strip()
+    if not api_id.isdigit() or not api_hash:
+        return JSONResponse({"ok": False, "error": "api_id must be a number and api_hash non-empty."})
+    by = current_user_email(request)
+    await _creds.set_("telegram_api_id", api_id, by=by)
+    await _creds.set_("telegram_api_hash", api_hash, by=by)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/telegram/user/send_code")
+async def telegram_user_send_code(request: Request):
+    form = await request.form()
+    phone = (form.get("phone") or "").strip().replace(" ", "")
+    if not phone.startswith("+"):
+        return JSONResponse({"ok": False, "error": "Phone must be international format, e.g. +9725…"})
+    old = _login_state.pop("client", None)
+    if old is not None:
+        import contextlib
+        with contextlib.suppress(Exception):
+            await old.disconnect()
+    _login_state.clear()
+    try:
+        client = await _login_client()
+        if client is None:
+            return JSONResponse({"ok": False, "error": "Set API ID + hash first."})
+        sent = await client.send_code_request(phone)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)[:200]})
+    _login_state.update({"client": client, "phone": phone,
+                         "phone_code_hash": sent.phone_code_hash})
+    return JSONResponse({"ok": True})
+
+
+@router.post("/telegram/user/sign_in")
+async def telegram_user_sign_in(request: Request):
+    from telethon.errors import SessionPasswordNeededError
+
+    from plata.config import credentials as _creds
+    from plata.dashboard.auth import current_user_email
+    form = await request.form()
+    code = (form.get("code") or "").strip()
+    password = (form.get("password") or "").strip()
+    client = _login_state.get("client")
+    if client is None:
+        return JSONResponse({"ok": False, "error": "No login in progress — send a code first."})
+    try:
+        try:
+            await client.sign_in(
+                phone=_login_state["phone"], code=code,
+                phone_code_hash=_login_state["phone_code_hash"],
+            )
+        except SessionPasswordNeededError:
+            if not password:
+                return JSONResponse({"ok": False, "error": "2FA enabled — enter your Telegram password too."})
+            await client.sign_in(password=password)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)[:200]})
+    session_str = client.session.save()
+    await _creds.set_("telegram_user_session", session_str,
+                      by=current_user_email(request))
+    import contextlib
+    with contextlib.suppress(Exception):
+        await client.disconnect()
+    _login_state.clear()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/telegram/user/disconnect")
+async def telegram_user_disconnect():
+    """Invalidate + forget the stored user session."""
+    import contextlib
+
+    from telethon.sessions import StringSession
+
+    from plata.config import credentials as _creds
+    session_str = await _creds.get("telegram_user_session")
+    if session_str:
+        # Best-effort remote logout so the session doesn't linger in the
+        # account's device list.
+        with contextlib.suppress(Exception):
+            from telethon import TelegramClient
+            api_id = await _creds.get("telegram_api_id")
+            api_hash = await _creds.get("telegram_api_hash")
+            client = TelegramClient(StringSession(session_str), int(api_id), api_hash)
+            await client.connect()
+            await client.log_out()
+    await _creds.delete("telegram_user_session")
+    redis = get_redis()
+    await redis.delete("telegram:user_info")
+    await redis.delete("telegram:user_join_status")
+    return RedirectResponse(url="/news/", status_code=303)
+
+
+@router.post("/telegram/user/channels/add")
+async def telegram_user_channel_add(request: Request):
+    from plata.agents.scraper.telegram_user import _normalize_link
+    form = await request.form()
+    link = _normalize_link(form.get("link") or "")
+    if not link:
+        return JSONResponse({"ok": False, "error": "Paste a t.me link or @username."})
+    cfg = await get_news_config()
+    links = list(cfg.get("telegram_user_channels") or [])
+    if link not in links:
+        links.append(link)
+        await save_news_config({"telegram_user_channels": links})
+    return JSONResponse({"ok": True})
+
+
+@router.post("/telegram/user/channels/remove")
+async def telegram_user_channel_remove(request: Request):
+    form = await request.form()
+    link = (form.get("link") or "").strip()
+    cfg = await get_news_config()
+    links = [c for c in (cfg.get("telegram_user_channels") or []) if c != link]
+    await save_news_config({"telegram_user_channels": links})
+    await get_redis().hdel("telegram:user_join_status", link)
+    return RedirectResponse(url="/news/", status_code=303)
 
 
 @router.post("/telegram/chat/{chat_id}/toggle")

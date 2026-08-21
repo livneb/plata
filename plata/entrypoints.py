@@ -159,6 +159,7 @@ async def _bind_then_run(http_runner, agent_factories: list[tuple[str, Any]]) ->
 async def _run_ingestion_hub() -> None:
     from plata.agents.orchestrator import Orchestrator
     from plata.agents.scraper.runner import Scraper
+    from plata.agents.scraper.telegram_user import TelegramUserListener
     from plata.hitl.telegram_bot import TelegramBot
 
     await _bind_then_run(
@@ -167,6 +168,7 @@ async def _run_ingestion_hub() -> None:
             ("orchestrator", lambda: Orchestrator().run()),
             ("scraper", lambda: Scraper().run()),
             ("telegram_bot", lambda: TelegramBot().run()),
+            ("telegram_user", lambda: TelegramUserListener().run()),
         ],
     )
 

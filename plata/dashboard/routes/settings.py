@@ -37,6 +37,8 @@ async def index(request: Request, tab: str = "controls"):
         {"key": "alpaca_key",      "label": "Alpaca API key",    "url": "https://app.alpaca.markets/paper/dashboard/overview"},
         {"key": "alpaca_secret",   "label": "Alpaca API secret", "url": "https://app.alpaca.markets/paper/dashboard/overview"},
         {"key": "telegram",        "label": "Telegram bot token","url": "https://t.me/BotFather"},
+        {"key": "telegram_api_id",  "label": "Telegram API ID (user account)",   "url": "https://my.telegram.org/apps"},
+        {"key": "telegram_api_hash","label": "Telegram API hash (user account)", "url": "https://my.telegram.org/apps"},
         {"key": "langfuse_public", "label": "Langfuse public",   "url": "https://cloud.langfuse.com/"},
         {"key": "langfuse_secret", "label": "Langfuse secret",   "url": "https://cloud.langfuse.com/"},
     ]

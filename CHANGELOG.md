@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.219 — 2026-08-21
+- **🌐 Listen to PUBLIC signal groups you don't admin — user-account listener (Telethon/MTProto).** Bots can only be added to a group by that group's admins, which made the bot flow useless for public signal groups. New `telegram_user` agent (ingestion_hub) logs in as a regular Telegram **user account** and joins public groups/channels by itself:
+  - **Setup entirely from `/news/`** — new "🌐 Public signal groups (user account)" panel walks through it: (1) paste `api_id`/`api_hash` from my.telegram.org (stored encrypted in the credentials store), (2) sign in with phone → login code (+ optional 2FA password) right in the dashboard; the resulting session is stored encrypted (`telegram_user_session`). No CLI, no restarts.
+  - **Join by link**: paste `t.me/...` or `@username` → the account joins on its own (one join per sync cycle, `FloodWait` respected and surfaced). Status table per channel: joined/joining/rate-limited/error, plus a **"Signals in" counter + last-message time — live proof ingestion works**.
+  - Only chats in the followed list are ingested — personal DMs/groups are never read. Messages flow into `RAW_SIGNALS` like every other source and pass the same content filter.
+  - New config key `news_config.telegram_user_channels`; state in `telegram:user_info` / `telegram:user_join_status`; new credential slugs `telegram_api_id`, `telegram_api_hash`, `telegram_user_session` (first two also editable on /settings/?tab=api). New dep: `telethon`.
+  - Disconnect button logs the session out remotely and wipes it.
 ## 2.24.218 — 2026-08-21
 - **💳 OpenRouter out-of-credits (402) handling — follow-up to the 09:38 `LLMExhausted` WARN.** The requeue machinery worked as designed, but the 402 exposed two gaps:
   - **Sticky paid-402 marker (`llm:paid_402`, 30 min).** The auto-mode paid rescue now remembers a credits 402 and skips paid attempts while the marker is set — previously every requeue cycle burned one paid call guaranteed to 402. The final-rescue path (which the 09:38 error went through) also flags the Activity page provider card now, same as the mid-chain path.

@@ -258,6 +258,115 @@
       </details>
     </div>
 
+    <!-- Public signal groups — user-account listener (Telethon) -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <h3 class="font-semibold mb-1">🌐 Public signal groups (user account)</h3>
+      <p class="text-xs text-gray-500 mb-3">Bots can only be added to groups by that group's admins — useless for public signal groups you don't run. This listener logs in as a regular Telegram <b>user account</b> instead, joins any public group/channel by its <span class="font-mono">t.me</span> link, and feeds every message into the signal pipeline.</p>
+      {# All buttons here use fetch() — nested <form>s inside the page-wide Save form are invalid HTML. #}
+      <script>
+        async function tgUserPost(url, fields) {
+          const body = new FormData();
+          for (const [k, v] of Object.entries(fields || {})) body.append(k, v);
+          const res = await fetch(url, { method: 'POST', body });
+          let data = null;
+          try { data = await res.json(); } catch (e) { location.reload(); return; }
+          if (data && data.ok === false) { alert(data.error || 'Failed'); return; }
+          location.reload();
+        }
+      </script>
+
+      {% if not telegram_user.api_ok %}
+      <!-- Step 1: API credentials -->
+      <div class="p-3 rounded border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/30 text-xs space-y-2">
+        <div><b>Step 1 of 2 — one-time API credentials.</b> Log in at <a href="https://my.telegram.org/apps" target="_blank" rel="noopener" class="text-blue-500 hover:underline">my.telegram.org/apps</a> with your own Telegram account, create an app (any name), and copy its <b>api_id</b> and <b>api_hash</b> here. Stored encrypted.</div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <input id="tg-api-id" type="text" placeholder="api_id (number)" class="w-36 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 font-mono">
+          <input id="tg-api-hash" type="text" placeholder="api_hash" class="w-72 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 font-mono">
+          <button type="button" class="px-3 py-1 rounded bg-sky-600 hover:bg-sky-700 text-white"
+                  onclick="tgUserPost('/news/telegram/user/setup', { api_id: document.getElementById('tg-api-id').value, api_hash: document.getElementById('tg-api-hash').value })">Save</button>
+        </div>
+      </div>
+
+      {% elif not telegram_user.session_ok %}
+      <!-- Step 2: phone login -->
+      <div class="p-3 rounded border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/30 text-xs space-y-2">
+        <div><b>Step 2 of 2 — sign in.</b> Enter your phone number; Telegram sends a login code to your app/SMS. With two-step verification enabled, add your Telegram password too.</div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <input id="tg-phone" type="text" placeholder="+972501234567" class="w-44 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 font-mono">
+          <button type="button" class="px-3 py-1 rounded bg-sky-600 hover:bg-sky-700 text-white"
+                  onclick="tgUserPost('/news/telegram/user/send_code', { phone: document.getElementById('tg-phone').value })">Send code</button>
+          {% if telegram_user.login_pending %}<span class="text-emerald-600">Code sent — enter it below.</span>{% endif %}
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <input id="tg-code" type="text" placeholder="login code" class="w-32 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 font-mono">
+          <input id="tg-pass" type="password" placeholder="2FA password (if set)" class="w-48 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900">
+          <button type="button" class="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onclick="tgUserPost('/news/telegram/user/sign_in', { code: document.getElementById('tg-code').value, password: document.getElementById('tg-pass').value })">Sign in</button>
+        </div>
+      </div>
+
+      {% else %}
+      <!-- Connected: manage channels -->
+      <div class="flex flex-wrap items-center gap-2 mb-3 text-xs">
+        {% if telegram_user.info.get('state') == 'connected' %}
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800">● connected</span>
+          <span>as <b>{{ telegram_user.info.get('name') or telegram_user.info.get('username') }}</b>{% if telegram_user.info.get('phone') %} ({{ telegram_user.info.get('phone') }}){% endif %}</span>
+        {% elif telegram_user.info.get('state') == 'session_invalid' %}
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800">session expired</span>
+          <span class="text-red-500">{{ telegram_user.info.get('error') }}</span>
+        {% else %}
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">starting…</span>
+          <span class="text-gray-500">Session saved — the listener agent connects within ~30s of deploy/restart.{% if telegram_user.info.get('error') %} Last error: {{ telegram_user.info.get('error') }}{% endif %}</span>
+        {% endif %}
+        <button type="button" class="ml-auto text-gray-400 hover:text-red-500 hover:underline"
+                onclick="if (confirm('Log this session out of the Telegram account?')) tgUserPost('/news/telegram/user/disconnect', {})">Disconnect</button>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3 text-xs">
+        <input id="tg-chan-link" type="text" placeholder="https://t.me/somesignals or @somesignals" class="w-80 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 font-mono">
+        <button type="button" class="px-3 py-1 rounded bg-sky-600 hover:bg-sky-700 text-white"
+                onclick="tgUserPost('/news/telegram/user/channels/add', { link: document.getElementById('tg-chan-link').value })">➕ Join &amp; listen</button>
+        <span class="text-gray-500">The account joins the group itself — nobody needs to add it. One join per minute (Telegram rate limits).</span>
+      </div>
+
+      {% if telegram_user.channels %}
+      <table class="w-full text-xs text-left">
+        <thead class="text-[10px] uppercase text-gray-500">
+          <tr>
+            <th class="py-1 pr-2">Channel</th>
+            <th class="py-1 pr-2">Status</th>
+            <th class="py-1 pr-2" title="Messages ingested into the signal pipeline from this chat.">Signals in</th>
+            <th class="py-1 pr-2">Last message</th>
+            <th class="py-1 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in telegram_user.channels %}
+          <tr class="border-t border-gray-100 dark:border-gray-700">
+            <td class="py-1.5 pr-2">{{ c.title }} <span class="font-mono text-gray-400">{{ c.link }}</span></td>
+            <td class="py-1.5 pr-2">
+              {% if c.status == 'joined' %}<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800">👂 joined &amp; listening</span>
+              {% elif c.status == 'flood_wait' %}<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800" title="{{ c.error }}">⏳ rate-limited, retrying</span>
+              {% elif c.status == 'error' %}<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800" title="{{ c.error }}">⚠ {{ c.error[:60] }}</span>
+              {% else %}<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">joining…</span>{% endif %}
+            </td>
+            <td class="py-1.5 pr-2 font-mono">{{ c.msg_count }}</td>
+            <td class="py-1.5 pr-2 text-gray-500">{% if c.last_msg_at %}<time data-utc="{{ c.last_msg_at }}">{{ c.last_msg_at }}</time>{% else %}—{% endif %}</td>
+            <td class="py-1.5 text-right">
+              <button type="button" class="text-gray-400 hover:text-red-500 hover:underline"
+                      onclick="tgUserPost('/news/telegram/user/channels/remove', { link: '{{ c.link }}' })">🗑 Remove</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="text-[10px] text-gray-400 mt-2">Removing stops ingestion but the account stays in the group — leave it from your Telegram app if you want out. Ingested messages still pass the content filter below (min title length / block keywords).</p>
+      {% else %}
+      <p class="text-xs text-gray-500">No channels followed yet. Paste a <span class="font-mono">t.me</span> link above.</p>
+      {% endif %}
+      {% endif %}
+    </div>
+
     <!-- Market ticker config -->
     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
       <h3 class="font-semibold mb-2">📈 Market ticker</h3>

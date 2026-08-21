@@ -48,6 +48,10 @@ DEFAULTS: dict[str, Any] = {
     # added to each channel (use /joininfo in DM for instructions). Negative
     # numbers for groups/channels (e.g. -1001234567890).
     "telegram_channel_ids": [],
+    # Public groups/channels followed by the USER account listener (Telethon)
+    # — '@username' or '+invitehash' entries; the agent joins them itself.
+    # Managed from the /news/ 'Public signal groups' panel.
+    "telegram_user_channels": [],
     # --- Source-specific config ---
     "gdelt_query": (
         'sourcelang:eng (war OR sanction OR cyberattack OR "central bank" OR '
