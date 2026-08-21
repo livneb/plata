@@ -2,6 +2,13 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.217 — 2026-08-21
+- **🛟 LLM free-pool exhaustion no longer dead-letters signals (191 DLQ'd in one hour on 08-21).** When every free model 429'd at once, each raw signal burned 10 upstream attempts, raised `RuntimeError`, and went to the DLQ — the signal was lost even though quotas recover within minutes. Fixes:
+  - New typed `LLMExhausted` exception (subclasses `RuntimeError`) raised when the whole model chain — free pool plus auto-mode paid rescue — fails transiently.
+  - `BaseAgent` now catches it and **requeues the message** with a `_llm_retries` counter instead of DLQ-ing, then pauses the consumer 60s so it stops hammering rate-limited providers. Up to 30 requeues (~30–60 min of outage) before the message is dead-lettered for real. One WARN per message (first requeue), not one ERROR per attempt. Applies to every stream consumer (graph_ingestion, strategist, …).
+  - Free-tier provider-side 400s ("Provider returned error", e.g. AtlasCloud) are now classified transient and walk the fallback chain instead of escaping as `BadRequestError` (recurred 3× on 08-21).
+  - The sysop `all_free_exhausted` detector now matches the "LLM call returned no response" message variant and the new error type — the 191× storm only surfaced as a generic `repeated_error` because the detector was matching a different message string.
+
 ## 2.24.216 — 2026-08-21
 - **📡 One-click Telegram group ingestion from the dashboard.** Adding the bot to a signal group no longer requires hunting for chat IDs:
   - The bot now self-registers its identity in Redis (`telegram:bot_info`) on boot, and records every group/channel it's added to (`telegram:known_chats`) via `my_chat_member` updates (polling now explicitly requests them — the Bot API omits membership updates by default) plus a first-message fallback for chats it joined before this version.

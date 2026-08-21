@@ -19,7 +19,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Awaitable
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 
 from plata.core.bus import get_redis
 from plata.core.db import ErrorLog, SysopFinding, session_scope
@@ -560,8 +560,17 @@ async def _detect_all_free_exhausted() -> list[dict[str, Any]]:
             select(func.count(ErrorLog.id), func.max(ErrorLog.ts))
             .where(
                 ErrorLog.ts >= cutoff,
-                ErrorLog.error_type == "RuntimeError",
-                ErrorLog.message.like("%All free models exhausted%"),
+                # "RuntimeError" covers pre-v2.24.217 rows; "LLMExhausted" is
+                # the typed exception raised since. Match BOTH message
+                # variants — "All free models exhausted" (mid-chain raise) and
+                # "LLM call returned no response" (attempt budget burned out) —
+                # the latter was slipping past this detector and only showing
+                # up as a generic repeated_error finding.
+                ErrorLog.error_type.in_(("RuntimeError", "LLMExhausted")),
+                or_(
+                    ErrorLog.message.like("%All free models exhausted%"),
+                    ErrorLog.message.like("%LLM call returned no response%"),
+                ),
             )
         )).one_or_none()
     if not rows:
