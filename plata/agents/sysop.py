@@ -336,9 +336,16 @@ async def _detect_venue_block() -> list[dict[str, Any]]:
 async def _detect_openrouter_402() -> list[dict[str, Any]]:
     out = []
     redis = get_redis()
-    flag = await redis.hgetall("api_limit:openrouter")
-    if not flag:
+    # flag_api_limit writes a JSON *string* (SET), not a hash — the old
+    # `hgetall` here raised WRONGTYPE whenever the flag existed, so this
+    # detector could never fire. Read + parse it properly.
+    raw = await redis.get("api_limit:openrouter")
+    if not raw:
         return out
+    try:
+        flag = json.loads(raw)
+    except (TypeError, ValueError):
+        flag = {"message": str(raw)[:200]}
     mode = (await redis.hget("llm_config", "mode")) or "paid"
     if mode != "auto":
         out.append({
