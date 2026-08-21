@@ -157,17 +157,75 @@ async def source_log(name: str, request: Request):
     )
 
 
+async def _telegram_panel(redis, cfg: dict) -> dict:
+    """Bot identity + known chats for the 'Telegram groups & channels' panel.
+
+    Both keys are written by the telegram_bot agent (plata/hitl/telegram_bot.py):
+    bot info on startup, known chats on membership updates / incoming messages.
+    """
+    import json as _json
+    bot_info = await redis.hgetall("telegram:bot_info") or {}
+    raw = await redis.hgetall("telegram:known_chats") or {}
+    listen_ids = {int(i) for i in (cfg.get("telegram_channel_ids") or [])}
+    chats = []
+    for cid, blob in raw.items():
+        try:
+            e = _json.loads(blob)
+            e["id"] = int(e.get("id", cid))
+        except (ValueError, TypeError, _json.JSONDecodeError):
+            continue
+        e["gone"] = e.get("status") in ("left", "kicked")
+        e["listening"] = e["id"] in listen_ids
+        chats.append(e)
+    chats.sort(key=lambda e: (e["gone"], str(e.get("title") or "").lower()))
+    return {"bot": bot_info, "chats": chats, "listen_ids": listen_ids}
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     redis = get_redis()
     cfg = await get_news_config()
     drops = await redis.hgetall("scraper:filter_drops") or {}
     sources = await _source_rows(redis)
+    telegram = await _telegram_panel(redis, cfg)
     return templates.TemplateResponse(
         request, "pages/news.html",
         {"active": "news", "news_cfg": cfg, "news_drops": drops,
-         "news_defaults": NEWS_DEFAULTS, "sources": sources},
+         "news_defaults": NEWS_DEFAULTS, "sources": sources,
+         "telegram": telegram},
     )
+
+
+@router.post("/telegram/chat/{chat_id}/toggle")
+async def telegram_chat_toggle(chat_id: int):
+    """One-click listen/unlisten for a chat the bot is a member of.
+
+    Adding a chat also flips telegram_channels_enabled on — clicking 👂 Listen
+    means 'ingest this chat', no second switch to remember.
+    """
+    cfg = await get_news_config()
+    ids = [int(i) for i in (cfg.get("telegram_channel_ids") or [])]
+    updates: dict = {}
+    if chat_id in ids:
+        ids = [i for i in ids if i != chat_id]
+    else:
+        ids.append(chat_id)
+        if not cfg.get("telegram_channels_enabled"):
+            updates["telegram_channels_enabled"] = True
+    updates["telegram_channel_ids"] = ids
+    await save_news_config(updates)
+    return RedirectResponse(url="/news/", status_code=303)
+
+
+@router.post("/telegram/chat/{chat_id}/forget")
+async def telegram_chat_forget(chat_id: int):
+    """Drop a chat from the known list (and from the listen list)."""
+    redis = get_redis()
+    await redis.hdel("telegram:known_chats", str(chat_id))
+    cfg = await get_news_config()
+    ids = [int(i) for i in (cfg.get("telegram_channel_ids") or []) if int(i) != chat_id]
+    await save_news_config({"telegram_channel_ids": ids})
+    return RedirectResponse(url="/news/", status_code=303)
 
 
 @router.post("/source/{name}/run_now")

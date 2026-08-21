@@ -13,6 +13,36 @@ from plata.hitl.approval_store import list_pending, resolve
 
 _log = get_logger("telegram_bot")
 
+# Redis keys the dashboard (/news/) reads to offer one-click group ingestion:
+#   telegram:bot_info    — hash {id, username, name}; lets the UI render an
+#                          "Add bot to group" deep link (t.me/<bot>?startgroup).
+#   telegram:known_chats — hash chat_id -> JSON {id, title, type, username,
+#                          status, updated_at}; every group/channel the bot is
+#                          (or was) a member of, kept fresh by membership
+#                          updates + a throttled touch on incoming messages.
+BOT_INFO_KEY = "telegram:bot_info"
+KNOWN_CHATS_KEY = "telegram:known_chats"
+
+
+async def _record_chat(chat: Any, status: str, *, only_if_new: bool = False) -> None:
+    """Persist a group/channel the bot can see, so /news/ can list it."""
+    if chat is None or getattr(chat, "type", "private") == "private":
+        return
+    from datetime import UTC, datetime
+    redis = get_redis()
+    entry = json.dumps({
+        "id": chat.id,
+        "title": chat.title or chat.username or str(chat.id),
+        "type": chat.type,
+        "username": chat.username,
+        "status": status,
+        "updated_at": datetime.now(UTC).isoformat(),
+    })
+    if only_if_new:
+        await redis.hsetnx(KNOWN_CHATS_KEY, str(chat.id), entry)
+    else:
+        await redis.hset(KNOWN_CHATS_KEY, str(chat.id), entry)
+
 
 class TelegramBot(BaseAgent):
     name = "telegram_bot"
@@ -34,6 +64,7 @@ class TelegramBot(BaseAgent):
         from telegram.ext import (
             ApplicationBuilder,
             CallbackQueryHandler,
+            ChatMemberHandler,
             CommandHandler,
             ContextTypes,
             MessageHandler,
@@ -138,15 +169,47 @@ class TelegramBot(BaseAgent):
                 "To make Plata listen to a channel/group:\n"
                 "1. Add this bot as a member (admin not required for public groups; "
                 "channels require admin with 'Post messages' read).\n"
-                "2. In Plata → Settings → 📰 News, paste the chat ID into "
-                "'Telegram channel IDs' and turn 'Listen to Telegram channels' ON.\n\n"
+                "2. The chat then shows up automatically under 'Telegram groups & "
+                "channels' on Plata's News page — click 👂 Listen next to it.\n"
+                "   (Manual fallback: paste the chat ID into 'Telegram channel IDs' "
+                "there and turn 'Listen to Telegram channels' ON.)\n\n"
                 "Tip: forward a message from the target channel to @userinfobot to "
                 "discover its ID quickly. Channel IDs are negative (e.g. -1001234567890)."
             )
             await update.message.reply_text(text, parse_mode="HTML")
 
+        async def on_my_chat_member(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
+            """Track the bot being added to / removed from groups and channels."""
+            cmu = update.my_chat_member
+            if not cmu:
+                return
+            status = cmu.new_chat_member.status  # member/administrator/left/kicked/…
+            try:
+                await _record_chat(cmu.chat, status)
+            except Exception:  # noqa: BLE001
+                _log.exception("known_chat_record_failed", chat_id=cmu.chat.id)
+            label = cmu.chat.title or cmu.chat.username or cmu.chat.id
+            if status in ("left", "kicked"):
+                await log_action(self.name, f"Removed from chat '{label}' ({cmu.chat.id})")
+            else:
+                await log_action(
+                    self.name,
+                    f"Added to chat '{label}' ({cmu.chat.id}) as {status} — "
+                    "enable listening on /news/",
+                )
+
+        # Throttle known-chat touches from the message path: once per chat per
+        # process is enough (membership updates keep status/title fresh).
+        _touched_chats: set[int] = set()
+
         async def on_channel_message(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
             """Ingest messages from channels/groups Plata is watching."""
+            import contextlib
+            _msg = update.effective_message
+            if _msg and _msg.chat_id not in _touched_chats:
+                _touched_chats.add(_msg.chat_id)
+                with contextlib.suppress(Exception):
+                    await _record_chat(_msg.chat, "active", only_if_new=True)
             try:
                 from plata.agents.scraper.news_config import get_config as _news_cfg
                 from plata.core.bus import Streams as _S, publish as _publish
@@ -219,6 +282,7 @@ class TelegramBot(BaseAgent):
         app.add_handler(CommandHandler("positions", cmd_positions))
         app.add_handler(CommandHandler("joininfo", cmd_joininfo))
         app.add_handler(CallbackQueryHandler(cb_approval))
+        app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
         # Channel/group ingestion — listens to any chat the bot is a member of;
         # the on_channel_message handler self-gates by news_config.telegram_channel_ids.
         try:
@@ -249,8 +313,28 @@ class TelegramBot(BaseAgent):
             _log.warning("telegram_polling_error", error_type=type(exc).__name__, error=str(exc))
 
         await app.initialize()
+
+        # Publish the bot's identity so /news/ can render "Add bot to group"
+        # deep links (t.me/<username>?startgroup) without knowing the token.
+        try:
+            me = await app.bot.get_me()
+            from datetime import UTC, datetime
+            await get_redis().hset(BOT_INFO_KEY, mapping={
+                "id": str(me.id),
+                "username": me.username or "",
+                "name": me.first_name or "",
+                "updated_at": datetime.now(UTC).isoformat(),
+            })
+        except Exception:  # noqa: BLE001
+            _log.exception("bot_info_store_failed")
+
         await app.start()
-        await app.updater.start_polling(error_callback=_on_polling_error)
+        await app.updater.start_polling(
+            error_callback=_on_polling_error,
+            # Default getUpdates omits chat_member updates — ask for everything
+            # so on_my_chat_member actually fires when the bot joins a group.
+            allowed_updates=["message", "channel_post", "callback_query", "my_chat_member"],
+        )
 
         try:
             await asyncio.gather(

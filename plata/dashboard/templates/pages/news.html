@@ -149,7 +149,7 @@
         </label>
         <label class="flex items-center gap-2 md:col-span-2">
           <input type="checkbox" name="telegram_channels_enabled" {% if news_cfg.get('telegram_channels_enabled') %}checked{% endif %} class="w-4 h-4">
-          <span>Listen to Telegram channels (bot must be a member). DM the bot <span class="font-mono">/joininfo</span> from inside the channel to discover its ID.</span>
+          <span>Listen to Telegram channels (bot must be a member). Use the <b>📡 Telegram groups &amp; channels</b> panel below to add the bot and pick chats — this toggle flips ON automatically when you click 👂 Listen.</span>
         </label>
         <label class="flex items-center gap-2 md:col-span-2">
           <input type="checkbox" name="market_ticker_enabled" {% if news_cfg.get('market_ticker_enabled', True) %}checked{% endif %} class="w-4 h-4">
@@ -181,12 +181,81 @@
 {% endfor %}</textarea>
     </div>
 
-    <!-- Telegram channel IDs -->
+    <!-- Telegram groups & channels -->
     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-      <h3 class="font-semibold mb-2">Telegram channel IDs</h3>
-      <p class="text-xs text-gray-500 mb-2">One numeric chat ID per line (channels/groups are negative, e.g. <span class="font-mono">-1001234567890</span>). Leave empty to accept all chats the bot is in.</p>
-      <textarea name="telegram_channel_ids" rows="4" class="w-full text-xs font-mono p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">{% for cid in news_cfg.get('telegram_channel_ids', []) %}{{ cid }}
+      <h3 class="font-semibold mb-2">📡 Telegram groups &amp; channels</h3>
+
+      {% if telegram.bot.get('username') %}
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <a href="https://t.me/{{ telegram.bot.username }}?startgroup=true" target="_blank" rel="noopener"
+           class="px-3 py-1.5 text-xs font-medium rounded bg-sky-600 hover:bg-sky-700 text-white">➕ Add bot to a group</a>
+        <a href="https://t.me/{{ telegram.bot.username }}?startchannel&admin=post_messages" target="_blank" rel="noopener"
+           class="px-3 py-1.5 text-xs font-medium rounded bg-sky-600 hover:bg-sky-700 text-white">➕ Add bot to a channel</a>
+        <span class="text-xs text-gray-500">Opens Telegram with a chat picker for <span class="font-mono">@{{ telegram.bot.username }}</span>. Once added, the chat appears below — click 👂 Listen to start ingesting its messages as signals.</span>
+      </div>
+      {% else %}
+      <p class="text-xs text-amber-600 dark:text-amber-400 mb-3">⚠ Bot identity not registered yet — the telegram_bot agent hasn't started (is <span class="font-mono">TELEGRAM_BOT_TOKEN</span> set on ingestion_hub?). Add the bot to groups manually from Telegram; it will self-register here on its next boot.</p>
+      {% endif %}
+
+      {% if telegram.chats %}
+      <table class="w-full text-xs text-left mb-3">
+        <thead class="text-[10px] uppercase text-gray-500">
+          <tr>
+            <th class="py-1 pr-2">Chat</th>
+            <th class="py-1 pr-2">Type</th>
+            <th class="py-1 pr-2">ID</th>
+            <th class="py-1 pr-2">Ingestion</th>
+            <th class="py-1 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in telegram.chats %}
+          <tr class="border-t border-gray-100 dark:border-gray-700 {% if c.gone %}opacity-50{% endif %}">
+            <td class="py-1.5 pr-2">
+              {% if c.username %}<a href="https://t.me/{{ c.username }}" target="_blank" rel="noopener" class="hover:underline">{{ c.title }}</a>{% else %}{{ c.title }}{% endif %}
+              {% if c.gone %}<span class="ml-1 text-[10px] text-red-500">(bot removed)</span>{% endif %}
+            </td>
+            <td class="py-1.5 pr-2 text-gray-500">{{ c.type }}</td>
+            <td class="py-1.5 pr-2 font-mono text-gray-400">{{ c.id }}</td>
+            <td class="py-1.5 pr-2">
+              {% if c.listening and news_cfg.get('telegram_channels_enabled') %}
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800">👂 listening</span>
+              {% elif c.listening %}
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800" title="Selected, but the 'Listen to Telegram channels' source toggle is OFF.">selected — source off</span>
+              {% elif not telegram.listen_ids and news_cfg.get('telegram_channels_enabled') and not c.gone %}
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800" title="The chat-ID list is empty, so ALL chats the bot is in are ingested.">👂 listening (all chats)</span>
+              {% else %}
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">muted</span>
+              {% endif %}
+            </td>
+            <td class="py-1.5 text-right whitespace-nowrap">
+              {# Plain buttons + fetch — nested <form>s inside the page-wide Save form are invalid HTML (see the Reset button note below). #}
+              {% if not c.gone %}
+              <button type="button" class="text-blue-500 hover:underline"
+                      onclick="(async () => { await fetch('/news/telegram/chat/{{ c.id }}/toggle', { method: 'POST' }); location.reload(); })();">
+                {% if c.listening %}🔇 Stop listening{% else %}👂 Listen{% endif %}
+              </button>
+              {% else %}
+              <button type="button" class="text-gray-400 hover:text-red-500 hover:underline"
+                      onclick="(async () => { await fetch('/news/telegram/chat/{{ c.id }}/forget', { method: 'POST' }); location.reload(); })();">
+                🗑 Forget
+              </button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="text-xs text-gray-500 mb-3">No chats known yet. Add the bot to a group/channel and send one message there — it will show up here.</p>
+      {% endif %}
+
+      <details class="text-xs">
+        <summary class="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Manual chat IDs (advanced)</summary>
+        <p class="text-gray-500 mt-2 mb-2">One numeric chat ID per line (channels/groups are negative, e.g. <span class="font-mono">-1001234567890</span>). Leave empty to accept all chats the bot is in. The 👂 Listen buttons above edit this same list.</p>
+        <textarea name="telegram_channel_ids" rows="4" class="w-full text-xs font-mono p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900">{% for cid in news_cfg.get('telegram_channel_ids', []) %}{{ cid }}
 {% endfor %}</textarea>
+      </details>
     </div>
 
     <!-- Market ticker config -->

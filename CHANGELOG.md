@@ -2,6 +2,14 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.216 — 2026-08-21
+- **📡 One-click Telegram group ingestion from the dashboard.** Adding the bot to a signal group no longer requires hunting for chat IDs:
+  - The bot now self-registers its identity in Redis (`telegram:bot_info`) on boot, and records every group/channel it's added to (`telegram:known_chats`) via `my_chat_member` updates (polling now explicitly requests them — the Bot API omits membership updates by default) plus a first-message fallback for chats it joined before this version.
+  - New **"📡 Telegram groups & channels"** panel on `/news/`: "➕ Add bot to a group/channel" deep-link buttons (`t.me/<bot>?startgroup`), and a live table of every chat the bot is in with a **👂 Listen / 🔇 Stop listening** button per chat. Clicking Listen adds the chat ID to `telegram_channel_ids` AND flips `telegram_channels_enabled` on — no second switch to remember. Chats the bot was removed from show "(bot removed)" with a 🗑 Forget button.
+  - The manual chat-ID textarea still exists (collapsed under "Manual chat IDs (advanced)") and edits the same list.
+  - `/joininfo` in the bot now points at the new flow.
+  - Flow: click "Add bot to a group" on /news/ → pick the group in Telegram → refresh /news/ → click 👂 Listen. Done.
+
 ## 2.24.215 — 2026-08-20
 - **⚡ Page loads: eliminated full-keyspace Redis SCANs (the ~10s pages).** `SCAN MATCH` walks the ENTIRE keyspace regardless of pattern; with a graph-sized keyspace, every page that "listed agents" or "listed sources" paid thousands of network roundtrips. Fixes:
   - **Registry SETs** — agents (`registry:agents`) and scraper sources (`registry:sources`) now register themselves on every heartbeat/poll; the workflow, activity, agents pages, topbar polls (`/api/agents/halted`, header stats), sysop, orchestrator and improver read the registry + pipelined `HGETALL` instead of scanning. Fallback to scan until writers re-register after this deploy.
