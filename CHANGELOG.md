@@ -2,6 +2,11 @@
 
 Each entry is one deployed version. Most recent first.
 
+## 2.24.218 — 2026-08-21
+- **💳 OpenRouter out-of-credits (402) handling — follow-up to the 09:38 `LLMExhausted` WARN.** The requeue machinery worked as designed, but the 402 exposed two gaps:
+  - **Sticky paid-402 marker (`llm:paid_402`, 30 min).** The auto-mode paid rescue now remembers a credits 402 and skips paid attempts while the marker is set — previously every requeue cycle burned one paid call guaranteed to 402. The final-rescue path (which the 09:38 error went through) also flags the Activity page provider card now, same as the mid-chain path.
+  - **Fixed a dead sysop detector:** `_detect_openrouter_402` read the flag with `HGETALL`, but `flag_api_limit` writes a JSON *string* — WRONGTYPE meant the "OpenRouter returned a credit error" critical finding could never fire. Now reads/parses the string like the Activity page does.
+
 ## 2.24.217 — 2026-08-21
 - **🛟 LLM free-pool exhaustion no longer dead-letters signals (191 DLQ'd in one hour on 08-21).** When every free model 429'd at once, each raw signal burned 10 upstream attempts, raised `RuntimeError`, and went to the DLQ — the signal was lost even though quotas recover within minutes. Fixes:
   - New typed `LLMExhausted` exception (subclasses `RuntimeError`) raised when the whole model chain — free pool plus auto-mode paid rescue — fails transiently.

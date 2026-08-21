@@ -44,6 +44,34 @@ class LLMExhausted(RuntimeError):
     working."""
 
 
+# Sticky "OpenRouter paid is out of credits" marker. While set, auto-mode
+# paid rescues are skipped entirely — with BaseAgent requeuing on
+# LLMExhausted, each retry cycle would otherwise burn one paid call that is
+# guaranteed to 402.
+_PAID_402_KEY = "llm:paid_402"
+_PAID_402_TTL_S = 1800
+
+
+async def _paid_402_active() -> bool:
+    try:
+        return bool(await get_redis().exists(_PAID_402_KEY))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _mark_paid_402(message: str) -> None:
+    """Remember the 402 for 30 min and light up the Activity page card."""
+    try:
+        await get_redis().setex(_PAID_402_KEY, _PAID_402_TTL_S, "1")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from plata.core.error_reporter import flag_api_limit
+        await flag_api_limit("openrouter", message)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # Per-agent paid-model defaults.
 AGENT_MODELS: dict[str, str] = {
     "graph_ingestion": "anthropic/claude-haiku-4-5",
@@ -990,7 +1018,8 @@ class LLMClient:
                     except Exception:  # noqa: BLE001
                         cfg = {}
                     mode = (cfg.get("mode") or "paid").lower()
-                    if mode == "auto" and not kwargs.get("_paid_rescue_tried"):
+                    if mode == "auto" and not kwargs.get("_paid_rescue_tried") \
+                            and not await _paid_402_active():
                         paid = AGENT_MODELS.get(self.agent, "anthropic/claude-haiku-4-5")
                         if paid and paid != current_model:
                             _log.warning("llm_free_exhausted_paid_rescue",
@@ -1018,11 +1047,9 @@ class LLMClient:
                 is_credit_error = ("402" in msg or "credit" in low or "billing" in low
                                    or "payment" in low or "insufficient" in low)
                 if is_credit_error:
-                    try:
-                        from plata.core.error_reporter import flag_api_limit
-                        await flag_api_limit("openrouter", msg)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    # Flags the provider card AND sets the sticky paid-402
+                    # marker so rescue paths skip paid for the next 30 min.
+                    await _mark_paid_402(msg)
                     # AUTO mode: fall back to the free model for this agent and
                     # retry once. Sticky for 1h so we don't keep hitting 402.
                     try:
@@ -1088,7 +1115,8 @@ class LLMClient:
             except Exception:  # noqa: BLE001
                 cfg = {}
             mode = (cfg.get("mode") or "paid").lower()
-            if mode == "auto" and not kwargs.get("_paid_rescue_tried"):
+            if mode == "auto" and not kwargs.get("_paid_rescue_tried") \
+                    and not await _paid_402_active():
                 paid = AGENT_MODELS.get(self.agent, "anthropic/claude-haiku-4-5")
                 if paid:
                     _log.warning("llm_budget_exhausted_paid_rescue",
@@ -1105,10 +1133,20 @@ class LLMClient:
                     try:
                         response = await _attempt_once()
                     except Exception as exc:  # noqa: BLE001
+                        rescue_msg = str(exc)
+                        rescue_low = rescue_msg.lower()
+                        # A 402 here means OpenRouter credits are gone — flag
+                        # the provider card + skip paid rescues for 30 min so
+                        # requeue cycles stop burning doomed paid calls.
+                        if ("402" in rescue_msg or "credit" in rescue_low
+                                or "billing" in rescue_low
+                                or "payment" in rescue_low
+                                or "insufficient" in rescue_low):
+                            await _mark_paid_402(rescue_msg)
                         raise LLMExhausted(
                             f"LLM call returned no response after {max_attempts} "
                             f"free attempts AND paid rescue ({paid}) also failed: "
-                            f"{type(exc).__name__}: {str(exc)[:200]}"
+                            f"{type(exc).__name__}: {rescue_msg[:200]}"
                         ) from exc
         if response is None:
             raise LLMExhausted(
